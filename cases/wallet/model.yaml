@@ -1,0 +1,154 @@
+# Delegated wallet agent — the architecture of the wallet-agent figure.
+# The principal grants a mandate held by the wallet; an LLM agent turns invoices into payment
+# requests; the wallet signs payment instructions under the mandate and presents the delegation
+# credential to relying parties; the bank executes, and its account feed flows back to the agent.
+name: wallet-agent
+description: >
+  Duna Bank's delegate payment agent. Six guards: revocation sync on the mandate, mandate,
+  dedup and amount checks on the payment instruction, the bank's cap on transfers, and the
+  disclosure check on presentations. Observed at the bank statement and the presentation log.
+modes:
+  - omission
+  - commission: [oom, dup, over, revoked]   # out of mandate, duplicate, over the limit, under a revoked mandate
+  - late
+  - value
+lattices:
+  confidentiality: [public, pseudonymous, personal]
+  authority: [none, agent, principal]
+
+components:
+  - id: agent
+    kind: llm
+    label: "LLM · discretionary"
+    version: gpt-x-2026-05
+    in: [invoice, view]
+    out: [request]
+    flow: {invoice: [request], view: []}
+    authority: principal
+    clearance: personal
+    rows:
+      - id: p_offmandate
+        label: pays an account the mandate does not cover
+        when: {invoice: any}
+        then: {request: {oom: const 9}}
+      - id: p_dup
+        label: re-plans on a stale account view and pays the invoice again
+        when: {view: {late: 3}}
+        then: {request: {dup: const 9}}
+      - id: p_over
+        label: pays more than the mandate's per-payment limit
+        when: {invoice: any}
+        then: {request: {over: const 7}}
+    drop_defaults:
+      - {port: request, mode: omission, reason: "the agent always emits a request on the happy path; a missing payment is the invoice's dunning problem, not a hazard"}
+      - {port: request, mode: commission, reason: "the agent's commissions in this model are named: out of mandate, duplicate, over the limit"}
+      - {port: request, mode: late, reason: "lateness is modelled at the bank, whose confirmation can be slow"}
+      - {port: request, mode: value, reason: "a wrong amount is modelled as the over-the-limit sub-kind"}
+    pos: {x: 90, y: 300}
+
+  - id: mandate
+    kind: store
+    label: data held by the wallet
+    version: mandate-store-2
+    in: [grant]
+    out: [record]
+    clearance: personal
+    rows:
+      - id: m_stale
+        label: the stored mandate lags behind a revocation
+        when: {grant: any}
+        then: {record: {late: const 6}}
+    pos: {x: 420, y: 80}
+
+  - id: wallet
+    kind: deterministic
+    label: keys and guards
+    version: wallet-3.2
+    in: [request, mandate]
+    out: [instruction, presentation]
+    flow: {request: [instruction, presentation], mandate: []}
+    pass: [commission]
+    authority: principal
+    raises: true            # signs with the principal's delegation credential
+    clearance: personal
+    rows:
+      - id: w_revoked
+        label: signs under a mandate whose revocation it has not seen
+        when: {mandate: {late: 1}}
+        then: {instruction: {revoked: const 9}}
+    pos: {x: 420, y: 300}
+
+  - id: bank
+    kind: external
+    label: executes
+    version: bank-api-2026
+    trusted: true
+    in: [instruction]
+    out: [transfer, update]
+    pass: [commission, value]
+    clearance: personal
+    rows:
+      - id: b_slow
+        label: confirms a payment slowly
+        when: {instruction: any}
+        then: {update: {late: const 4}}
+    pos: {x: 760, y: 300}
+
+  - id: feed
+    kind: deterministic
+    label: transaction feed
+    version: feed-1.4
+    in: [update]
+    out: [view]
+    pass: [late]
+    clearance: personal
+    pos: {x: 420, y: 560}
+
+guards:
+  - {id: gr, label: rev. sync, edge: e_mandate, version: revsync-1,
+     targets: [{mode: late, threshold: 1, decidable: true}]}
+  - {id: gm, label: mandate, edge: e_instruction, version: mandate-v2,
+     targets: [{mode: oom, threshold: 1, decidable: true}]}
+  - {id: gd, label: dedup, edge: e_instruction, version: dedup-v3,
+     targets: [{mode: dup, threshold: 1, decidable: true}]}
+  - {id: ga, label: amount, edge: e_instruction, version: amount-v1,
+     targets: [{mode: over, threshold: 1, decidable: true}]}
+  - {id: gc, label: cap, edge: e_transfer, version: bank-cap-2026,
+     targets: [{mode: over, threshold: 1, decidable: true}]}
+  - {id: gx, label: disclosure, edge: e_presentation, version: disclosure-v1,
+     targets: [{conf: pseudonymous, decidable: true}]}
+
+edges:
+  - {id: e_invoice, from: sys.invoice, to: agent.invoice, label: invoice}
+  - {id: e_grant, from: sys.principal, to: mandate.grant, label: grants}
+  - {id: e_request, from: agent.request, to: wallet.request, label: "LLM request ~"}
+  - {id: e_mandate, from: mandate.record, to: wallet.mandate, label: consulted by the mandate check}
+  - {id: e_instruction, from: wallet.instruction, to: bank.instruction, label: payment instruction}
+  - {id: e_presentation, from: wallet.presentation, to: sys.rp, label: presentation}
+  - {id: e_transfer, from: bank.transfer, to: sys.payee, label: transfer}
+  - {id: e_update, from: bank.update, to: feed.update, label: account update}
+  - {id: e_view, from: feed.view, to: agent.view, label: account view}
+
+use_cases:
+  - id: pay
+    label: pay an incoming invoice under the mandate
+    entries:
+      - {port: invoice, token: {taint: true, auth: none, conf: personal}}
+      - {port: principal, token: {auth: principal, conf: personal}}
+
+observation_points:
+  - id: o_statement
+    edge: e_transfer
+    label: bank statement
+    log: the customer's bank statement (CSV export)
+    tolerate: {commission: 1, oom: 1, dup: 1, over: 1, revoked: 1, late: 5, value: 3, omission: 5}
+    requires: principal
+  - id: o_presentation
+    edge: e_presentation
+    label: presentation log
+    log: the wallet's OpenID4VP presentation log
+    clearance: pseudonymous
+
+claims:
+  - {cell: oom@o_statement, verdict: guarantee, by: wallet team, note: "the mandate check rules out out-of-mandate payments"}
+  - {cell: dup@o_statement, verdict: guarantee, by: payments platform team}

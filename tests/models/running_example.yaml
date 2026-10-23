@@ -1,0 +1,42 @@
+# The paper's running example: a payment outside the mandate (Chapter 3).
+name: running-example
+modes:
+  - omission
+  - commission: [oom]
+  - late
+  - value
+lattices:
+  confidentiality: [public, personal]
+  authority: [none, customer]
+components:
+  - id: planner
+    kind: llm
+    version: gpt-x-2026-05
+    in: [request]
+    out: [order]
+    rows:
+      - id: p1
+        when: {request: any}
+        then: {order: {oom: const 9}}
+    drop_defaults:
+      - {port: order, mode: omission, reason: "the planner always emits an order on the happy path"}
+      - {port: order, mode: commission, reason: "the planner's only commission in this model is the out-of-mandate payment"}
+      - {port: order, mode: late, reason: "lateness is modelled on the bank, not the planner"}
+      - {port: order, mode: value, reason: "amounts are checked elsewhere; not in this example"}
+guards:
+  - id: M
+    label: mandate check
+    edge: e_PB
+    version: mandate-v2
+    targets:
+      - {mode: oom, threshold: 1, decidable: true}
+edges:
+  - {id: e_req, from: sys.request, to: planner.request}
+  - {id: e_PB, from: planner.order, to: sys.bank}
+use_cases:
+  - {id: pay, entries: [{port: request, token: {}}]}
+observation_points:
+  - id: o
+    edge: e_PB
+    label: statement
+    tolerate: {commission: 1, oom: 1}
