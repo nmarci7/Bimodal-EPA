@@ -41,8 +41,9 @@ def _print(rep, fmt):
             rem = c["candidates"].get("remaining")
             if rem is None and c["candidates"].get("at_least"):
                 rem = f">{c['candidates']['at_least']}"
-            print(f"{c['cell']:<28} {c['verdict']:<14} {('{' + st + '}') if st else '':<10} "
-                  f"{'' if rem is None else f'{rem}/{c['candidates']['space']}':>12}  {explain.reason_line(c)}")
+            frac = "" if rem is None else f"{rem}/{c['candidates']['space']}"
+            st_txt = ("{" + st + "}") if st else ""
+            print(f"{c['cell']:<28} {c['verdict']:<14} {st_txt:<10} {frac:>12}  {explain.reason_line(c)}")
         if rep.get("ranking"):
             print("\ncertify next:")
             for a in rep["ranking"][:8]:

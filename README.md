@@ -20,7 +20,7 @@ ranking of which guard to certify next.
 
 ## Quick start
 
-Requirements: Python 3.11 or newer, Java 11 or newer (for TLC). `tla2tools.jar` is in `vendor/`.
+Requirements: Python 3.10 or newer, Java 11 or newer (for TLC). `tla2tools.jar` is in `vendor/`.
 
 ```sh
 ./run.sh            # makes .venv, installs the requirements, starts the UI on http://127.0.0.1:8765

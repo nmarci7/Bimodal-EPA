@@ -5,9 +5,16 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${1:-8765}"
 
-PY="${PYTHON:-python3}"
-if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
-  echo "Python 3.11 or newer is needed (found: $("$PY" --version 2>&1))." >&2
+PY="${PYTHON:-}"
+if [ -z "$PY" ]; then
+  for c in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+      PY="$c"; break
+    fi
+  done
+fi
+if [ -z "$PY" ]; then
+  echo "Python 3.10 or newer is needed (found: $(python3 --version 2>&1)). On macOS: brew install python@3.12" >&2
   exit 1
 fi
 if [ ! -d .venv ]; then
