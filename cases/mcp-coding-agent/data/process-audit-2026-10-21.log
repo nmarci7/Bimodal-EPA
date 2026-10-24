@@ -1,0 +1,4 @@
+2026-10-21T09:15:40Z type=EXECVE pid=48211 session=sess-142 trigger=issue argv="git status" script_outside_allowlist=no exit=0
+2026-10-21T09:16:12Z type=EXECVE pid=48230 session=sess-142 trigger=issue argv="npm run lint" script_outside_allowlist=no exit=0
+2026-10-21T09:16:30Z type=EXECVE pid=48241 session=sess-142 trigger=issue argv="npm test" script_outside_allowlist=no exit=0
+2026-10-21T14:01:55Z type=EXECVE pid=51102 session=sess-150 trigger=issue argv="npm run docs:build" script_outside_allowlist=no exit=0

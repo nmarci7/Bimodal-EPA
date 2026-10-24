@@ -1,0 +1,24 @@
+# The hub's device command log (what reached the lock, alarm and heating) -> witnesses at o_actuator.
+id: actuator-log-v1
+files: ["actuator-log-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {voice: voice, calendar: calendar, offline: offline}}
+date: {field: ts}
+id_field: command_id
+id_prefix: act
+match: {field: executed, eq: true}
+rules:
+  - label: unsafe actuation, no owner authority
+    when: {all: [{field: service, in: [lock.unlock, alarm_control_panel.alarm_disarm]},
+                 {field: presence, in: [home_asleep, away]}, {field: authorised_by, eq: none}]}
+    witness: {o_actuator: {modes: {unsafe: [1, 10]}, auth: [none, none]}}
+  - label: unsafe actuation with owner authority
+    when: {all: [{field: service, in: [lock.unlock, alarm_control_panel.alarm_disarm]},
+                 {field: presence, in: [home_asleep, away]}]}
+    witness: {o_actuator: {modes: {unsafe: [1, 10]}, auth: [owner, owner]}}
+  - label: safe command, no owner authority
+    when: {field: authorised_by, eq: none}
+    witness: {o_actuator: {modes: {unsafe: [0, 0]}, auth: [none, none]}}
+  - label: safe command with owner authority
+    when: {field: authorised_by, in: [owner-voice-profile, pin]}
+    witness: {o_actuator: {modes: {unsafe: [0, 0]}, auth: [owner, owner]}}

@@ -1,0 +1,19 @@
+# The MCP client's JSON-RPC log -> o_mcp (the tool call as it leaves the runner, after the pinned tool list).
+id: mcp-calls-v1
+files: ["mcp-calls-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {issue: issue}}
+date: {field: ts}
+id_field: call_id
+id_prefix: rpc
+match: {field: jsonrpc_method, eq: tools/call}
+rules:
+  - label: a tool whose description changed since approval, on no one's authority
+    when: {all: [{field: tool_hash, ne_field: approved_hash}, {field: initiator_authority, eq: none}]}
+    witness: {o_mcp: {modes: {drift: [1, 10]}, auth: [none, none]}}
+  - label: an approved tool, on no one's authority
+    when: {field: initiator_authority, eq: none}
+    witness: {o_mcp: {modes: {drift: [0, 0]}, auth: [none, none]}}
+  - label: an approved tool, on a maintainer's authority
+    when: {field: initiator_authority, eq: maintainer}
+    witness: {o_mcp: {modes: {drift: [0, 0]}, auth: [maintainer, maintainer]}}

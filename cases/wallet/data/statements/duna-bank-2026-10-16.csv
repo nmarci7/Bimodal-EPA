@@ -1,0 +1,4 @@
+booking_date,value_date,amount_huf,currency,creditor_name,creditor_iban,remittance_information,end_to_end_id,channel
+2026-10-16,2026-10-16,-38900,HUF,FŐTÁV Zrt.,HU62117050080000000000123456,FT-2026-0991234,DUNA-AGT-000416,delegate-agent
+2026-10-16,2026-10-16,-12800,HUF,Lidl Magyarország,HU33116000060000000012345678,card 4413 *8812,CARD-20261016-0192,card
+2026-10-16,2026-10-16,-24990,HUF,Budapesti Vízművek Zrt.,HU29107000240000000100000005,INV 2026/10-56001,DUNA-AGT-000417,delegate-agent

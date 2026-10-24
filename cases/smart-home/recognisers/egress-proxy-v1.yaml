@@ -1,0 +1,15 @@
+# The hub's outbound proxy log (plain text) -> o_egress (the context sent to the cloud planner).
+id: egress-proxy-v1
+files: ["egress-proxy-*.log"]
+format: regex
+pattern: '^(?P<ts>\S+) (?P<host>\S+) (?P<method>\S+) (?P<url>\S+) trigger=(?P<trigger>\S+) bytes=(?P<bytes>\d+) fields=(?P<fields>\S+)$'
+use_case: {field: trigger, map: {voice: voice, calendar: calendar, offline: offline}}
+date: {field: ts}
+match: {all: [{field: method, eq: POST}, {field: url, regex: "/v2/plan$"}]}
+rules:
+  - label: occupancy sent to the cloud
+    when: {field: fields, contains: occupancy}
+    witness: {o_egress: {conf: [presence, presence]}}
+  - label: household data only
+    when: {field: fields, regex: ".*"}
+    witness: {o_egress: {conf: [household, household]}}

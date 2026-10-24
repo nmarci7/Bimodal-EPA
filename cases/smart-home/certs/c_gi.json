@@ -1,0 +1,12 @@
+{
+  "id": "c_gi",
+  "component": "gi",
+  "targets": {"unsafe": "never", "auth": "never"},
+  "version": "interlock-v4",
+  "issuer": "hub firmware team (safety lead)",
+  "date": "2026-10-06",
+  "method": "exhaustive test of the hard constraint: every actuator x state x hour band x presence state; unlock and disarm require presence plus PIN; review",
+  "scope": ["voice", "calendar", "offline"],
+  "context": {"planner": "cloud-llm-2026-08", "hub": "hub-fw-5.1"},
+  "evidence": "ci://hub/interlock/exhaustive/2026-10-06"
+}

@@ -1,0 +1,21 @@
+# What the app showed the household, against the device state at that moment -> o_report.
+id: app-report-log-v1
+files: ["app-report-log-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {voice: voice, calendar: calendar, offline: offline}}
+date: {field: ts}
+id_field: report_id
+id_prefix: rep
+rules:
+  - label: wrong state shown, and stale
+    when: {all: [{field: shown_state, ne_field: device_state}, {field: state_age_s, gt: 120}]}
+    witness: {o_report: {modes: {value: [3, 10], late: [3, 10]}}}
+  - label: wrong state shown
+    when: {field: shown_state, ne_field: device_state}
+    witness: {o_report: {modes: {value: [3, 10], late: [0, 2]}}}
+  - label: right state, but stale
+    when: {field: state_age_s, gt: 120}
+    witness: {o_report: {modes: {value: [0, 2], late: [3, 10]}}}
+  - label: right and fresh
+    when: {field: state_age_s, le: 120}
+    witness: {o_report: {modes: {value: [0, 2], late: [0, 2]}}}

@@ -1,0 +1,10 @@
+{
+  "system": "smart-home hub, firmware line 5",
+  "changes": [
+    {"date": "2026-10-01", "set": {"planner": "cloud-llm-2026-08", "memory": "memory-store-3", "hub": "hub-fw-5.1",
+                                   "devices": "zigbee-2026", "local": "local-slm-1.2", "mf": "memfilter-llm-2",
+                                   "gj": "judge-llm-1", "gi": "interlock-v4", "gw": "watchdog-v2", "gf": "freshness-v1",
+                                   "gl": "failover-v2", "gs": "skill-schema-1"}},
+    {"date": "2026-10-28", "set": {"redact": "redact-v1", "gs": "skill-schema-2", "hub": "hub-fw-5.2"}}
+  ]
+}

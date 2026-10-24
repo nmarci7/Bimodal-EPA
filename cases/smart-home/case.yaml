@@ -1,0 +1,37 @@
+title: Smart-home hub
+order: 1
+summary: >
+  A cloud LLM planner drives a home hub: lock, alarm and heating, a state report to the household,
+  third-party skills, and standing instructions in memory. Seven guards, two of them learned.
+  The scenario certifies the deterministic guards, reads a week of logs, and then changes the design
+  where the verdicts say only a redesign helps.
+figure: figure.svg
+model: model.yaml
+deployments: data/deployments.json
+recognisers: [recognisers/*.yaml]
+lookup_files: [data/*.csv, data/*.json]
+stages:
+  - id: S0
+    label: Design time
+    note: No evidence. Presence data reaches the cloud in every run; the ranking puts the interlock first.
+  - id: S1
+    label: The firmware team certifies the interlock, watchdog, freshness check and failover
+    note: >
+      Four deterministic certificates. The judge vendor's red-team report is submitted as a
+      certificate for the LLM judge and rejected: a learned guard can never be certified never.
+    certificates: [certs/c_gi.json, certs/c_gw.json, certs/c_gf.json, certs/c_hub_failover.json, certs/c_gs.json,
+                   certs/judge-vendor-eval.json]
+  - id: S2
+    label: A week of logs
+    note: >
+      Actuator log, app report log, memory audit, egress proxy log and skill call log of week 42.
+      The report log shows the app claiming "locked" during a cloud outage while the lock was open.
+    logs: [data/actuator-log-2026-w42.jsonl, data/app-report-log-2026-w42.jsonl, data/memory-audit-2026-10.jsonl,
+           data/egress-proxy-2026-10-14.log, data/skill-calls-2026-w42.jsonl]
+  - id: S3
+    label: "Redesign: redact before the cloud, report device state only"
+    note: >
+      Model v2 adds a redaction guard on the context sent to the cloud and stops the hub from
+      reporting the plan's claims as device state. Only the changed cones are run again.
+    model: model-v2.yaml
+    certificates: [certs/c_redact.json, certs/c_gs2.json, certs/c_hub_failover_52.json]

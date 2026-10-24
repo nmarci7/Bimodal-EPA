@@ -1,0 +1,19 @@
+# Duna Bank statement export (CSV) -> witnesses at the bank statement (o_statement).
+# One witness per payment the delegate agent initiated: was the payee's IBAN on the mandate?
+id: bank-statement-v1
+files: ["duna-bank-*.csv"]
+format: csv
+use_case: pay
+date: {field: booking_date}
+id_field: end_to_end_id
+id_prefix: stmt
+match: {field: channel, eq: delegate-agent}      # card payments and incoming transfers are not runs of this system
+lookups:
+  mandate: {file: mandate.csv, column: iban}
+rules:
+  - label: payee IBAN not on the mandate
+    when: {field: creditor_iban, not_in: mandate}
+    witness: {o_statement: {modes: {oom: [1, 10]}}}
+  - label: payee IBAN on the mandate
+    when: {field: creditor_iban, in: mandate}
+    witness: {o_statement: {modes: {oom: [0, 0]}}}

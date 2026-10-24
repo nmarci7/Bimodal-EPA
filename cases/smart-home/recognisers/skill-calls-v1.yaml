@@ -1,0 +1,15 @@
+# The third-party skill gateway log -> o_skill.
+id: skill-calls-v1
+files: ["skill-calls-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {voice: voice, calendar: calendar}}
+date: {field: ts}
+id_field: call_id
+id_prefix: skl
+rules:
+  - label: occupancy in the payload, enumerated fields only
+    when: {all: [{field: payload_fields, contains: occupancy}, {field: free_text, eq: false}]}
+    witness: {o_skill: {conf: [presence, presence], taint: false}}
+  - label: no presence data, enumerated fields only
+    when: {field: free_text, eq: false}
+    witness: {o_skill: {conf: [public, public], taint: false}}

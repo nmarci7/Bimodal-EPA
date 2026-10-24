@@ -103,8 +103,8 @@ def main(argv=None):
         deps = log_import.load_deployments(a.deployments) if a.deployments else None
         wits = []
         for f in a.logs:
-            _, ws, _ = log_import.recognise_any(open(f).read(), f, recs, m, deps, os.path.dirname(f))
-            wits += ws
+            for _, ws, _ in log_import.recognise_all(open(f).read(), f, recs, m, deps, os.path.dirname(f)):
+                wits += ws
         rep = _engine(m).analyse({"certificates": certs, "witnesses": wits}, rank=not a.no_rank)
         _print(rep, a.format)
         return
@@ -115,7 +115,8 @@ def main(argv=None):
         stages = [a.stage] if a.stage else [s["id"] for s in meta.get("stages", [])] or [None]
         for sid in stages:
             doc, ev, st = stage_inputs(d, sid)
-            print(f"\n=== {meta['title']}" + (f" - {sid}: {st.get('label', '')}" if st else ""))
+            if a.format == "text":
+                print(f"\n=== {meta['title']}" + (f" - {sid}: {st.get('label', '')}" if st else ""))
             rep = _engine(load_model(doc), quiet=True).analyse(ev)
             _print(rep, a.format)
         return

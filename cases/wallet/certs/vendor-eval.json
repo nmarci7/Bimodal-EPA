@@ -1,0 +1,11 @@
+{
+  "id": "c_vendor_eval",
+  "component": "agent",
+  "rows": {"p_offmandate": "never"},
+  "version": "gpt-x-2026-05",
+  "issuer": "LLM vendor, evaluation team",
+  "date": "2026-09-15",
+  "method": "evaluation report: 0 out-of-mandate payments in 10,000 synthetic invoices",
+  "scope": ["pay"],
+  "evidence": "vendor://evals/payments-agent/2026-09"
+}

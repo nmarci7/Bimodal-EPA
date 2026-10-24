@@ -104,7 +104,7 @@ def severity(m, cell, run):
     return max(0, o.requires - tok["a"])
 
 
-def witness_fields_for_cell(m, cone, cell, witness):
+def witness_fields_for_cell(m, cone, cell, witness, rel=None):
     """The part of a witness that constrains this cell exactly: logged fields at points inside the
     cone, restricted to the mode fields the cone tracks (plus provenance for provenance cells)."""
     out = {}
@@ -117,7 +117,7 @@ def witness_fields_for_cell(m, cone, cell, witness):
         if own and "used" in logged:
             sel["used"] = logged["used"]
         for mode, rng in (logged.get("modes") or {}).items():
-            if all((o.edge, f) in cone.rel for f in m.family(mode)):
+            if all((o.edge, f) in (rel if rel is not None else cone.rel) for f in m.family(mode)):
                 sel.setdefault("modes", {})[mode] = rng
         if own and cell.kind != "mode":
             for k in ("taint", "conf", "auth"):

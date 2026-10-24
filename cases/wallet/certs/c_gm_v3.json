@@ -1,0 +1,12 @@
+{
+  "id": "c_gm_v3",
+  "component": "gm",
+  "targets": {"oom": "never"},
+  "version": "mandate-v3",
+  "issuer": "wallet team (N. N.), second reviewer: security office",
+  "date": "2026-10-20",
+  "method": "exhaustive test on IBANs, including every payee name with a foreign IBAN and every IBAN with a foreign name + review",
+  "scope": ["pay"],
+  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"},
+  "evidence": "ci://wallet/mandate-check/test-report/2026-10-20"
+}

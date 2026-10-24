@@ -173,14 +173,27 @@ def evidence_logs(body: LogUpload):
     recs = [log_import.load_recogniser(r) for r in body.recognisers]
     deps = log_import.load_deployments(body.deployments) if body.deployments else None
     try:
-        rec, ws, unmatched = log_import.recognise_any(body.text, body.filename, recs, m, deps, files=body.lookups)
+        found = log_import.recognise_all(body.text, body.filename, recs, m, deps, files=body.lookups)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(422, detail={"problems": [str(e)]})
-    if rec is None:
-        return {"recogniser": None, "witnesses": [], "unmatched": [], "note": "no recogniser matched this file"}
-    for w in ws:
-        w["state"], w["reason"] = log_import.classify_witness(w, m)
-    return {"recogniser": rec["id"], "witnesses": ws, "unmatched": unmatched}
+    if not found:
+        return {"recognisers": [], "witnesses": [], "unmatched": [], "note": "no recogniser matched this file"}
+    ws_all, unmatched = [], []
+    for rec, ws, un in found:
+        for w in ws:
+            w["state"], w["reason"] = log_import.classify_witness(w, m)
+        ws_all += ws
+        unmatched += [{"recogniser": rec["id"], "line": n} for n in un]
+    return {"recognisers": [r["id"] for r, _, _ in found], "witnesses": ws_all, "unmatched": unmatched}
+
+
+@app.get("/api/cases/{case}/stages/{stage}")
+def case_stage(case: str, stage: str):
+    """The model and the evidence of one scenario stage, as the analyst would have assembled them."""
+    from ..engine.scenario import stage_inputs
+    d = _case_dir(case)
+    doc, ev, st = stage_inputs(d, stage)
+    return {"doc": doc, "evidence": ev, "stage": st}
 
 
 class CertUpload(BaseModel):

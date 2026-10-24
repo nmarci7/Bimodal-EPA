@@ -1,0 +1,11 @@
+{
+  "id": "c_gl",
+  "component": "gl",
+  "targets": {"malicious": "never"},
+  "version": "lockfile-v2",
+  "issuer": "release engineering",
+  "date": "2026-10-12",
+  "method": "CI rejects every package whose hash is not in the reviewed lockfile; lockfile changes need two approvals",
+  "scope": ["release"],
+  "evidence": "ci://release/lockfile-check/2026-10-12"
+}

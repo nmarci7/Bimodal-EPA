@@ -1,0 +1,11 @@
+{
+  "id": "c_hub_failover",
+  "component": "hub",
+  "rows": {"hub_drop": "never"},
+  "version": "hub-fw-5.1",
+  "issuer": "hub firmware team",
+  "date": "2026-10-08",
+  "method": "failover test: the cloud cut in 200 scenarios; a missing plan always hands the request to the local path",
+  "scope": ["voice", "calendar"],
+  "evidence": "ci://hub/failover/2026-10-08"
+}

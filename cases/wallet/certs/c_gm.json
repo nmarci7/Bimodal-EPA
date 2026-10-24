@@ -1,0 +1,12 @@
+{
+  "id": "c_gm",
+  "component": "gm",
+  "targets": {"oom": "never"},
+  "version": "mandate-v2",
+  "issuer": "wallet team (N. N.)",
+  "date": "2026-10-01",
+  "method": "exhaustive mandate-scope test (every payee on the mandate, three amounts each) + review",
+  "scope": ["pay"],
+  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"},
+  "evidence": "ci://wallet/mandate-check/test-report/2026-10-01"
+}

@@ -67,7 +67,7 @@ components:
     in: [request, mandate]
     out: [instruction, presentation]
     flow: {request: [instruction, presentation], mandate: []}
-    pass: [commission]
+    pass: [commission, late, value]
     authority: principal
     raises: true            # signs with the principal's delegation credential
     clearance: personal
@@ -85,7 +85,7 @@ components:
     trusted: true
     in: [instruction]
     out: [transfer, update]
-    pass: [commission, value]
+    pass: [commission, late, value]
     clearance: personal
     rows:
       - id: b_slow

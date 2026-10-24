@@ -1,0 +1,4 @@
+2026-10-14T06:30:01Z hub-01 POST https://planner.cloud.example/v2/plan trigger=voice bytes=1644 fields=request,device_states,occupancy
+2026-10-14T09:02:47Z hub-01 POST https://planner.cloud.example/v2/plan trigger=calendar bytes=2210 fields=feed_item,device_states,occupancy,household_members
+2026-10-14T21:39:55Z hub-01 POST https://planner.cloud.example/v2/plan trigger=voice bytes=1520 fields=request,device_states,occupancy
+2026-10-14T21:40:02Z hub-01 GET https://planner.cloud.example/v2/health trigger=none bytes=88 fields=-

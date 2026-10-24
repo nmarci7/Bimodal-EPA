@@ -101,8 +101,9 @@ class Engine:
         allruns = self.cache.runs(key)
         exact = set(C.exact_points(m, cone))
         proj = {}
+        crel = cone.cell_rel.get(cell.id, cone.rel)
         for w in witnesses:
-            p = R.witness_fields_for_cell(m, cone, cell, w)
+            p = R.witness_fields_for_cell(m, cone, cell, w, crel)
             p = {o: f for o, f in p.items() if o in exact}
             if p:
                 proj[w["id"]] = (p, w.get("use_case"))
@@ -205,11 +206,10 @@ class Engine:
                     out["certificates"].append(k)
         # dropped defaults that could have put the failure here
         U = set(cone.components)
-        tracked = set(cone.cell_fields.get(cell.id, [])) if cell.kind == "mode" else set()
+        crel = cone.cell_rel.get(cell.id, set())
         for d in m.decisions:
             if d.get("kind") == "drop-default" and d["component"] in U:
-                reach_port = any(e.id in set(cone.edges) for e in m.edges_from(d["component"], d["port"]))
-                if reach_port and d["mode"] in tracked:
+                if any((e.id, d["mode"]) in crel for e in m.edges_from(d["component"], d["port"])):
                     out["decisions"].append(d)
         if out["certificates"] or out["decisions"]:
             out["structural"] = False
@@ -290,7 +290,14 @@ class Engine:
         guards = [g for g in m.components.values() if g.is_guard]
         actions = []
         certifiable = []
+        pinned = set()
+        for c in reg["certificates"]:
+            if c["state"] == "in force" and c["id"] in certs_on:
+                pinned |= {r for r, x in c["resolved"].items() if x == "N"}
         for g in guards:
+            dec_rows = {t["row"] for t in g.targets if t["decidable"] and not g.learned}
+            if dec_rows and dec_rows <= pinned:
+                continue          # already certified
             dec = [t for t in g.targets if t["decidable"] and not g.learned]
             if g.learned:
                 actions.append({"action": [g.id], "key": 0, "moved": [],
@@ -304,28 +311,41 @@ class Engine:
         self.emit("ranking", f"ranking {len(combos)} action(s) over {len(by_cell)} cells")
         wit = [w for w in reg["witnesses"] if w["state"] == "in force"]
         inf = [c for c in reg["certificates"] if c["state"] == "in force"]
+        hyp_rows = {g.id: {t["row"]: "N" for t in g.targets if t["decidable"]} for g in certifiable}
+        # one grounded problem per cell, with every hypothetical certificate switched off until used
+        problems = {}
+        for cone in cone_list:
+            for cell in cone.cells:
+                cur = by_cell[cell.id]
+                rows = set(cone.cell_rows[cell.id])
+                if cur["verdict"] == "guarantee":
+                    continue
+                hyps = [(f"hyp:{gid}", {r: x for r, x in hr.items() if r in rows})
+                        for gid, hr in hyp_rows.items() if set(hr) & rows]
+                if not hyps:
+                    continue
+                prob, _, _ = self.problem(cone, cell, inf, wit, extra_certs=hyps)
+                base = (set(certs_on) - set(cur["suspended"])) & set(prob.cert_ids)
+                problems[cell.id] = (prob, base, set(cur["witnesses_used"]), cur)
         for combo in combos:
-            hyp = {}
-            for g in combo:
-                for t in g.targets:
-                    if t["decidable"]:
-                        hyp[t["row"]] = "N"
             moved = []
-            for cone in cone_list:
-                for cell in cone.cells:
-                    cur = by_cell[cell.id]
-                    rows = cone.cell_rows[cell.id]
-                    if cur["verdict"] == "guarantee" or not (set(hyp) & set(rows)):
-                        continue
-                    hyp_c = [("hyp", {r: x for r, x in hyp.items() if r in rows})]
-                    prob, _, _ = self.problem(cone, cell, inf, wit, extra_certs=hyp_c)
-                    on = (set(certs_on) - set(cur["suspended"])) & set(prob.cert_ids) | {"hyp"}
-                    b = prob.brave(on, set(cur["witnesses_used"]))
-                    if b and V.verdict_of(b["seen"]) == "guarantee":
-                        moved.append({"cell": cell.id, "severity": cur["severity"], "from": cur["verdict"]})
+            for cid, (prob, base, won, cur) in problems.items():
+                on = {f"hyp:{g.id}" for g in combo} & set(prob.cert_ids)
+                if not on:
+                    continue
+                b = prob.brave(base | on, won)
+                if b and V.verdict_of(b["seen"]) == "guarantee":
+                    moved.append({"cell": cid, "severity": cur["severity"], "from": cur["verdict"]})
             key = max([x["severity"] for x in moved] or [0])
             actions.append({"action": [g.id for g in combo], "key": key, "moved": moved,
                             "note": "" if moved else "moves no cell to guarantee"})
+        # a pair is shown only if it moves more than each of its guards alone
+        single = {a["action"][0]: {x["cell"] for x in a["moved"]} for a in actions if len(a["action"]) == 1}
+        actions = [a for a in actions if len(a["action"]) == 1 or
+                   {x["cell"] for x in a["moved"]} - single.get(a["action"][0], set()) - single.get(a["action"][1], set())
+                   or not any(single.get(g) for g in a["action"])]
+        actions = [a for a in actions if len(a["action"]) == 1 or len({x["cell"] for x in a["moved"]}) >
+                   max(len(single.get(g, ())) for g in a["action"])]
         actions.sort(key=lambda a: (-a["key"], -len(a["moved"]), len(a["action"]), a["action"]))
         return actions
 

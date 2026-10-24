@@ -1,0 +1,34 @@
+title: MCP coding agent
+order: 3
+summary: >
+  A coding agent reads issues in a public repository, edits the workspace, runs commands and opens
+  pull requests through a GitHub MCP server holding an OAuth token; CI releases the product. Seven
+  guards. The scenario certifies the obvious guards, replays the private-repository leak through a
+  pull request, and fixes the token's scope.
+figure: figure.svg
+model: model.yaml
+deployments: data/deployments.json
+recognisers: [recognisers/*.yaml]
+lookup_files: [data/*.csv, data/*.json]
+stages:
+  - id: S0
+    label: Design time
+    note: >
+      Authority at the shell and at the MCP server is exposed in every run, structurally: injected
+      issue text has no one's authority and nothing on the path can restore it.
+  - id: S1
+    label: The platform team certifies the allowlist, paths, tool pinning and lockfile
+    note: The test suite is submitted as a certificate for "tests catch malicious packages"; it is rejected.
+    certificates: [certs/c_ga.json, certs/c_gp.json, certs/c_gt.json, certs/c_gl.json, certs/tests-claim.json]
+  - id: S2
+    label: "21 October: a public pull request carries private code"
+    note: >
+      The agent, working on issue #142 of acme/public-site, read a private repository with its token
+      and opened PR #143 containing it. The PR diff scanner, the MCP call log, the process audit, the
+      egress log and the release scan of that week are uploaded.
+    logs: [data/mcp-calls-2026-10-21.jsonl, data/pr-diff-scan-2026-10-21.json, data/process-audit-2026-10-21.log,
+           data/egress-2026-10-21.jsonl, data/release-scan-2026-10.json]
+  - id: S3
+    label: The token is replaced by a GitHub App installation scoped to the one public repository
+    versions: {gk: token-scope-v1}
+    certificates: [certs/c_gk.json]

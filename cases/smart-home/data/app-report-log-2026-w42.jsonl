@@ -1,0 +1,5 @@
+{"ts": "2026-10-12T07:45:40Z", "report_id": "rep-0101", "trigger": "voice", "entity": "lock.front_door", "shown_state": "locked", "device_state": "locked", "state_age_s": 9, "cloud_status": "ok"}
+{"ts": "2026-10-13T09:15:02Z", "report_id": "rep-0118", "trigger": "calendar", "entity": "lock.back_door", "shown_state": "unlocked", "device_state": "unlocked", "state_age_s": 22, "cloud_status": "ok"}
+{"ts": "2026-10-14T21:40:18Z", "report_id": "rep-0140", "trigger": "voice", "entity": "lock.back_door", "shown_state": "locked", "device_state": "unlocked", "state_age_s": 3, "cloud_status": "degraded", "note": "the planner answered 'all doors locked' from its own plan while the cloud API was degraded"}
+{"ts": "2026-10-15T23:12:50Z", "report_id": "rep-0152", "trigger": "offline", "entity": "lock.front_door", "shown_state": "locked", "device_state": "locked", "state_age_s": 6, "cloud_status": "unreachable"}
+{"ts": "2026-10-16T08:00:20Z", "report_id": "rep-0160", "trigger": "voice", "entity": "climate.living_room", "shown_state": "21.5", "device_state": "21.5", "state_age_s": 8, "cloud_status": "ok"}

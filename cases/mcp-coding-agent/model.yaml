@@ -1,0 +1,155 @@
+# MCP coding agent — the architecture of the mcp-coding-agent figure.
+# An LLM planner reads issues and repository text and plans; a runner (gates and MCP client) edits
+# the workspace, runs commands in a shell and calls tools on an MCP server holding an OAuth token;
+# CI builds the workspace with packages from a registry and releases the artefact.
+name: mcp-coding-agent
+description: >
+  Seven guards: paths on file edits, the command allowlist, the shell's network sandbox, the pinned
+  tool list, the token scope on pull requests, and the lockfile and tests on releases. Observed at the
+  process audit, the MCP call log, the PR diff scan, the egress log and the SBOM and release scan.
+modes:
+  - omission
+  - commission: [escape, drift, malicious]   # edits outside the allowed paths, calls to a changed tool, compromised dependency
+  - late
+  - value
+lattices:
+  confidentiality: [public, private]
+  authority: [none, contributor, maintainer]
+
+components:
+  - id: planner
+    kind: llm
+    label: "LLM · discretionary"
+    version: coder-llm-2026-07
+    in: [issue]
+    out: [plan]
+    authority: maintainer
+    clearance: private
+    rows:
+      - {id: p_val, label: plans a wrong command, when: {issue: any}, then: {plan: {value: const 7}}}
+      - {id: p_escape, label: plans edits outside the allowed paths (its own config, CI files), when: {issue: any}, then: {plan: {escape: const 8}}}
+    drop_defaults:
+      - {port: plan, mode: omission, reason: "an omitted plan leaves the issue open; no harm path"}
+      - {port: plan, mode: commission, reason: "the planner's commissions are modelled as path escapes; tool drift and compromised packages enter elsewhere"}
+      - {port: plan, mode: late, reason: "timing is not assessed in this model"}
+    pos: {x: 450, y: 70}
+
+  - id: runner
+    kind: deterministic
+    label: gates and MCP client
+    version: runner-0.9
+    in: [plan, scripts]
+    out: [edits, cmd, call]
+    flow: {plan: [edits, cmd, call], scripts: []}
+    authority: maintainer
+    clearance: private
+    rows:
+      - {id: r_cmd, label: runs the planned command, activation: always, when: {plan: {value: 1}}, then: {cmd: {value: keep}}}
+      - {id: r_call, label: calls the planned tool, activation: always, when: {plan: {value: 1}}, then: {call: {value: keep}}}
+      - {id: r_edit, label: applies the planned edits, activation: always, when: {plan: {escape: 1}}, then: {edits: {escape: keep}}}
+      - {id: r_scripts, label: runs the workspace scripts the command invokes, activation: always, when: {scripts: {escape: 1}}, then: {cmd: {escape: keep}}}
+      - {id: r_drift, label: calls a tool without re-checking its description, when: {plan: any}, then: {call: {drift: const 7}}}
+    pos: {x: 450, y: 330}
+
+  - id: workspace
+    kind: store
+    label: scripts, config, code
+    version: repo-main
+    in: [edits, checkout]
+    out: [scripts, source]
+    flow: {edits: [scripts, source], checkout: [scripts, source]}
+    clearance: private
+    pos: {x: 800, y: 80}
+
+  - id: shell
+    kind: tool
+    label: runs commands
+    version: zsh-sandboxed
+    in: [cmd, env]
+    out: [outbound]
+    flow: {cmd: [outbound], env: []}
+    clearance: private
+    pos: {x: 840, y: 330}
+
+  - id: mcp
+    kind: tool
+    label: tools, OAuth token
+    version: github-mcp-0.4
+    trusted: true
+    in: [call, repos]
+    out: [pr]
+    flow: {call: [pr], repos: []}
+    clearance: private
+    pos: {x: 450, y: 590}
+
+  - id: registry
+    kind: external
+    label: package registry
+    version: pypi
+    in: [fetch]
+    out: [packages]
+    rows:
+      - {id: reg_bad, label: serves a compromised package version, when: {fetch: any}, then: {packages: {malicious: const 9}}}
+    pos: {x: 1170, y: 80}
+
+  - id: ci
+    kind: deterministic
+    label: build and tests
+    version: ci-2026-10
+    in: [source, packages]
+    out: [release]
+    pass: all
+    clearance: private
+    pos: {x: 1170, y: 330}
+
+guards:
+  - {id: gp, label: paths, edge: e_edits, version: paths-v1, targets: [{mode: escape, threshold: 1, decidable: true}]}
+  - {id: ga, label: allowlist, edge: e_cmd, version: allowlist-v2, closed_output: true, targets: [{taint: true, decidable: true}]}
+  - {id: gs, label: sandbox, edge: e_outbound, version: sandbox-v3, targets: [{conf: public, decidable: true}]}
+  - {id: gt, label: tool list, edge: e_call, version: toolpin-v1, targets: [{mode: drift, threshold: 1, decidable: true}]}
+  - {id: gk, label: scope, edge: e_pr, version: token-scope-v0, targets: [{conf: public, decidable: true}]}
+  - {id: gl, label: lockfile, edge: e_release, version: lockfile-v2, targets: [{mode: malicious, threshold: 1, decidable: true}]}
+  - {id: gx, label: tests, edge: e_release, version: tests-2026-10, targets: [{mode: malicious, threshold: 1, decidable: false}]}
+
+edges:
+  - {id: e_issue, from: sys.issues, to: planner.issue, label: untrusted}
+  - {id: e_plan, from: planner.plan, to: runner.plan, label: "LLM plan ~"}
+  - {id: e_edits, from: runner.edits, to: workspace.edits, label: file edits}
+  - {id: e_checkout, from: sys.checkout, to: workspace.checkout, label: checkout}
+  - {id: e_scripts, from: workspace.scripts, to: runner.scripts, label: scripts it runs}
+  - {id: e_cmd, from: runner.cmd, to: shell.cmd, label: what runs}
+  - {id: e_outbound, from: shell.outbound, to: sys.network, label: outbound}
+  - {id: e_call, from: runner.call, to: mcp.call, label: tool call + token}
+  - {id: e_pr, from: mcp.pr, to: sys.public_repo, label: pull request}
+  - {id: e_repos, from: sys.private_repos, to: mcp.repos, label: what the token can read}
+  - {id: e_env, from: sys.shell_env, to: shell.env, label: secrets in the environment}
+  - {id: e_source, from: workspace.source, to: ci.source, label: source}
+  - {id: e_fetch, from: sys.fetch, to: registry.fetch, label: dependency resolution}
+  - {id: e_packages, from: registry.packages, to: ci.packages, label: packages}
+  - {id: e_release, from: ci.release, to: sys.artefact, label: release}
+
+use_cases:
+  - id: issue
+    label: the agent works on an issue in a public repository
+    entries:
+      - {port: issues, token: {taint: true, auth: none, conf: public}}
+      - {port: checkout, token: {auth: maintainer, conf: public}}
+      - {port: private_repos, token: {auth: maintainer, conf: private}}
+      - {port: shell_env, token: {auth: maintainer, conf: private}}
+  - id: release
+    label: CI builds and releases the product
+    entries:
+      - {port: checkout, token: {auth: maintainer, conf: public}}
+      - {port: fetch, token: {auth: maintainer, conf: public}}
+
+observation_points:
+  - {id: o_process, edge: e_cmd, label: process audit, log: the shell's process audit trail,
+     tolerate: {value: 5, escape: 1}, taint: reject, requires: maintainer}
+  - {id: o_mcp, edge: e_call, label: MCP call log, log: the MCP client's JSON-RPC log, tolerate: {drift: 1, value: 5}, requires: maintainer}
+  - {id: o_pr, edge: e_pr, label: PR diff scan, log: the secret and private-code scanner on pull requests, clearance: public}
+  - {id: o_egress, edge: e_outbound, label: egress log, log: the sandbox's outbound proxy log, clearance: public}
+  - {id: o_release, edge: e_release, label: SBOM and release scan, log: the CycloneDX SBOM and the release scanner, tolerate: {malicious: 1}}
+
+claims:
+  - {cell: conf@o_pr, verdict: guarantee, by: platform team, note: "private code never reaches a public pull request"}
+  - {cell: taint@o_process, verdict: guarantee, by: platform team, note: "untrusted text never reaches the shell"}

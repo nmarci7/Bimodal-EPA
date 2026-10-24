@@ -1,0 +1,11 @@
+{
+  "id": "c_judge_eval",
+  "component": "gj",
+  "targets": {"unsafe": "never"},
+  "version": "judge-llm-1",
+  "issuer": "judge vendor",
+  "date": "2026-09-30",
+  "method": "red-team evaluation: the judge blocked 99.2% of 5,000 unsafe actuation prompts",
+  "scope": ["voice", "calendar"],
+  "evidence": "vendor://judge/redteam/2026-09"
+}

@@ -1,0 +1,16 @@
+# The release scanner over each release's CycloneDX SBOM -> o_release.
+id: release-scan-v1
+files: ["release-scan-*.json"]
+format: json
+items: items
+use_case: release
+date: {field: date}
+id_field: release
+id_prefix: rel
+rules:
+  - label: a known-malicious component shipped
+    when: {field: malicious_components, nonempty: true}
+    witness: {o_release: {modes: {malicious: [1, 10]}}}
+  - label: no known-malicious component
+    when: {field: malicious_components, nonempty: false}
+    witness: {o_release: {modes: {malicious: [0, 0]}}}

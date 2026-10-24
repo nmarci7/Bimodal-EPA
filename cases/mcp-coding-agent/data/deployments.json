@@ -1,0 +1,10 @@
+{
+  "system": "acme coding agent",
+  "changes": [
+    {"date": "2026-10-01", "set": {"planner": "coder-llm-2026-07", "runner": "runner-0.9", "workspace": "repo-main",
+                                   "shell": "zsh-sandboxed", "mcp": "github-mcp-0.4", "registry": "pypi", "ci": "ci-2026-10",
+                                   "gp": "paths-v1", "ga": "allowlist-v2", "gs": "sandbox-v3", "gt": "toolpin-v1",
+                                   "gk": "token-scope-v0", "gl": "lockfile-v2", "gx": "tests-2026-10"}},
+    {"date": "2026-10-23", "set": {"gk": "token-scope-v1"}}
+  ]
+}

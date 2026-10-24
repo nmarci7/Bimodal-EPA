@@ -1,0 +1,11 @@
+{
+  "id": "c_gt",
+  "component": "gt",
+  "targets": {"drift": "never"},
+  "version": "toolpin-v1",
+  "issuer": "platform team",
+  "date": "2026-10-10",
+  "method": "tool descriptions and input schemas pinned by hash at approval; a changed hash blocks the call (test with a modified server)",
+  "scope": ["issue"],
+  "evidence": "ci://agent/toolpin/2026-10-10"
+}

@@ -1,0 +1,16 @@
+# The sandbox's outbound proxy log -> o_egress (flows that left the sandbox).
+id: egress-v1
+files: ["egress-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {issue: issue}}
+date: {field: ts}
+id_field: flow_id
+id_prefix: egr
+match: {field: decision, eq: allow}
+rules:
+  - label: private data left the sandbox
+    when: {field: dlp_class, eq: private}
+    witness: {o_egress: {conf: [private, private]}}
+  - label: public data only
+    when: {field: dlp_class, eq: public}
+    witness: {o_egress: {conf: [public, public]}}

@@ -1,0 +1,16 @@
+# The shell's process audit trail (auditd-style text) -> o_process (what ran).
+id: process-audit-v1
+files: ["process-audit-*.log"]
+format: regex
+pattern: '^(?P<ts>\S+) type=EXECVE pid=(?P<pid>\d+) session=(?P<session>\S+) trigger=(?P<trigger>\S+) argv="(?P<argv>[^"]*)" script_outside_allowlist=(?P<outside>\S+) exit=(?P<exit>\d+)$'
+use_case: {field: trigger, map: {issue: issue}}
+date: {field: ts}
+id_field: pid
+id_prefix: proc
+rules:
+  - label: ran a script edited outside the allowed paths
+    when: {field: outside, eq: "yes"}
+    witness: {o_process: {modes: {escape: [1, 10]}}}
+  - label: ran only scripts inside the allowed paths
+    when: {field: outside, eq: "no"}
+    witness: {o_process: {modes: {escape: [0, 0]}}}

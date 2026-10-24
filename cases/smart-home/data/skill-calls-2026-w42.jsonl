@@ -1,0 +1,3 @@
+{"ts": "2026-10-12T18:20:11Z", "call_id": "skl-2201", "skill": "grocer-plus", "trigger": "voice", "payload_fields": ["shopping_list", "delivery_slot"], "free_text": false}
+{"ts": "2026-10-13T09:03:40Z", "call_id": "skl-2214", "skill": "parcelpal", "trigger": "calendar", "payload_fields": ["delivery_slot", "occupancy"], "free_text": false}
+{"ts": "2026-10-15T12:10:03Z", "call_id": "skl-2230", "skill": "grocer-plus", "trigger": "voice", "payload_fields": ["shopping_list"], "free_text": false}

@@ -1,0 +1,18 @@
+# The wallet's OpenID4VP presentation log -> witnesses at the presentation log (o_presentation).
+# A presentation that discloses a claim outside the payment-initiation set reveals personal data.
+id: presentation-log-v1
+files: ["presentation-log-*.jsonl"]
+format: jsonl
+use_case: pay
+date: {field: ts}
+id_field: transaction_id
+id_prefix: pres
+lookups:
+  payment_claims: {values: [mandate_id, payee_iban, amount, currency, invoice_ref]}
+rules:
+  - label: discloses a claim outside the payment-initiation set
+    when: {field: disclosed_claims, not_in: payment_claims}
+    witness: {o_presentation: {conf: [personal, personal]}}
+  - label: discloses payment claims only
+    when: {field: disclosed_claims, in: payment_claims}
+    witness: {o_presentation: {conf: [pseudonymous, pseudonymous]}}

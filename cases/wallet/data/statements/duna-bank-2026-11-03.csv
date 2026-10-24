@@ -1,0 +1,4 @@
+booking_date,value_date,amount_huf,currency,creditor_name,creditor_iban,remittance_information,end_to_end_id,channel
+2026-11-03,2026-11-03,-56320,HUF,Duna Energia Zrt.,HU42117730161111101800000000,DE-2026-1061120,DUNA-AGT-000502,delegate-agent
+2026-11-03,2026-11-03,-56320,HUF,Duna Energia Zrt.,HU42117730161111101800000000,DE-2026-1061120,DUNA-AGT-000503,delegate-agent
+2026-11-03,2026-11-03,-19990,HUF,Telekom Hungary Zrt.,HU55100320000106000400000000,TH-88123977,DUNA-AGT-000504,delegate-agent

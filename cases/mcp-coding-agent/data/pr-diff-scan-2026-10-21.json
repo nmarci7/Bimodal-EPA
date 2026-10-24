@@ -1,0 +1,10 @@
+{
+  "scanner": "diffguard 3.2 (secrets and private-code fingerprints)",
+  "items": [
+    {"pr": "acme/public-site#143", "session": "sess-142", "trigger": "issue", "opened": "2026-10-21T09:16:58Z",
+     "private_content": true, "source_repos": ["acme/payroll-private"],
+     "findings": [{"rule": "private-repo-fingerprint", "path": "docs/authors.md", "lines": "12-58"}]},
+    {"pr": "acme/public-site#151", "session": "sess-150", "trigger": "issue", "opened": "2026-10-21T14:02:31Z",
+     "private_content": false, "source_repos": [], "findings": []}
+  ]
+}

@@ -1,0 +1,3 @@
+{"ts": "2026-10-21T09:16:20Z", "flow_id": "egr-9001", "session": "sess-142", "trigger": "issue", "host": "registry.npmjs.org", "bytes_out": 2140, "decision": "allow", "dlp_class": "public"}
+{"ts": "2026-10-21T09:16:31Z", "flow_id": "egr-9002", "session": "sess-142", "trigger": "issue", "host": "telemetry.lint-tool.dev", "bytes_out": 512, "decision": "deny", "dlp_class": "public"}
+{"ts": "2026-10-21T14:01:58Z", "flow_id": "egr-9040", "session": "sess-150", "trigger": "issue", "host": "registry.npmjs.org", "bytes_out": 1990, "decision": "allow", "dlp_class": "public"}

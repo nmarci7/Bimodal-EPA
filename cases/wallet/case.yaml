@@ -1,0 +1,41 @@
+title: Delegated wallet agent
+order: 2
+summary: >
+  Duna Bank's delegate payment agent pays invoices under a mandate the customer grants through the
+  EUDI wallet. Six guards; observed at the bank statement and the presentation log. The scenario
+  follows the paper's timeline: certify, an incident on a statement, withdrawal, a fixed check, an
+  LLM swap.
+figure: figure.svg
+model: model.yaml
+deployments: data/deployments.json
+recognisers: [recognisers/*.yaml]
+lookup_files: [data/*.csv, data/*.json]
+stages:
+  - id: S0
+    label: Design time
+    note: No evidence. The ranking says what to certify first.
+  - id: S1
+    label: The teams certify the dedup, mandate and disclosure checks
+    note: >
+      The payments platform team model-checks the idempotency check, the wallet team tests the
+      mandate check and the disclosure check. The LLM vendor's evaluation report is submitted too;
+      it is rejected by the LLM rule.
+    certificates: [certs/c_gd.json, certs/c_gm.json, certs/c_gx.json, certs/vendor-eval.json]
+  - id: S2
+    label: The statement of 15 October
+    note: >
+      One line pays "Duna Energia Zrt." to an IBAN that is not on the mandate (invoice redirection).
+      The witness contradicts the mandate certificate; the engine suspends it.
+    logs: [data/statements/duna-bank-2026-10-15.csv, data/presentation-log-2026-10.jsonl]
+  - id: S3
+    label: The wallet team withdraws the certificate; the next day's statement is clean
+    decisions:
+      - {kind: withdraw-cert, certificate: c_gm, by: wallet team, reason: "mandate-v2 compares payee names, not IBANs"}
+    logs: [data/statements/duna-bank-2026-10-16.csv]
+  - id: S4
+    label: mandate-v3 compares IBANs and is re-certified
+    versions: {gm: mandate-v3}
+    certificates: [certs/c_gm_v3.json]
+  - id: S5
+    label: The vendor replaces the planner's LLM
+    versions: {agent: gpt-y-2027-01}

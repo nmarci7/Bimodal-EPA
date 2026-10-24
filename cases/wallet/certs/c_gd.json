@@ -1,0 +1,12 @@
+{
+  "id": "c_gd",
+  "component": "gd",
+  "targets": {"dup": "never"},
+  "version": "dedup-v3",
+  "issuer": "payments platform team (K. Szabó)",
+  "date": "2026-09-28",
+  "method": "TLC model check of Dedup.tla (idempotency key, every interleaving of up to three resubmissions) + code review",
+  "scope": ["pay"],
+  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"},
+  "evidence": "ci://payments/dedup/tlc-run/8812"
+}

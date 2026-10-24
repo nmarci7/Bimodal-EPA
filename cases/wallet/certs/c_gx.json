@@ -1,0 +1,12 @@
+{
+  "id": "c_gx",
+  "component": "gx",
+  "targets": {"conf": "never"},
+  "version": "disclosure-v1",
+  "issuer": "wallet team (identity)",
+  "date": "2026-10-05",
+  "method": "conformance suite against the selective-disclosure policy: every combination of requested claims",
+  "scope": ["pay"],
+  "context": {"wallet": "wallet-3.2"},
+  "evidence": "ci://wallet/disclosure/conformance/2026-10-05"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "c_tests",
+  "component": "gx",
+  "targets": {"malicious": "never"},
+  "version": "tests-2026-10",
+  "issuer": "release engineering",
+  "date": "2026-10-12",
+  "method": "all 1,240 tests green on every release",
+  "scope": ["release"],
+  "evidence": "ci://release/tests/2026-10-12"
+}

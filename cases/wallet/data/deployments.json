@@ -1,0 +1,11 @@
+{
+  "system": "duna-bank delegate agent",
+  "note": "Deployment change log: which version of each component was in production from which date. Witnesses take their versions from here.",
+  "changes": [
+    {"date": "2026-09-01", "set": {"agent": "gpt-x-2026-05", "mandate": "mandate-store-2", "wallet": "wallet-3.2",
+                                   "bank": "bank-api-2026", "feed": "feed-1.4", "gr": "revsync-1", "gm": "mandate-v2",
+                                   "gd": "dedup-v3", "ga": "amount-v1", "gc": "bank-cap-2026", "gx": "disclosure-v1"}},
+    {"date": "2026-10-20", "set": {"gm": "mandate-v3"}},
+    {"date": "2027-02-01", "set": {"agent": "gpt-y-2027-01"}}
+  ]
+}

@@ -117,6 +117,12 @@ def holds(cond, r, lookups):
     if "not" in cond:
         return not holds(cond["not"], r, lookups)
     v = _get(r, cond["field"])
+    if "eq_field" in cond:
+        return str(v) == str(_get(r, cond["eq_field"]))
+    if "ne_field" in cond:
+        return str(v) != str(_get(r, cond["ne_field"]))
+    if "nonempty" in cond:
+        return bool(v) == bool(cond["nonempty"])
     if "eq" in cond:
         return str(v) == str(cond["eq"])
     if "ne" in cond:
@@ -183,13 +189,33 @@ def _resolve_levels(at, m):
     return out
 
 
+def _aggregate(recs_iter, rec):
+    """With `group_by` and `aggregate: true`, rules see one record per group: the first record's
+    fields, `_count` (how many lines share the key) and `_lines`."""
+    groups, order = {}, []
+    for line_no, r in recs_iter:
+        k = str(_get(r, rec["group_by"]))
+        if k not in groups:
+            groups[k] = {**r, "_count": 0, "_lines": []}
+            order.append(k)
+        groups[k]["_count"] += 1
+        groups[k]["_lines"].append(line_no)
+    for k in order:
+        yield groups[k]["_lines"][0], groups[k]
+
+
 def witnesses_from_text(text, filename, rec, m=None, deployments=None, base_dir=".", files=None):
     """Apply one recogniser to one uploaded file. Returns (witnesses, unmatched line numbers)."""
     lookups = _lookups(rec, base_dir, files)
     deployments = deployments or {"changes": []}
     groups, order, unmatched = {}, [], []
-    for line_no, r in records(text, rec):
-        if not holds(rec.get("match"), r, lookups):
+    source = records(text, rec)
+    aggregate = bool(rec.get("aggregate") and rec.get("group_by"))
+    if aggregate:
+        source = _aggregate(((i, r) for i, r in source if holds(rec.get("match"), r, lookups)), rec)
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    for line_no, r in source:
+        if not aggregate and not holds(rec.get("match"), r, lookups):
             continue
         for rule in rec["rules"]:
             if holds(rule.get("when"), r, lookups):
@@ -199,17 +225,22 @@ def witnesses_from_text(text, filename, rec, m=None, deployments=None, base_dir=
                 uc = rec.get("use_case")
                 if isinstance(uc, dict):
                     uc = rec["use_case"].get("map", {}).get(str(_get(r, uc["field"])), _get(r, uc["field"]))
-                key = str(_get(r, rec["group_by"])) if rec.get("group_by") else f"{line_no}"
-                stem = os.path.splitext(os.path.basename(filename))[0]
+                if rec.get("id_field"):
+                    key = str(_get(r, rec["id_field"]))
+                elif rec.get("group_by") and not aggregate:
+                    key = str(_get(r, rec["group_by"]))
+                else:
+                    key = f"{line_no}"
                 if key not in groups:
-                    groups[key] = {"id": f"w_{stem}_{key}".replace("-", "_").replace(".", "_"),
+                    wid = f"w_{rec.get('id_prefix', stem)}_{key}"
+                    groups[key] = {"id": "".join(ch if ch.isalnum() else "_" for ch in wid),
                                    "use_case": uc, "at": {}, "date": date,
                                    "source": f"{os.path.basename(filename)} line {line_no}",
                                    "recogniser": rec["id"], "versions": versions_at(deployments, date),
                                    "rule": rule.get("label", ""), "lines": []}
                     order.append(key)
                 w = groups[key]
-                w["lines"].append(line_no)
+                w["lines"] += r["_lines"] if aggregate else [line_no]
                 for obs_id, logged in at.items():
                     cur = w["at"].setdefault(obs_id, {})
                     for k, v in logged.items():
@@ -232,14 +263,37 @@ def classify_witness(w, m, rejected=()):
             return "rejected", f"unknown observation point {obs_id}"
     if w.get("use_case") and w["use_case"] not in {u.id for u in m.use_cases}:
         return "rejected", f"unknown use case {w['use_case']}"
+    from ..model.cone import upstream
+    passed = set()
+    for obs_id in w["at"]:
+        passed |= upstream(m, m.obs[obs_id].edge)
     stale = []
     for cid, v in (w.get("versions") or {}).items():
+        if cid not in passed:
+            continue          # a witness is a run through the components upstream of what it logs
         c = m.components.get(cid)
         if c is not None and c.version is not None and c.version != v:
             stale.append(f"{cid} was {v}, now {c.version}")
     if stale:
         return "stale", "; ".join(stale)
     return "in force", ""
+
+
+def recognise_all(text, filename, recognisers, m=None, deployments=None, base_dir=".", files=None):
+    """Every recogniser whose `files` globs match the file name, applied in turn (one log can say
+    several things, e.g. out-of-mandate lines and duplicates); falls back to the first that yields."""
+    import fnmatch
+    out = []
+    for rec in recognisers:
+        globs = rec.get("files", [])
+        if globs and any(fnmatch.fnmatch(os.path.basename(filename), g) for g in globs):
+            ws, un = witnesses_from_text(text, filename, rec, m, deployments, base_dir, files)
+            out.append((rec, ws, un))
+    if not out:
+        rec, ws, un = recognise_any(text, filename, recognisers, m, deployments, base_dir, files)
+        if rec is not None:
+            out.append((rec, ws, un))
+    return out
 
 
 def recognise_any(text, filename, recognisers, m=None, deployments=None, base_dir=".", files=None):

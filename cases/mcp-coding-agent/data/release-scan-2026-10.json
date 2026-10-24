@@ -1,0 +1,10 @@
+{
+  "scanner": "release-scan 1.9 over the CycloneDX SBOM of each release",
+  "items": [
+    {"release": "public-site 1.4.1", "date": "2026-10-14", "trigger": "release", "components": 412,
+     "malicious_components": [], "lockfile_verified": true},
+    {"release": "public-site 1.4.2", "date": "2026-10-22", "trigger": "release", "components": 415,
+     "malicious_components": [], "lockfile_verified": true,
+     "note": "litellm-gateway 1.82.1 (compromised upstream on 2026-10-20) was rejected by the hash pin; 1.82.0 shipped"}
+  ]
+}

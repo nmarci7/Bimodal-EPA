@@ -43,6 +43,7 @@ class Cone:
     cell_rows: dict = field(default_factory=dict)   # cell id -> the rows of that cell's own cone
     cell_fields: dict = field(default_factory=dict) # cell id -> the mode fields that cell's cone reads
     rel: set = field(default_factory=set)            # (edge, field) pairs the runs compute exactly
+    cell_rel: dict = field(default_factory=dict)     # cell id -> the (edge, field) pairs its own rows decide
 
     def key(self, m):
         payload = {
@@ -125,15 +126,76 @@ def normal_edges(m):
     return out
 
 
+def possible(m):
+    """Per use case, an over-approximation of which edges can carry a message and which mode fields
+    can be non-zero on them, whatever the rows' activations."""
+    out = {}
+    for u in m.use_cases:
+        pos = {eid: {f for f, v in tok["b"].items() if v > 0} for eid, tok in u.entries}
+        changed = True
+        while changed:
+            changed = False
+            for c in m.components.values():
+                inp = {p: [e.id for e in m.edges_into(c.id, p) if e.id in pos] for p in c.ins}
+                fields_at = {p: set().union(*[pos[e] for e in es]) if es else set() for p, es in inp.items()}
+                emit = {}
+                for p, es in inp.items():
+                    if not es:
+                        continue
+                    for qp in c.flow.get(p, []):
+                        emit.setdefault(qp, set())
+                        emit[qp] |= fields_at[p] if c.is_guard else (fields_at[p] & set(c.passes))
+                if not c.is_guard:
+                    for r in m.comp_rows(c.id):
+                        if _trigger_possible(m, c, r, inp, fields_at):
+                            for qp, d in r.then.items():
+                                emit.setdefault(qp, set())
+                                emit[qp] |= set(d)
+                else:
+                    fp = m.rows.get(f"fp.{c.id}")
+                    if fp is not None and inp.get("in"):
+                        emit.setdefault("out", set()).update(fp.then.get("out", {}))
+                for qp, fs in emit.items():
+                    for e in m.edges_from(c.id, qp):
+                        if e.id not in pos:
+                            pos[e.id] = set(fs)
+                            changed = True
+                        elif not fs <= pos[e.id]:
+                            pos[e.id] |= fs
+                            changed = True
+        out[u.id] = pos
+    return out
+
+
+def _trigger_possible(m, c, r, inp, fields_at):
+    if "*" in r.when:
+        return any(inp[p] for p in c.ins)
+    for p, pat in r.when.items():
+        if not inp.get(p):
+            return False
+        for f in pat.get("modes", {}):
+            if not set(m.family(f)) & fields_at[p]:
+                return False
+    return True
+
+
 def _creates_message(m, r, port, ucs=None):
-    """A row creates a message if it can emit on an edge that, in some use case, no normal message
-    uses: then whether the edge is used at all depends on the row (and on guards that drop)."""
+    """A row creates a message if, in some use case where it can fire, it emits on an edge no normal
+    message uses: then whether that edge is used at all depends on the row (and on guards that drop)."""
     if ucs is None:
         ucs = [u.id for u in m.use_cases]
     if not hasattr(m, "_normal_edges"):
         m._normal_edges = normal_edges(m)
+        m._possible = possible(m)
+    c = m.components[r.comp]
     es = [e.id for e in m.edges_from(r.comp, port)]
-    return any(not set(es) <= m._normal_edges[u] for u in ucs)
+    for u in ucs:
+        pos = m._possible[u]
+        inp = {p: [e.id for e in m.edges_into(c.id, p) if e.id in pos] for p in c.ins}
+        fields_at = {p: set().union(*[pos[e] for e in ids]) if ids else set() for p, ids in inp.items()}
+        if _trigger_possible(m, c, r, inp, fields_at) and not set(es) <= m._normal_edges[u]:
+            return True
+    return False
 
 
 def downstream_guards(m, comp, port):
@@ -251,7 +313,7 @@ def cone_of_cell(m, cell):
     comps = sorted(U)
     return Cone(cells=[cell], obs=cell.obs, components=comps, edges=sub_edges, use_cases=ucs,
                 rows=rows, always=always, fields=fields, cell_rows={cell.id: rows},
-                cell_fields={cell.id: fields}, rel=set(rel))
+                cell_fields={cell.id: fields}, rel=set(rel), cell_rel={cell.id: set(rel)})
 
 
 def cones(m, cell_list, merge_limit=10):
@@ -274,13 +336,15 @@ def cones(m, cell_list, merge_limit=10):
                     g.cells += k.cells
                     g.cell_rows.update(k.cell_rows)
                     g.cell_fields.update(k.cell_fields)
+                    g.cell_rel.update(k.cell_rel)
                     g.rel |= k.rel
                     break
             else:
                 groups.append(Cone(cells=list(k.cells), obs=k.obs, components=k.components, edges=k.edges,
                                    use_cases=k.use_cases, rows=list(k.rows), always=list(k.always),
                                    fields=list(k.fields), cell_rows=dict(k.cell_rows),
-                                   cell_fields=dict(k.cell_fields), rel=set(k.rel)))
+                                   cell_fields=dict(k.cell_fields), rel=set(k.rel),
+                                   cell_rel=dict(k.cell_rel)))
         out += groups
     return out
 

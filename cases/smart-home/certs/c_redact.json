@@ -1,0 +1,11 @@
+{
+  "id": "c_redact",
+  "component": "redact",
+  "targets": {"conf": "never"},
+  "version": "redact-v1",
+  "issuer": "privacy office",
+  "date": "2026-10-28",
+  "method": "the context payload is built from an allowlist of fields; occupancy and household members are not on it; review + schema test",
+  "scope": ["voice", "calendar", "offline"],
+  "evidence": "repo://hub/egress/context-allowlist.json"
+}

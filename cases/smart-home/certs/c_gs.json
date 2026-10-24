@@ -1,0 +1,11 @@
+{
+  "id": "c_gs",
+  "component": "gs",
+  "targets": {"taint": "never"},
+  "version": "skill-schema-1",
+  "issuer": "integrations team",
+  "date": "2026-10-07",
+  "method": "schema review: every field of a skill call is an enumeration or a number; no free text reaches a skill",
+  "scope": ["voice", "calendar"],
+  "evidence": "repo://hub/skills/schema-1.json"
+}

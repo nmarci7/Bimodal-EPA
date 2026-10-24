@@ -1,0 +1,16 @@
+# The pull-request diff scanner -> o_pr (what reached the public repository).
+id: pr-diff-scan-v1
+files: ["pr-diff-scan-*.json"]
+format: json
+items: items
+use_case: {field: trigger, map: {issue: issue}}
+date: {field: opened}
+id_field: pr
+id_prefix: pr
+rules:
+  - label: private-repository content in a public pull request
+    when: {field: private_content, eq: true}
+    witness: {o_pr: {conf: [private, private]}}
+  - label: public content only
+    when: {field: private_content, eq: false}
+    witness: {o_pr: {conf: [public, public]}}

@@ -1,0 +1,11 @@
+{
+  "id": "c_gs2",
+  "component": "gs",
+  "targets": {"taint": "never", "conf": "never"},
+  "version": "skill-schema-2",
+  "issuer": "integrations team",
+  "date": "2026-10-28",
+  "method": "schema review: enumerations and numbers only; the occupancy field removed from every skill schema",
+  "scope": ["voice", "calendar"],
+  "evidence": "repo://hub/skills/schema-2.json"
+}

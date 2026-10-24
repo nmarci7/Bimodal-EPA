@@ -1,0 +1,18 @@
+# The standing-instruction audit trail -> o_memory (what the planner reads back from memory).
+id: memory-audit-v1
+files: ["memory-audit-*.jsonl"]
+format: jsonl
+use_case: {field: trigger, map: {voice: voice, calendar: calendar}}
+date: {field: ts}
+id_field: entry_id
+id_prefix: mem
+rules:
+  - label: an instruction planted by feed content
+    when: {field: planted, eq: true}
+    witness: {o_memory: {modes: {instr: [1, 10]}, taint: true}}
+  - label: written from feed content, not an instruction
+    when: {field: source, regex: "^(calendar|delivery):"}
+    witness: {o_memory: {modes: {instr: [0, 0]}, taint: true}}
+  - label: written from the household's own request
+    when: {field: source, regex: "^user:"}
+    witness: {o_memory: {modes: {instr: [0, 0]}, taint: false}}

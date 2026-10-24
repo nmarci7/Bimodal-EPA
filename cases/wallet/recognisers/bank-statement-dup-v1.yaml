@@ -1,0 +1,17 @@
+# The same statement export, read for duplicates: one witness per invoice reference.
+id: bank-statement-dup-v1
+files: ["duna-bank-*.csv"]
+format: csv
+use_case: pay
+date: {field: booking_date}
+match: {field: channel, eq: delegate-agent}
+group_by: remittance_information
+aggregate: true
+id_prefix: dup
+rules:
+  - label: the same invoice paid more than once
+    when: {field: _count, ge: 2}
+    witness: {o_statement: {modes: {dup: [1, 10]}}}
+  - label: the invoice paid once
+    when: {field: _count, le: 1}
+    witness: {o_statement: {modes: {dup: [0, 0]}}}

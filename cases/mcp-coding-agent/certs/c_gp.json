@@ -1,0 +1,11 @@
+{
+  "id": "c_gp",
+  "component": "gp",
+  "targets": {"escape": "never"},
+  "version": "paths-v1",
+  "issuer": "platform team",
+  "date": "2026-10-10",
+  "method": "exhaustive path tests: writes outside src/, docs/ and tests/ rejected, including symlinks, .github/, the agent's own config and package.json scripts",
+  "scope": ["issue"],
+  "evidence": "ci://agent/paths/2026-10-10"
+}
