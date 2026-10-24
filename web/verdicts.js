@@ -127,7 +127,7 @@ export class VerdictsView {
           : `Candidates · ${live.length} of ${r.candidates.length} remain`),
         h('p', { class: 'hint' }, r.remaining_only
           ? `Each box is one assignment of never (N), sometimes (S) or always (A) to the open rows that the evidence leaves, with the status it gives the failure here. The space is too large to draw the struck ones; clingo lists the remaining.${r.suspended && r.suspended.length ? ` Suspended: ${r.suspended.join(', ')}.` : ''}`
-          : 'Each box is one assignment of never (N), sometimes (S) or always (A) to the open rows, with the status it gives the failure here. A dashed box is struck by the evidence named under it. LLM rows and learned guards have no N.'));
+          : `Each box is one assignment of never (N), sometimes (S) or always (A) to the open rows, with the status it gives the failure here. A dashed box is struck by the evidence named under it. LLM rows and learned guards have no N.${r.suspended && r.suspended.length ? ` Suspended, so striking nothing: ${r.suspended.join(', ')}.` : ''}`));
       const grid = h('div', { class: 'rooms' });
       const show = r.candidates.slice().sort((a, b) => (a.struck_by.length > 0) - (b.struck_by.length > 0)).slice(0, 120);
       for (const x of show) {

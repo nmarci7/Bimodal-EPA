@@ -69,5 +69,8 @@ def test_analysis_streams_and_reports(client):
     assert {"model", "cells", "cone", "verdict", "done"} <= steps
     pos = client.get(f"/api/analyses/{aid}/cells/commission@o_statement/possibilities").json()
     assert pos["remaining_only"] and pos["candidates"]
+    oom = client.get(f"/api/analyses/{aid}/cells/oom@o_statement/possibilities").json()
+    assert oom["suspended"] == ["c_gm"]
+    assert sorted(c["status"] for c in oom["candidates"] if not c["struck_by"]) == ["S", "S", "S"]
     md = client.get(f"/api/analyses/{aid}/report.md").text
     assert "oom" in md

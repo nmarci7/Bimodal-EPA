@@ -32,6 +32,7 @@ stages:
     label: "Redesign: redact before the cloud, report device state only"
     note: >
       Model v2 adds a redaction guard on the context sent to the cloud and stops the hub from
-      reporting the plan's claims as device state. Only the changed cones are run again.
+      reporting the plan's claims as device state. Every cone passes through the changed hub, so
+      every cone is explored again; certificates of the old hub firmware go stale or on re-verify.
     model: model-v2.yaml
     certificates: [certs/c_redact.json, certs/c_gs2.json, certs/c_hub_failover_52.json]

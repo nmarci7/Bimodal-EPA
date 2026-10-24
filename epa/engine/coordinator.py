@@ -241,8 +241,10 @@ class Engine:
     def analyse(self, evidence=None, only_cells=None, rank=True):
         m = self.m
         evidence = evidence or {}
-        self.emit("model", f"model {m.name}: {len(m.components)} components, {len(m.edges)} edges, "
-                           f"{len(m.rows)} rows, {len(m.obs)} observation points, {len(m.use_cases)} use cases")
+        n_g = sum(1 for c in m.components.values() if c.is_guard)
+        self.emit("model", f"model {m.name}: {len(m.components) - n_g} components, {n_g} guards, "
+                           f"{len(m.edges)} edge segments, {len(m.rows)} rows, {len(m.obs)} observation point(s), "
+                           f"{len(m.use_cases)} use case(s)")
         reg = self.register(evidence)
         certs_on = {c["id"] for c in reg["certificates"] if c["state"] == "in force"}
         wits_on = {w["id"] for w in reg["witnesses"] if w["state"] == "in force"}
@@ -372,15 +374,16 @@ class Engine:
         prob, runs, proj = self.problem(cone, cell, inf, wit)
         rows = [r for r in cone.cell_rows[cell_id] if m.rows[r].open]
         space = candidate_space(m, rows)
+        # certificates in a minimal conflict are suspended, as in the verdict
+        on = {c for c in prob.cert_ids}
+        won = set(prob.wit_ids)
+        suspended = set()
+        if not prob.satisfiable(on, won):
+            conf = prob.minimal_conflicts(on, won)
+            suspended = set().union(*conf) if conf else set()
+            on -= suspended
         if space > cap:
             # too many to enumerate in Python: list the remaining ones with clingo instead
-            on = {c for c in prob.cert_ids}
-            won = set(prob.wit_ids)
-            suspended = set()
-            if not prob.satisfiable(on, won):
-                conf = prob.minimal_conflicts(on, won)
-                suspended = set().union(*conf) if conf else set()
-                on -= suspended
             listed = prob.listing(on, won, cap=240)
             return {"cell": cell_id, "rows": rows, "runs": len(runs), "space": space, "remaining_only": True,
                     "suspended": sorted(suspended),
@@ -402,6 +405,8 @@ class Engine:
             st = "x" if not use else ("N" if not reach else ("A" if all(r["reaches"] for r in use) else "S"))
             struck = []
             for c in inf:
+                if c["id"] in suspended:
+                    continue
                 for q, x in c["resolved"].items():
                     if q in act and act[q] != x:
                         struck.append(c["id"])
@@ -410,7 +415,8 @@ class Engine:
                 if not any(wid in r["matches"] for r in adm):
                     struck.append(wid)
             out.append({"act": act, "status": st, "struck_by": struck})
-        return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs), "space": space}
+        return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs), "space": space,
+                "suspended": sorted(suspended)}
 
     def trace_of(self, cell_id, uc, fire):
         m = self.m
