@@ -187,6 +187,48 @@ def evidence_logs(body: LogUpload):
     return {"recognisers": [r["id"] for r, _, _ in found], "witnesses": ws_all, "unmatched": unmatched}
 
 
+@app.get("/api/cases/{case}/bundle")
+def case_bundle(case: str):
+    """Everything the UI needs to work on a case: the model text, the recognisers, the deployment
+    manifest and lookup files (loaded silently), and the evidence files the analyst can upload."""
+    import glob
+    from ..engine.scenario import load_case
+    d = _case_dir(case)
+    meta = load_case(d)
+
+    def rel(p):
+        return os.path.relpath(p, d)
+
+    recs = {}
+    for pat in meta.get("recognisers", ["recognisers/*.yaml"]):
+        for p in sorted(glob.glob(os.path.join(d, pat))):
+            recs[rel(p)] = open(p, encoding="utf-8").read()
+    lookups = {}
+    for pat in meta.get("lookup_files", ["data/*.csv", "data/*.json"]):
+        for p in sorted(glob.glob(os.path.join(d, pat))):
+            if os.path.basename(p) != os.path.basename(meta.get("deployments", "")):
+                lookups[os.path.basename(p)] = open(p, encoding="utf-8").read()
+    deps = open(os.path.join(d, meta["deployments"]), encoding="utf-8").read() if meta.get("deployments") else None
+    logs, certs, models, intake = [], [], [], []
+    for base, _, names in os.walk(d):
+        for n in sorted(names):
+            p = os.path.join(base, n)
+            r = rel(p)
+            if r.startswith("certs/"):
+                certs.append(r)
+            elif r.startswith("intake/"):
+                intake.append(r)
+            elif r.startswith("data/") and os.path.basename(p) not in lookups and r != meta.get("deployments"):
+                logs.append(r)
+            elif r.endswith((".yaml", ".yml")) and r.startswith("model"):
+                models.append(r)
+    return {"id": case, "meta": meta, "model_text": open(os.path.join(d, meta.get("model", "model.yaml")),
+                                                         encoding="utf-8").read(),
+            "models": sorted(models), "recognisers": recs, "deployments": deps, "lookups": lookups,
+            "logs": sorted(logs), "certificates": sorted(certs), "intake": sorted(intake),
+            "stages": meta.get("stages", [])}
+
+
 @app.get("/api/cases/{case}/stages/{stage}")
 def case_stage(case: str, stage: str):
     """The model and the evidence of one scenario stage, as the analyst would have assembled them."""
@@ -211,11 +253,24 @@ def evidence_certs(body: CertUpload):
     return {"certificates": out}
 
 
+class EvidenceReq(BaseModel):
+    doc: dict
+    evidence: dict = {}
+
+
+@app.post("/api/evidence/register")
+def evidence_register(body: EvidenceReq):
+    """The evidence register against the current model: every certificate and witness with its state."""
+    m = _model(body.doc)
+    return Engine(m, WORK, cache=CACHE).register(body.evidence)
+
+
 class Boot(BaseModel):
     traces: str
     tools: str | None = None
     answers: str | None = None
     name: str = "bootstrapped"
+    server: str = ""
     server_trust: bool = False
 
 
@@ -223,7 +278,12 @@ class Boot(BaseModel):
 def do_bootstrap(body: Boot):
     skel = bootstrap.skeleton_from_traces(bootstrap.read_spans(body.traces))
     if body.tools:
-        skel = bootstrap.skeleton_from_mcp(mcp_import.read_tools_list(body.tools), skel, server_trust=body.server_trust)
+        server = body.server
+        if server not in skel["components"]:
+            # the traced component that stands for the MCP server: the one named after it
+            server = next((c for c in skel["components"] if "mcp" in c.lower()), server)
+        skel = bootstrap.skeleton_from_mcp(mcp_import.read_tools_list(body.tools), skel, server=server,
+                                           server_trust=body.server_trust)
     out = {"skeleton": skel, "questions": bootstrap.questionnaire(skel)}
     if body.answers:
         try:

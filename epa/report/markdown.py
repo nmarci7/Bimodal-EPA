@@ -25,6 +25,8 @@ def report(rep):
             rc = c["candidates"]
             if rc.get("remaining") is not None:
                 line += f" — {rc['remaining']} of {rc['space']} candidates remain"
+            elif rc.get("at_least"):
+                line += f" — more than {rc['at_least']} of {rc['space']} candidates remain"
             why = reason_line(c)
             if why:
                 line += f" — {why}"

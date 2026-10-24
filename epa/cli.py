@@ -39,8 +39,10 @@ def _print(rep, fmt):
         for c in rep["cells"]:
             st = ",".join(c["statuses"])
             rem = c["candidates"].get("remaining")
+            if rem is None and c["candidates"].get("at_least"):
+                rem = f">{c['candidates']['at_least']}"
             print(f"{c['cell']:<28} {c['verdict']:<14} {('{' + st + '}') if st else '':<10} "
-                  f"{'' if rem is None else f'{rem}/{c['candidates']['space']}':>10}  {explain.reason_line(c)}")
+                  f"{'' if rem is None else f'{rem}/{c['candidates']['space']}':>12}  {explain.reason_line(c)}")
         if rep.get("ranking"):
             print("\ncertify next:")
             for a in rep["ranking"][:8]:
@@ -74,6 +76,7 @@ def main(argv=None):
     s.add_argument("--traces", required=True)
     s.add_argument("--tools")
     s.add_argument("--answers")
+    s.add_argument("--server", default="mcp", help="the component the traces show for the MCP server")
     s.add_argument("--name", default="bootstrapped")
     a = ap.parse_args(argv)
 
@@ -131,7 +134,7 @@ def main(argv=None):
         from .intake import bootstrap, mcp_import
         skel = bootstrap.skeleton_from_traces(bootstrap.read_spans(open(a.traces).read()))
         if a.tools:
-            skel = bootstrap.skeleton_from_mcp(mcp_import.read_tools_list(a.tools), skel)
+            skel = bootstrap.skeleton_from_mcp(mcp_import.read_tools_list(a.tools), skel, server=a.server)
         if not a.answers:
             for q in bootstrap.questionnaire(skel):
                 print(f"- {q['key']}: {q['ask']}")

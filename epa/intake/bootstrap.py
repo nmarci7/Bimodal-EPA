@@ -39,7 +39,7 @@ def skeleton_from_traces(spans, use_case_attr="app.use_case"):
         agent = ra.get("gen_ai.agent.name", "agent")
         uc = ra.get(use_case_attr, "default")
         ucs[uc] += 1
-        steps = []
+        comp_of = {}
         for s in sorted(ss, key=lambda s: s["start"]):
             a = s.get("attributes", {})
             op = a.get("gen_ai.operation.name")
@@ -55,11 +55,23 @@ def skeleton_from_traces(spans, use_case_attr="app.use_case"):
                 name = a["epa.component"]
                 comps.setdefault(name, {"id": name, "kind": a.get("epa.kind", "deterministic"),
                                         "version": a.get("service.version"), "source": "traces: epa.component"})
-            if name and (not steps or steps[-1] != name):
-                steps.append(name)
-        if steps:
-            entry_of.setdefault(uc, steps[0])
-        chain = [f"sys.{uc}_in"] + steps
+            if name:
+                comp_of[s["span_id"]] = name
+        # a span called by a component span is fed by it (parent -> child); spans directly under the
+        # root follow one another in time (each step's output feeds the next)
+        top = []
+        for s in sorted(ss, key=lambda s: s["start"]):
+            name = comp_of.get(s["span_id"])
+            if not name:
+                continue
+            parent = comp_of.get(s.get("parent_span_id"))
+            if parent and parent != name:
+                edges[(parent, name)] += 1
+            elif not parent and (not top or top[-1] != name):
+                top.append(name)
+        if top:
+            entry_of.setdefault(uc, top[0])
+        chain = [f"sys.{uc}_in"] + top
         for x, y in zip(chain, chain[1:]):
             edges[(x, y)] += 1
     n = len(by_trace)
@@ -72,13 +84,28 @@ def skeleton_from_traces(spans, use_case_attr="app.use_case"):
 
 
 def skeleton_from_mcp(tools, skel, server="mcp", server_trust=False):
+    """If the traces already show the MCP server as one component (`server`), its tools become that
+    component's operations (with their schema hashes as its version); otherwise each tool becomes a
+    tool component of its own. If no traced component has that name, one named after MCP is taken."""
+    if server not in skel["components"]:
+        server = next((c for c in skel["components"] if "mcp" in c.lower()), server)
     patch = mcp_import.tools_to_patch(tools, server=server, server_trust=server_trust)
-    for c in patch["components"]:
-        cur = skel["components"].setdefault(c["id"], {"id": c["id"], "kind": "tool", "source": ""})
-        cur["source"] = (cur.get("source", "") + " + mcp tools/list").strip(" +")
-        cur["schema_fields"] = c["schema_fields"]
-        cur["version"] = cur.get("version") or c["version"]
-        cur["trusted"] = c["trusted"]
+    if server in skel["components"]:
+        c = skel["components"][server]
+        c["tools"] = [{"name": t["name"], "hash": mcp_import.tool_hash(t),
+                       "hints": sorted(k for k, v in (t.get("annotations") or {}).items() if v is True)}
+                      for t in tools]
+        c["version"] = c.get("version") or "tools:" + mcp_import.tool_hash({"description": "", "inputSchema": [
+            mcp_import.tool_hash(t) for t in tools]})
+        c["source"] = (c.get("source", "") + " + mcp tools/list").strip(" +")
+        c["trusted"] = bool(server_trust)
+    else:
+        for c in patch["components"]:
+            cur = skel["components"].setdefault(c["id"], {"id": c["id"], "kind": "tool", "source": ""})
+            cur["source"] = (cur.get("source", "") + " + mcp tools/list").strip(" +")
+            cur["schema_fields"] = c["schema_fields"]
+            cur["version"] = cur.get("version") or c["version"]
+            cur["trusted"] = c["trusted"]
     skel["suggestions"] = patch["suggestions"]
     return skel
 
@@ -86,8 +113,9 @@ def skeleton_from_mcp(tools, skel, server="mcp", server_trust=False):
 def questionnaire(skel):
     q = [{"key": "modes", "ask": "Which failure modes should be analysed? (e.g. omission, commission with sub-kinds, late, value)"},
          {"key": "data_flow_confirmed", "ask": "Does each call's output feed the next call, in the order the traces show?"}]
+    traced = {e["from"] for e in skel["edges"]} | {e["to"] for e in skel["edges"]}
     for c in skel["components"].values():
-        if c["kind"] == "tool":
+        if c["kind"] == "tool" and c["id"] in traced:
             q.append({"key": f"guards.{c['id']}", "ask": f"Is {c['id']} a guard? If so: what it catches (mode and threshold, taint, confidentiality, authority), whether that is decidable from the edge, and its version."})
             q.append({"key": "outside", "ask": f"Is {c['id']} outside the system (a sink such as a bank, a public repository, a device)?"})
     q.append({"key": "observation_points", "ask": "Where do logs exist (which edge), what do they record, and what is tolerated there?"})

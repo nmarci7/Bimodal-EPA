@@ -44,7 +44,7 @@ components:
       - {port: request, mode: commission, reason: "the agent's commissions in this model are named: out of mandate, duplicate, over the limit"}
       - {port: request, mode: late, reason: "lateness is modelled at the bank, whose confirmation can be slow"}
       - {port: request, mode: value, reason: "a wrong amount is modelled as the over-the-limit sub-kind"}
-    pos: {x: 90, y: 300}
+    pos: {x: 70, y: 320}
 
   - id: mandate
     kind: store
@@ -58,7 +58,7 @@ components:
         label: the stored mandate lags behind a revocation
         when: {grant: any}
         then: {record: {late: const 6}}
-    pos: {x: 420, y: 80}
+    pos: {x: 430, y: 64}
 
   - id: wallet
     kind: deterministic
@@ -76,7 +76,7 @@ components:
         label: signs under a mandate whose revocation it has not seen
         when: {mandate: {late: 1}}
         then: {instruction: {revoked: const 9}}
-    pos: {x: 420, y: 300}
+    pos: {x: 430, y: 320}
 
   - id: bank
     kind: external
@@ -92,7 +92,7 @@ components:
         label: confirms a payment slowly
         when: {instruction: any}
         then: {update: {late: const 4}}
-    pos: {x: 760, y: 300}
+    pos: {x: 860, y: 320}
 
   - id: feed
     kind: deterministic
@@ -102,7 +102,7 @@ components:
     out: [view]
     pass: [late]
     clearance: personal
-    pos: {x: 420, y: 560}
+    pos: {x: 430, y: 600}
 
 guards:
   - {id: gr, label: rev. sync, edge: e_mandate, version: revsync-1,
@@ -152,3 +152,11 @@ observation_points:
 claims:
   - {cell: oom@o_statement, verdict: guarantee, by: wallet team, note: "the mandate check rules out out-of-mandate payments"}
   - {cell: dup@o_statement, verdict: guarantee, by: payments platform team}
+
+# canvas layout of the system ports (the workbench reads it; the engine ignores it)
+layout:
+  sys:
+    principal: {x: 80, y: 70, dir: in}
+    invoice: {x: 80, y: 196, dir: in}
+    rp: {x: 1150, y: 82, dir: out}
+    payee: {x: 1214, y: 326, dir: out}

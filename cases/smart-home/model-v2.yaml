@@ -37,7 +37,7 @@ components:
       - {port: write, mode: omission, reason: "a lost memory write loses a convenience, not a function"}
       - {port: write, mode: late, reason: "standing instructions are not time-critical"}
       - {port: write, mode: value, reason: "memory writes are assessed for planted instructions only"}
-    pos: {x: 470, y: 70}
+    pos: {x: 450, y: 70}
 
   - id: memory
     kind: store
@@ -46,7 +46,7 @@ components:
     in: [write]
     out: [read]
     clearance: presence
-    pos: {x: 900, y: 70}
+    pos: {x: 1010, y: 84}
 
   - id: hub
     kind: deterministic
@@ -64,7 +64,7 @@ components:
     clearance: presence
     rows:
       - {id: hub_drop, label: a missing plan becomes a missing command (no fallback to the local path), when: {plan: {omission: 1}}, then: {command: {omission: keep}}}
-    pos: {x: 470, y: 330}
+    pos: {x: 450, y: 336}
 
   - id: devices
     kind: external
@@ -76,7 +76,7 @@ components:
     clearance: presence
     rows:
       - {id: d_stale, label: reports its state late, when: {command: any}, then: {state: {late: const 4}}}
-    pos: {x: 960, y: 330}
+    pos: {x: 980, y: 336}
 
   - id: local
     kind: llm
@@ -92,7 +92,7 @@ components:
       - {port: cmd, mode: omission, reason: "the local path is the fallback; its silence is the cloud path's availability problem"}
       - {port: cmd, mode: commission, reason: "the local model's commissions are modelled as unsafe commands"}
       - {port: cmd, mode: late, reason: "local inference, no network round trip"}
-    pos: {x: 140, y: 590}
+    pos: {x: 70, y: 606}
 
 guards:
   - {id: redact, label: redact, edge: e_context, version: redact-v1,
@@ -155,3 +155,13 @@ observation_points:
 claims:
   - {cell: unsafe@o_actuator, verdict: guarantee, by: hub firmware team, note: "no unsafe actuation reaches a device"}
   - {cell: conf@o_egress, verdict: guarantee, by: privacy office, note: "presence data never leaves the home"}
+
+# canvas layout of the system ports (the workbench reads it; the engine ignores it)
+layout:
+  sys:
+    feeds: {x: 80, y: 76, dir: in}
+    voice: {x: 230, y: 214, dir: in}
+    sensors: {x: 990, y: 520, dir: in}
+    local_voice: {x: 80, y: 770, dir: in}
+    user: {x: 80, y: 342, dir: out}
+    skill: {x: 462, y: 612, dir: out}

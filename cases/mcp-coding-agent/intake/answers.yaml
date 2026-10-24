@@ -1,0 +1,31 @@
+# The analyst's answers to the questions the bootstrap printed for the MCP coding agent.
+# Everything the traces and the tools list cannot know.
+modes:
+  - omission
+  - commission: [drift]
+  - value
+lattices:
+  confidentiality: [public, private]
+  authority: [none, contributor, maintainer]
+data_flow_confirmed: true            # the runner's output feeds the checks, the checks feed the tools
+guards:
+  toolpin:
+    id: gt
+    label: tool list
+    version: toolpin-v1
+    targets: [{mode: drift, threshold: 1, decidable: true}]
+  allowlist:
+    id: ga
+    label: allowlist
+    version: allowlist-v2
+    closed_output: true
+    targets: [{taint: true, decidable: true}]
+outside: [github_mcp, shell]         # the MCP server and the shell are where the agent acts on the world
+components:
+  planner: {authority: maintainer}
+  runner: {authority: maintainer, rows: [{id: r_drift, when: {"*": any}, then: {out: {drift: const 7}}}]}
+use_case_tokens:
+  issue: {taint: true, auth: none, conf: public}
+observation_points:
+  - {id: o_mcp, into: github_mcp, label: MCP call log, tolerate: {drift: 1}, requires: maintainer}
+  - {id: o_process, into: shell, label: process audit, taint: reject, requires: maintainer}

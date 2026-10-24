@@ -29,7 +29,8 @@ def find_jar():
 def java_ok():
     try:
         out = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=20)
-        return out.returncode == 0, (out.stderr or out.stdout).splitlines()[0] if (out.stderr or out.stdout) else ""
+        lines = [ln for ln in (out.stderr or out.stdout or "").splitlines() if not ln.startswith("Picked up")]
+        return out.returncode == 0, lines[0] if lines else ""
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 

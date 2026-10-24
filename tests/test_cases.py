@@ -70,3 +70,13 @@ def test_smart_home_ranking_puts_the_interlock_first_and_the_judge_at_zero(work)
     assert "gi" in first["action"] and first["key"] == 8
     judge = next(a for a in rep["ranking"] if a["action"] == ["gj"])
     assert judge["key"] == 0 and "learned" in judge["note"]
+
+
+def test_conflict_is_found_on_a_cold_cache(tmp_path):
+    """With only the runs the certificates allow in the cache, a witness the certificates rule out
+    must still lead to a conflict set, not to 'the model lacks a path'."""
+    doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "wallet"), "S2")
+    rep = Engine(load_model(doc), str(tmp_path)).analyse(ev, only_cells=["commission@o_statement"], rank=False)
+    c = rep["cells"][0]
+    assert not c["lacks_path"]
+    assert c["verdict"] == "unchecked" and c["suspended"] == ["c_gm"]

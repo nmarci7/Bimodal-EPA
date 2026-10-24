@@ -31,6 +31,9 @@ from ..translate import to_tla
 from .cache import RunCache, covers
 
 
+COUNT_CAP = 5000   # remaining candidates are counted up to this many
+
+
 class Engine:
     def __init__(self, model, workroot, schedule="rounds", on_event=None, cache=None):
         self.m = model
@@ -140,13 +143,15 @@ class Engine:
         b = prob.brave(on, won)
         conflicts, suspended, lacks_path = [], set(), False
         if b is None:
+            # the runs explored so far may be only those the certificates allow: explore every
+            # firing choice before deciding whether the witnesses or the certificates are at fault
+            self.ensure(cone, [{}])
+            prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
             if not prob.satisfiable(set(), won):
                 lacks_path = True
                 self.emit("conflict", f"{cell.id}: the witnesses alone leave no candidate - the model lacks a path",
                           cell=cell.id)
             else:
-                self.ensure(cone, [{}])
-                prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
                 conflicts = prob.minimal_conflicts(on, won)
                 suspended = set().union(*conflicts) if conflicts else set()
                 self.emit("conflict", f"{cell.id}: evidence in conflict; minimal sets "
@@ -166,8 +171,12 @@ class Engine:
             "witness_projection": {w: p for w, (p, _) in proj.items()},
         }
         space = candidate_space(m, rows)
-        res["candidates"] = {"space": space,
-                             "remaining": prob.count(on, won) if (b and space <= 20000) else (None if b else 0)}
+        if b:
+            n = prob.count(on, won, cap=COUNT_CAP + 1)
+            res["candidates"] = {"space": space, "remaining": n if n <= COUNT_CAP else None,
+                                 "at_least": None if n <= COUNT_CAP else COUNT_CAP}
+        else:
+            res["candidates"] = {"space": space, "remaining": 0, "at_least": None}
         res["severity"] = max([r["sev"] for r in runs] or [0])
         # root causes: minimal sets of firing rows behind reaching runs some remaining candidate admits
         if b:
@@ -362,6 +371,21 @@ class Engine:
         wit = [w for w in reg["witnesses"] if w["state"] == "in force"]
         prob, runs, proj = self.problem(cone, cell, inf, wit)
         rows = [r for r in cone.cell_rows[cell_id] if m.rows[r].open]
+        space = candidate_space(m, rows)
+        if space > cap:
+            # too many to enumerate in Python: list the remaining ones with clingo instead
+            on = {c for c in prob.cert_ids}
+            won = set(prob.wit_ids)
+            suspended = set()
+            if not prob.satisfiable(on, won):
+                conf = prob.minimal_conflicts(on, won)
+                suspended = set().union(*conf) if conf else set()
+                on -= suspended
+            listed = prob.listing(on, won, cap=240)
+            return {"cell": cell_id, "rows": rows, "runs": len(runs), "space": space, "remaining_only": True,
+                    "suspended": sorted(suspended),
+                    "candidates": [{**c, "act": {r: x for r, x in c["act"].items() if r in rows}, "struck_by": []}
+                                   for c in listed]}
         choices = []
         for r in rows:
             row = m.rows[r]
@@ -386,7 +410,7 @@ class Engine:
                 if not any(wid in r["matches"] for r in adm):
                     struck.append(wid)
             out.append({"act": act, "status": st, "struck_by": struck})
-        return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs)}
+        return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs), "space": space}
 
     def trace_of(self, cell_id, uc, fire):
         m = self.m

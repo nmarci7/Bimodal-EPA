@@ -32,7 +32,7 @@ components:
       - {port: plan, mode: omission, reason: "an omitted plan leaves the issue open; no harm path"}
       - {port: plan, mode: commission, reason: "the planner's commissions are modelled as path escapes; tool drift and compromised packages enter elsewhere"}
       - {port: plan, mode: late, reason: "timing is not assessed in this model"}
-    pos: {x: 450, y: 70}
+    pos: {x: 400, y: 70}
 
   - id: runner
     kind: deterministic
@@ -49,7 +49,7 @@ components:
       - {id: r_edit, label: applies the planned edits, activation: always, when: {plan: {escape: 1}}, then: {edits: {escape: keep}}}
       - {id: r_scripts, label: runs the workspace scripts the command invokes, activation: always, when: {scripts: {escape: 1}}, then: {cmd: {escape: keep}}}
       - {id: r_drift, label: calls a tool without re-checking its description, when: {plan: any}, then: {call: {drift: const 7}}}
-    pos: {x: 450, y: 330}
+    pos: {x: 400, y: 336}
 
   - id: workspace
     kind: store
@@ -59,7 +59,7 @@ components:
     out: [scripts, source]
     flow: {edits: [scripts, source], checkout: [scripts, source]}
     clearance: private
-    pos: {x: 800, y: 80}
+    pos: {x: 816, y: 70}
 
   - id: shell
     kind: tool
@@ -69,7 +69,7 @@ components:
     out: [outbound]
     flow: {cmd: [outbound], env: []}
     clearance: private
-    pos: {x: 840, y: 330}
+    pos: {x: 828, y: 336}
 
   - id: mcp
     kind: tool
@@ -80,7 +80,7 @@ components:
     out: [pr]
     flow: {call: [pr], repos: []}
     clearance: private
-    pos: {x: 450, y: 590}
+    pos: {x: 400, y: 606}
 
   - id: registry
     kind: external
@@ -90,7 +90,7 @@ components:
     out: [packages]
     rows:
       - {id: reg_bad, label: serves a compromised package version, when: {fetch: any}, then: {packages: {malicious: const 9}}}
-    pos: {x: 1170, y: 80}
+    pos: {x: 1166, y: 70}
 
   - id: ci
     kind: deterministic
@@ -100,7 +100,7 @@ components:
     out: [release]
     pass: all
     clearance: private
-    pos: {x: 1170, y: 330}
+    pos: {x: 1166, y: 336}
 
 guards:
   - {id: gp, label: paths, edge: e_edits, version: paths-v1, targets: [{mode: escape, threshold: 1, decidable: true}]}
@@ -153,3 +153,15 @@ observation_points:
 claims:
   - {cell: conf@o_pr, verdict: guarantee, by: platform team, note: "private code never reaches a public pull request"}
   - {cell: taint@o_process, verdict: guarantee, by: platform team, note: "untrusted text never reaches the shell"}
+
+# canvas layout of the system ports (the workbench reads it; the engine ignores it)
+layout:
+  sys:
+    issues: {x: 68, y: 76, dir: in}
+    checkout: {x: 828, y: -80, dir: in}
+    fetch: {x: 1178, y: -80, dir: in}
+    private_repos: {x: 412, y: 790, dir: in}
+    shell_env: {x: 1000, y: 486, dir: in}
+    public_repo: {x: 50, y: 612, dir: out}
+    network: {x: 840, y: 612, dir: out}
+    artefact: {x: 1178, y: 612, dir: out}
