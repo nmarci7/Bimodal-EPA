@@ -167,7 +167,7 @@ export class VerdictsView {
     const rk = rep.ranking || [];
     if (!rk.length) panel.appendChild(h('p', { class: 'hint' }, 'Nothing left to certify that would change a verdict.'));
     for (const a of rk.slice(0, 12)) {
-      panel.appendChild(h('div', { class: 'rank' }, h('span', { class: 'key' }, a.key), h('b', {}, a.action.join(' + ')),
+      panel.appendChild(h('div', { class: 'rank' }, h('span', { class: 'key' }, a.key), h('b', { title: a.action.join(' + ') }, a.action.map((gid) => { const g = (S.doc.guards || []).find((x) => x.id === gid); return g && g.label ? `${g.label} (${gid})` : gid; }).join(' + ')),
         h('span', { class: 'small' }, a.moved.length ? `moves ${a.moved.map((m) => m.cell).join(', ')}` : h('span', { class: 'muted' }, a.note))));
     }
     return panel;

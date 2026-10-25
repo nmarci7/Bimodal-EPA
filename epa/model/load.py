@@ -283,6 +283,11 @@ def validate(doc) -> list:
             for port, pat in (r.get("when") or {}).items():
                 if port != "*" and port not in c.get("in", []):
                     p.append(f"row {rid}: unknown input port {cid}.{port}")
+                if port == "*" and pat not in ("any", None, True):
+                    p.append(f"row {rid}: 'any input' takes only 'any message'; "
+                             f"name the input port to match a failure")
+                if port == "*" and len(r.get("when") or {}) > 1:
+                    p.append(f"row {rid}: 'any input' cannot be combined with named ports")
                 if isinstance(pat, dict):
                     for mname in pat:
                         if mname not in fields:
@@ -340,10 +345,17 @@ def validate(doc) -> list:
         for mname in (o.get("tolerate") or {}):
             if mname not in fields:
                 p.append(f"observation point {o.get('id')}: unknown mode {mname!r}")
-        if "clearance" in o and o["clearance"] not in conf:
-            p.append(f"observation point {o.get('id')}: unknown clearance {o['clearance']!r}")
-        if "requires" in o and o["requires"] not in auth:
-            p.append(f"observation point {o.get('id')}: unknown authority {o['requires']!r}")
+        into = next((e.get("to") for e in doc["edges"] if e.get("id") == o.get("edge")), None)
+        receiver = _parse_ref(into)[0] if _parse_ref(into) else None
+        for key, levels, what in (("clearance", conf, "clearance"), ("requires", auth, "authority")):
+            if key not in o:
+                continue
+            if o[key] == "receiver":
+                if receiver == "sys":
+                    p.append(f"observation point {o.get('id')}: its receiver is outside the model "
+                             f"({into}); name the {what} level instead of 'receiver'")
+            elif o[key] not in levels:
+                p.append(f"observation point {o.get('id')}: unknown {what} {o[key]!r}")
     sys_inputs = {_parse_ref(e["from"])[1] for e in doc["edges"]
                   if _parse_ref(e.get("from")) and _parse_ref(e["from"])[0] == "sys"}
     for u in doc.get("use_cases", []):
@@ -476,13 +488,18 @@ def normalise(doc) -> Model:
         seg_of[eid] = prev.id
 
     obs = {}
+    doc_edges = {e["id"]: e for e in doc["edges"]}
     for o in doc.get("observation_points", []):
         tol = {m: int(v) for m, v in (o.get("tolerate") or {}).items()}
+        # 'receiver': judge against the receiving component's own clearance / required authority
+        recv = comps.get(_parse_ref(doc_edges[o["edge"]]["to"])[0])
+        clr = o.get("clearance")
+        req = o.get("requires")
         obs[o["id"]] = ObsPoint(
             id=o["id"], edge=seg_of.get(o["edge"], o["edge"]), doc_edge=o["edge"], label=o.get("label", ""),
             log=o.get("log", ""), tolerate=tol, taint=o.get("taint", "accept"),
-            clearance=conf.index(o["clearance"]) if "clearance" in o else None,
-            requires=auth.index(o["requires"]) if "requires" in o else None)
+            clearance=None if clr is None else (recv.clearance if clr == "receiver" else conf.index(clr)),
+            requires=None if req is None else (recv.requires if req == "receiver" else auth.index(req)))
 
     ucs = []
     for u in doc.get("use_cases", []):

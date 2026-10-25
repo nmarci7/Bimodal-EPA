@@ -11,14 +11,26 @@ A certificate record (JSON):
 from __future__ import annotations
 
 import json
+import os
+
+import yaml
 
 WORD = {"never": "N", "sometimes": "S", "always": "A", "n": "N", "s": "S", "a": "A",
         "N": "N", "S": "S", "A": "A"}
 
 
 def load(src):
-    data = json.load(open(src)) if isinstance(src, str) and not src.lstrip().startswith(("{", "[")) else (
-        json.loads(src) if isinstance(src, str) else src)
+    """A path, JSON or YAML text, or parsed data: one certificate, a list, or {certificates: [...]}."""
+    data = src
+    if isinstance(src, str):
+        text = src
+        if "\n" not in src and src.endswith((".json", ".yaml", ".yml")) and os.path.exists(src):
+            with open(src, encoding="utf-8") as f:
+                text = f.read()
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = yaml.safe_load(text)
     if isinstance(data, dict) and "certificates" in data:
         data = data["certificates"]
     return data if isinstance(data, list) else [data]

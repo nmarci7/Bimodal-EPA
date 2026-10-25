@@ -3,6 +3,7 @@ import { h, clear, api, modal } from './lib.js';
 import { S, on } from './state.js';
 import { Canvas } from './canvas.js';
 import { Inspector } from './inspector.js';
+import { MapTable } from './maptable.js';
 
 const PALETTE = [
   ['Components', [
@@ -21,22 +22,30 @@ export class ModelView {
         h('div', { class: `pal ${cls}`, draggable: 'true', ondragstart: (e) => { e.dataTransfer.setData('text/plain', kind); e.dataTransfer.effectAllowed = 'copy'; } },
           kind === 'obs' ? eyeIcon() : null, label))));
     }
-    pal.appendChild(h('p', {}, 'Drag onto the canvas. Guards and observation points go onto an edge. Drag from the round handle on a component to another one to connect them; the ports are named for you and can be renamed in the inspector.'));
+    pal.appendChild(h('p', {}, 'Drag onto the canvas. Guards and observation points go onto an edge.'));
+    pal.appendChild(h('div', { class: 'legend' },
+      h('span', {}, h('i', { class: 'pdot in' }), 'input port'), h('span', {}, h('i', { class: 'pdot out' }), 'output port'),
+      h('p', {}, 'Wire a component by dragging from an output port onto an input port, or onto a component to give it a new input port. The + handle starts a new output port. Ports can be added, renamed and deleted in the inspector.')));
     this.badge = h('span', { class: 'badge' }, 'checking…');
     this.name = h('span', { class: 'mono small muted' });
     this.overlayBtn = h('button', { class: 'btn small', 'aria-pressed': 'true', onclick: () => { this.canvas.overlay = !this.canvas.overlay; this.overlayBtn.setAttribute('aria-pressed', String(this.canvas.overlay)); this.overlayBtn.textContent = this.canvas.overlay ? 'Verdicts on canvas: on' : 'Verdicts on canvas: off'; this.canvas.render(); } }, 'Verdicts on canvas: on');
     this.yamlBtn = h('button', { class: 'btn small', onclick: () => this.toggleYaml() }, 'Show YAML');
+    this.portBtn = h('button', { class: 'btn small', 'aria-pressed': 'true', onclick: () => { this.canvas.portNames = !this.canvas.portNames; this.portBtn.setAttribute('aria-pressed', String(this.canvas.portNames)); this.portBtn.textContent = this.canvas.portNames ? 'Port names: on' : 'Port names: off'; this.canvas.render(); } }, 'Port names: on');
+    this.mapBtn = h('button', { class: 'btn small', 'aria-pressed': 'true', title: 'the mapping table of the selected component or guard', onclick: () => { this.table.open = !this.table.open; this.syncMapBtn(); this.table.render(); } }, 'Mapping table: on');
     this.figBtn = h('button', { class: 'btn small', hidden: true, onclick: () => this.figure() }, 'Case figure');
     const bar = h('div', { class: 'canvas-bar' }, this.badge, this.name, h('span', { class: 'spacer' }),
-      this.figBtn, this.overlayBtn, h('button', { class: 'btn small', onclick: () => this.canvas.fit() }, 'Fit'), this.yamlBtn);
+      this.figBtn, this.portBtn, this.overlayBtn, this.mapBtn, h('button', { class: 'btn small', onclick: () => this.canvas.fit() }, 'Fit'), this.yamlBtn);
     const canvasHost = h('div', { class: 'canvas' });
     this.yaml = h('pre', { class: 'yaml-pane', hidden: true });
     this.foot = h('div', { class: 'canvas-foot' });
-    const wrap = h('div', { class: 'canvas-wrap' }, bar, canvasHost, this.yaml, this.foot);
+    const tableHost = h('section', { class: 'maptable', 'aria-label': 'Mapping table', hidden: true });
+    const wrap = h('div', { class: 'canvas-wrap' }, bar, canvasHost, tableHost, this.yaml, this.foot);
     const insp = h('aside', { class: 'inspector', 'aria-label': 'Inspector' });
     host.append(pal, wrap, insp);
     this.canvas = new Canvas(canvasHost);
     this.inspector = new Inspector(insp);
+    this.table = new MapTable(tableHost);
+    on('maptable:toggled', () => this.syncMapBtn());
     on('check', () => this.status());
     on('doc', () => { this.name.textContent = S.doc ? S.doc.name : ''; if (!this.yaml.hidden) this.refreshYaml(); });
     on('loaded', () => { this.name.textContent = S.doc.name; this.figBtn.hidden = !(S.bundle && S.bundle.meta && S.bundle.meta.figure); this.canvas.render(); requestAnimationFrame(() => this.canvas.fit()); });
@@ -63,6 +72,8 @@ export class ModelView {
       h('span', {}, `largest cone: ${maxc} candidates`),
       (ch.unmatched || []).length ? h('span', { style: 'color: var(--h-ink)' }, `${ch.unmatched.length} failure(s) absorbed without a row`) : null].filter(Boolean));
   }
+
+  syncMapBtn() { this.mapBtn.setAttribute('aria-pressed', String(this.table.open)); this.mapBtn.textContent = this.table.open ? 'Mapping table: on' : 'Mapping table: off'; }
 
   async refreshYaml() { this.yaml.textContent = await api('/api/model/yaml', { doc: S.doc }); }
   toggleYaml() {

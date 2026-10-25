@@ -106,51 +106,124 @@ export function addSysPort(dir, x, y) {
   changed({ type: 'sys', id: `sys:${name}` });
 }
 function uniquePort(list, base) { const t = new Set(list); return uniqueId(base, t); }
-export function connect(fromNode, toNode) {
+
+/** Connect two ends. An end is {node, port?}: a component (with an existing port, or none for a
+ *  new one) or a system port node 'sys:<name>'. Returns {ok, id} or {ok: false, why}. */
+export function connectPorts(from, to) {
   const d = S.doc;
-  if (fromNode === toNode) return null;
-  const taken = new Set(d.edges.map((e) => e.id));
-  let from, to;
-  const fsys = fromNode.startsWith('sys:'), tsys = toNode.startsWith('sys:');
-  if (fsys && tsys) return null;
+  if (!from || !to || !from.node || !to.node) return { ok: false, why: 'Drop onto a component, a port or a system output.' };
+  if (from.node === to.node) return { ok: false, why: 'A component cannot be wired to itself here; add a store or a loop component.' };
+  const fsys = from.node.startsWith('sys:'), tsys = to.node.startsWith('sys:');
+  if (fsys && tsys) return { ok: false, why: 'Two system ports cannot be wired directly.' };
+  let fromRef, toRef;
   if (fsys) {
-    const name = fromNode.slice(4);
-    if ((d.layout.sys[name] || {}).dir === 'out') return null;
-    from = `sys.${name}`;
+    const name = from.node.slice(4);
+    if ((d.layout.sys[name] || {}).dir === 'out' || sysPorts(d).outs.includes(name)) return { ok: false, why: 'A system output only receives.' };
+    fromRef = `sys.${name}`;
   } else {
-    const a = comp(d, fromNode);
-    const q = uniquePort(a.out, tsys ? toNode.slice(4) : `to_${toNode}`);
-    a.out.push(q);
-    if (a.flow) for (const p of a.in) { a.flow[p] = a.flow[p] || []; a.flow[p].push(q); }
-    from = `${a.id}.${q}`;
+    const a = comp(d, from.node);
+    let q = from.port;
+    if (!q) {
+      q = uniquePort(a.out, tsys ? to.node.slice(4) : `to_${to.node}`);
+      a.out.push(q);
+      if (a.flow) for (const p of a.in) { a.flow[p] = a.flow[p] || []; a.flow[p].push(q); }
+    }
+    fromRef = `${a.id}.${q}`;
   }
   if (tsys) {
-    const name = toNode.slice(4);
-    if ((d.layout.sys[name] || {}).dir === 'in') return null;
-    to = `sys.${name}`;
+    const name = to.node.slice(4);
+    if ((d.layout.sys[name] || {}).dir === 'in' || sysPorts(d).ins.includes(name)) return { ok: false, why: 'A system input only sends.' };
+    toRef = `sys.${name}`;
   } else {
-    const b = comp(d, toNode);
-    const p = uniquePort(b.in, fsys ? fromNode.slice(4) : `from_${fromNode}`);
-    b.in.push(p);
-    if (b.flow) b.flow[p] = b.out.slice();
-    to = `${b.id}.${p}`;
+    const b = comp(d, to.node);
+    let p = to.port;
+    if (!p) {
+      p = uniquePort(b.in, fsys ? from.node.slice(4) : `from_${from.node}`);
+      b.in.push(p);
+      if (b.flow) b.flow[p] = b.out.slice();
+    }
+    toRef = `${b.id}.${p}`;
   }
-  const id = uniqueId(`e_${fromNode.replace('sys:', '')}_${toNode.replace('sys:', '')}`, taken);
-  d.edges.push({ id, from, to, label: '' });
+  if (d.edges.some((e) => e.from === fromRef && e.to === toRef)) return { ok: false, why: 'These two ports are already wired.' };
+  const taken = new Set(d.edges.map((e) => e.id));
+  const id = uniqueId(`e_${from.node.replace('sys:', '')}_${to.node.replace('sys:', '')}`, taken);
+  d.edges.push({ id, from: fromRef, to: toRef, label: '' });
+  // the first wire out of a system input gives the model its first use case
+  if (fsys && !d.use_cases.length) d.use_cases.push({ id: 'uc1', label: '', entries: [{ port: from.node.slice(4), token: {} }] });
   changed({ type: 'edge', id });
-  return id;
+  return { ok: true, id };
 }
+export function connect(fromNode, toNode) { const r = connectPorts({ node: fromNode }, { node: toNode }); return r.ok ? r.id : null; }
+
+export function addPort(cid, side) {
+  const c = comp(S.doc, cid);
+  const name = uniquePort(c[side], side === 'in' ? 'in' : 'out');
+  c[side].push(name);
+  if (c.flow) { if (side === 'in') c.flow[name] = c.out.slice(); else for (const p of c.in) (c.flow[p] = c.flow[p] || []).push(name); }
+  changed({ type: 'port', id: `${cid}|${side}|${name}` });
+  return name;
+}
+export function portEdges(d, cid, side, name) { const ref = `${cid}.${name}`; return d.edges.filter((e) => (side === 'in' ? e.to : e.from) === ref); }
+export function removePort(cid, side, name) {
+  const d = S.doc, c = comp(d, cid);
+  const gone = portEdges(d, cid, side, name).map((e) => e.id);
+  dropEdges(gone);
+  c[side] = c[side].filter((p) => p !== name);
+  if (c.flow) { if (side === 'in') delete c.flow[name]; else for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].filter((q) => q !== name); }
+  c.rows = (c.rows || []).filter((r) => !(side === 'in' ? (r.when || {})[name] : (r.then || {})[name]));
+  for (const x of c.drop_defaults || []) if (side === 'out' && x.port === name) c.drop_defaults = c.drop_defaults.filter((y) => y !== x);
+  changed({ type: 'component', id: cid });
+}
+/** Re-attach one end of an edge to another port of the same component. */
+export function moveEdgeEnd(eid, end, port) {
+  const d = S.doc, e = edge(d, eid);
+  const [o] = parseRef(e[end]);
+  e[end] = `${o}.${port}`;
+  changed({ type: 'edge', id: eid });
+}
+
+// ---------------------------------------------------------------- summaries for the canvas
+const fmtLevel = (x) => x;
+export function targetText(t) {
+  if ('mode' in t) return `${t.mode} ≥ ${t.threshold || 1}`;
+  if ('taint' in t) return 'taint';
+  if ('conf' in t) return `conf > ${fmtLevel(t.conf)}`;
+  if ('auth' in t) return `auth < ${fmtLevel(t.auth)}`;
+  return '?';
+}
+export function guardSummary(d, g) {
+  const ts = g.targets || [];
+  if (!ts.length) return { empty: true, text: 'checks nothing yet', long: 'no target: add what it checks for' };
+  const parts = ts.map(targetText);
+  const text = parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ');
+  return { empty: false, text, long: `catches ${parts.join(', ')}${g.learned ? ' (learned: none can be certified never)' : ''}` };
+}
+export function obsSummary(d, o) {
+  const parts = Object.entries(o.tolerate || {}).map(([m, v]) => `${m}≥${v}`);
+  if (o.taint === 'reject') parts.push('taint');
+  if (o.clearance) parts.push(o.clearance === 'receiver' ? 'conf>clearance' : `conf>${o.clearance}`);
+  if (o.requires) parts.push(o.requires === 'receiver' ? 'auth<required' : `auth<${o.requires}`);
+  if (!parts.length) return { empty: true, text: 'judges nothing', long: 'nothing: tick the failures it judges' };
+  const text = parts.length > 2 ? `${parts.slice(0, 2).join(' · ')} +${parts.length - 2}` : parts.join(' · ');
+  return { empty: false, text, long: parts.join(', ') };
+}
+export function useCasesAt(d, port) { return (d.use_cases || []).filter((u) => (u.entries || [{ port: (u.entry || '').replace('sys.', '') }]).some((en) => en.port === port)); }
+
 export function addGuard(edgeId) {
   const d = S.doc;
   const id = uniqueId('g', allIds(d));
-  d.guards.push({ id, label: 'guard', edge: edgeId, targets: [] });
+  d.guards.push({ id, label: '', edge: edgeId, targets: [] });
   changed({ type: 'guard', id });
 }
 export function addObs(edgeId) {
   const d = S.doc;
   if (d.observation_points.find((o) => o.edge === edgeId)) return;
-  const id = uniqueId(`o_${edgeId.replace(/^e_/, '')}`, new Set(d.observation_points.map((o) => o.id)));
-  d.observation_points.push({ id, edge: edgeId, label: id, tolerate: {} });
+  const e = edge(d, edgeId);
+  const recv = e ? nodeIdOfRef(e.to).replace('sys:', '') : edgeId.replace(/^e_/, '');
+  const id = uniqueId(`o_${recv}`, new Set(d.observation_points.map((o) => o.id)));
+  // a toleration is total in the definition: every mode starts judged, accepting nothing
+  const tolerate = Object.fromEntries(topModes(d).map((m) => [m, 1]));
+  d.observation_points.push({ id, edge: edgeId, label: id, tolerate });
   changed({ type: 'obs', id });
 }
 export function removeSelection() {
@@ -173,18 +246,9 @@ export function removeSelection() {
   changed(null);
 }
 function dropEdges(ids) {
+  // ports belong to their component (Definition: Component), so removing an edge leaves them in
+  // place, unconnected, until the analyst deletes them or wires them again
   const d = S.doc, set = new Set(ids);
-  for (const e of d.edges.filter((x) => set.has(x.id))) {
-    for (const [ref, side] of [[e.from, 'out'], [e.to, 'in']]) {
-      const [o, p] = parseRef(ref);
-      const c = o !== 'sys' && comp(d, o);
-      if (c && d.edges.filter((x) => !set.has(x.id) && (side === 'out' ? x.from : x.to) === ref).length === 0) {
-        c[side] = c[side].filter((q) => q !== p);
-        if (c.flow) { if (side === 'in') delete c.flow[p]; else for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].filter((q) => q !== p); }
-        c.rows = (c.rows || []).filter((r) => !(side === 'in' ? (r.when || {})[p] : (r.then || {})[p]));
-      }
-    }
-  }
   d.edges = d.edges.filter((e) => !set.has(e.id));
   d.guards = d.guards.filter((g) => !set.has(g.edge));
   d.observation_points = d.observation_points.filter((o) => !set.has(o.edge));

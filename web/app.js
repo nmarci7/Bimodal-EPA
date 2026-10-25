@@ -53,6 +53,7 @@ function setDoc(doc, evidence) {
   if (evidence) S.evidence = evidence;
   S.analysis = null;
   S.selection = null;
+  S.check = null;
   persist();
   emit('loaded');
   emit('evidence');

@@ -33,6 +33,7 @@ export class EvidenceView {
     on('loaded', () => this.refresh());
     on('evidence', () => this.refresh());
     on('shown:evidence', () => this.refresh());
+    on('check', () => { if (S.view === 'evidence' || !this.register) this.refresh(); });
   }
 
   // ---------------------------------------------------------------- intake
@@ -95,6 +96,7 @@ export class EvidenceView {
 
   async refresh() {
     if (!S.doc) return;
+    if (!S.check || !S.check.ok) { this.register = null; this.render(); return; }
     try { this.register = await api('/api/evidence/register', { doc: S.doc, evidence: S.evidence }); }
     catch (e) { this.register = null; }
     this.render();

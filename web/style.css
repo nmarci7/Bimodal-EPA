@@ -79,8 +79,31 @@ main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; ove
 .node text.sub { font-family: var(--sans); font-weight: 400; font-size: 11px; fill: var(--muted); }
 .node { cursor: move; }
 .node.selected rect.body { stroke: var(--ext); stroke-width: 2.5; }
-.handle { fill: #fff; stroke: #8C8A84; stroke-width: 1.2; cursor: crosshair; opacity: 0; transition: opacity .1s; pointer-events: none; }
+.handle { cursor: crosshair; opacity: 0; transition: opacity .1s; pointer-events: none; }
+.handle circle { fill: #fff; stroke: #8C8A84; stroke-width: 1.2; }
+.handle path { stroke: #5A5F69; stroke-width: 1.6; }
 .node:hover .handle, .node.selected .handle { opacity: 1; pointer-events: all; }
+.node text.uc { font-family: var(--sans); font-weight: 500; font-size: 10.5px; fill: var(--ext-ink); }
+.node text.uc.none { fill: var(--e-ink); }
+/* ports (Definition: Component) */
+.port { cursor: crosshair; }
+.port .hit { fill: transparent; }
+.port .dot { stroke-width: 1.6; }
+.port.in .dot { fill: #fff; stroke: #4A4E57; }
+.port.free .dot { stroke-dasharray: 2 2; }
+.port.out.free .dot { fill: #fff; }
+.port.out .dot { fill: #4A4E57; stroke: #4A4E57; }
+.port.out.llm .dot { fill: var(--llm); stroke: var(--llm); }
+.port.selected .dot { stroke: var(--ext); stroke-width: 2.4; }
+.port.out.selected .dot { fill: var(--ext); }
+.port text { font-family: var(--mono); font-size: 10px; fill: #4A4E57; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.port:hover .dot { stroke: var(--ext); }
+.canvas.connecting .port.in .dot { stroke: var(--ext); stroke-width: 2.4; }
+.canvas.connecting-rev .port.out .dot { stroke: var(--ext); fill: var(--ext); }
+.eye.selected ellipse { stroke-width: 3; }
+.eye-label { font-size: 11px; fill: #1E4E8C; font-family: var(--sans); font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.eye-sub { font-size: 10px; fill: #3F5F8F; font-family: var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.eye-sub.warn { fill: var(--e-ink); }
 .edge path.line { fill: none; stroke: #6B6F78; stroke-width: 1.8; pointer-events: none; }
 .edge path.hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
 .edge.llm path.line { stroke: var(--llm); stroke-dasharray: 2 4; stroke-width: 2.2; }
@@ -88,7 +111,11 @@ main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; ove
 .edge text { font-size: 11px; fill: var(--muted); font-family: var(--sans); pointer-events: none; }
 .gpill rect { fill: var(--guard-bg); stroke: var(--guard); stroke-dasharray: 4 3; stroke-width: 1.4; }
 .gpill.learned rect { fill: #FDF6E6; stroke: var(--llm); }
-.gpill text { font-size: 11px; font-weight: 600; fill: var(--guard-ink); font-family: var(--sans); }
+.gpill text { font-family: var(--sans); fill: var(--guard-ink); }
+.gpill text.n { font-size: 11px; font-weight: 600; }
+.gpill text.t { font-size: 9.5px; font-family: var(--mono); }
+.gpill.empty rect { stroke: var(--e-ink); }
+.gpill.empty text.t { fill: var(--e-ink); }
 .gpill { cursor: pointer; }
 .gpill.selected rect { stroke: var(--ext); stroke-width: 2.2; stroke-dasharray: none; }
 .eye { cursor: pointer; }
@@ -234,3 +261,57 @@ pre.code { margin: 0; padding: 12px; background: #17191D; color: #E4E6EA; border
 .stagebar .chip { flex: 0 0 auto; }
 .canvas svg:focus { outline: none; }
 .canvas svg:focus-visible { outline: 2px solid var(--ext); outline-offset: -2px; }
+
+/* palette legend */
+.legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.pdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid #4A4E57; flex: 0 0 auto; }
+.pdot.in { background: #fff; } .pdot.out { background: #4A4E57; }
+/* inspector additions */
+.portrow { display: flex; align-items: center; gap: 8px; }
+.portrow input { width: 120px; height: 30px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 6px; font-size: 12px; }
+.linkish { border: 0; background: transparent; color: var(--ext-ink); cursor: pointer; padding: 2px 4px; text-align: left; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.linkish:hover { text-decoration: underline; }
+.portrow .linkish { flex: 1 1 auto; min-width: 0; }
+.token { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; align-items: end; padding: 6px 0; border-top: 1px dashed var(--line); position: relative; }
+.token .tk.check { grid-column: 1 / -1; }
+.token > .x { position: absolute; top: 4px; right: 0; }
+.token .tk { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.token .tk.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; height: 30px; }
+.token select, .token input:not([type=checkbox]) { height: 30px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 6px; font-size: 12px; background: #fff; }
+.token input.mono { width: 100%; }
+.token select { width: 100%; }
+.tolgrid { display: grid; grid-template-columns: max-content max-content 1fr; gap: 6px 12px; align-items: center; }
+.tolgrid .sub { padding-left: 16px; }
+.tolgrid input[type=number] { width: 54px; height: 28px; border: 1px solid var(--line2); border-radius: 6px; padding: 0 4px; }
+.warn { color: var(--e-ink); }
+/* the mapping table */
+.maptable { flex: 0 0 auto; max-height: 46%; display: flex; flex-direction: column; border-top: 2px solid var(--line2); background: var(--panel); min-height: 0; }
+.mt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.mt-flow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--soft); }
+.mt-scroll { overflow: auto; min-height: 0; }
+table.mt { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.mt th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line2); z-index: 1; }
+table.mt td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.mt tr.gen td { background: var(--soft); }
+table.mt tr.refined td, table.mt tr.dropped td { color: #8C8A84; }
+table.mt tr.dropped td .mono { text-decoration: line-through; }
+table.mt tr.absorbed td { background: #FFF6F4; }
+table.mt tr.hl td { box-shadow: inset 3px 0 0 var(--ext); }
+table.mt tr.hl td + td { box-shadow: none; }
+table.mt tr.note td { color: var(--muted); font-size: 12px; padding: 10px; }
+table.mt .cond { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 4px; }
+table.mt .sep { color: var(--muted); }
+table.mt select, table.mt input { height: 28px; padding: 0 5px; border: 1px solid var(--line2); border-radius: 6px; font-size: 12px; background: #fff; }
+table.mt input[type=number] { width: 50px; }
+table.mt { table-layout: fixed; min-width: 980px; }
+table.mt th:nth-child(1) { width: 17%; } table.mt th:nth-child(2) { width: 30%; } table.mt th:nth-child(3) { width: 30%; }
+table.mt th:nth-child(4) { width: 12%; } table.mt th:nth-child(5) { width: 11%; }
+table.mt td { overflow-wrap: anywhere; }
+table.mt td.rowid input { width: 100%; margin-bottom: 4px; }
+table.mt td.act-cell select { width: 100%; margin-bottom: 3px; }
+table.mt .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mchip { height: 24px; padding: 0 8px; border-radius: 12px; border: 1px solid var(--line2); background: #fff; font-family: var(--mono); font-size: 11px; cursor: pointer; color: var(--muted); }
+.mchip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+table.mt input.reason { width: 100%; margin-top: 4px; }
+.tag.absorbed { background: var(--e-bg); color: var(--e-ink); }

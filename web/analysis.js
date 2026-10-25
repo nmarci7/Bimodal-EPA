@@ -112,6 +112,8 @@ export class AnalysisView {
     p.appendChild(this.pipe);
     this.drawPipeline();
     if (this.error) p.appendChild(h('div', { class: 'problems' }, h('b', {}, 'The analysis failed. '), h('pre', { class: 'code', style: 'margin-top:8px' }, this.error)));
+    const why = nothingToJudge();
+    if (why && this.status !== 'running') p.appendChild(h('div', { class: 'problems' }, h('b', {}, 'Nothing to judge yet. '), why));
     this.log = h('div', { class: 'log', role: 'log', 'aria-live': 'polite' });
     const grid = h('div', { class: 'grid2' });
     grid.append(h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Coordinator log'), h('span', { class: 'muted' }, 'every step, as it happened')), this.log),
@@ -163,4 +165,12 @@ export class AnalysisView {
         h('pre', { class: 'code' }, text)));
     } catch (e) { toast(e.message); }
   }
+}
+
+/** Why a well-formed model gives no cell: the verdicts are per observation point and judged failure. */
+function nothingToJudge() {
+  const d = S.doc, ch = S.check;
+  if (!d || !ch || !ch.ok || (ch.cells || []).length) return null;
+  if (!d.observation_points.length) return 'The model has no observation point, and verdicts are given only there. Drop an eye (palette: Observation point) on the edge whose log you would read, then run again.';
+  return 'No observation point judges a failure. Select an eye and tick the failures it judges (its toleration), or the provenance it checks, then run again.';
 }

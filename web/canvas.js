@@ -1,8 +1,13 @@
-// The modelling canvas: components, system ports, edges, guards on edges, observation points.
-// SVG, with pan (drag the background), zoom (wheel), move (drag a node), connect (drag from the
-// round handle on a node's right side to another node) and drop from the palette.
+// The modelling canvas: components with their ports, system ports, edges between ports, guards on
+// edges, observation points. SVG, with pan (drag the background), zoom (wheel), move (drag a node),
+// connect (drag from a port, or from the "+" handle for a new output port, onto a port or a node)
+// and drop from the palette.
+//
+// Ports follow Definition (Component): In(c) and Out(c) are drawn on the border of the component,
+// inputs hollow and outputs filled, each on the side facing what it is wired to. An edge runs from
+// an output port (or a system input) to an input port (or a system output).
 import { s, clear } from './lib.js';
-import { S, on, comp, parseRef, nodeIdOfRef, sysPorts, connect, addComponent, addSysPort, addGuard, addObs, changed, removeSelection } from './state.js';
+import { S, on, comp, parseRef, nodeIdOfRef, sysPorts, connectPorts, addComponent, addSysPort, addGuard, addObs, changed, removeSelection, guardSummary, obsSummary, useCasesAt } from './state.js';
 
 const W = 156, H = 58, SW = 132, SH = 48;
 const VERDICT_RANK = { exposed: 6, conflict: 5, unchecked: 4, hope: 3, 'not exercised': 2, guarantee: 1 };
@@ -11,24 +16,23 @@ const VERDICT_COLOURS = {
   unchecked: ['#E3E9F8', '#2F4A8F'], conflict: ['#EDE3FA', '#5B2D91'], 'not exercised': ['#ECECEA', '#555555'],
 };
 
+export function nodeHeight(c) { return Math.max(H, 26 + 16 * Math.max(c.in.length, c.out.length)); }
+
 export class Canvas {
   constructor(host) {
     this.host = host;
     this.t = { x: 20, y: 20, k: 1 };
     this.svg = s('svg', { tabindex: 0, role: 'application', 'aria-label': 'Model canvas' });
-    this.svg.appendChild(s('defs', {},
-      s('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' },
-        s('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#6B6F78' })),
-      s('marker', { id: 'arrow-llm', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' },
-        s('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#B7791F' })),
-      s('marker', { id: 'arrow-sel', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' },
-        s('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#2B6CB0' }))));
+    const marker = (id, fill) => s('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' },
+      s('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill }));
+    this.svg.appendChild(s('defs', {}, marker('arrow', '#6B6F78'), marker('arrow-llm', '#B7791F'), marker('arrow-sel', '#2B6CB0')));
     this.vp = s('g');
-    this.gEdges = s('g'); this.gDeco = s('g'); this.gNodes = s('g'); this.gTemp = s('g');
-    this.vp.append(this.gEdges, this.gNodes, this.gDeco, this.gTemp);
+    this.gEdges = s('g'); this.gDeco = s('g'); this.gNodes = s('g'); this.gPorts = s('g'); this.gTemp = s('g');
+    this.vp.append(this.gEdges, this.gNodes, this.gDeco, this.gPorts, this.gTemp);
     this.svg.appendChild(this.vp);
     host.appendChild(this.svg);
     this.overlay = true;
+    this.portNames = true;
     this.bind();
     on('doc', () => this.render());
     on('select', () => this.render());
@@ -38,12 +42,70 @@ export class Canvas {
   // ---------------------------------------------------------------- geometry
   nodes() {
     const d = S.doc, out = [];
-    for (const c of d.components) out.push({ id: c.id, kind: c.kind, label: c.label || '', x: c.pos.x, y: c.pos.y, w: W, h: H, c });
+    for (const c of d.components) out.push({ id: c.id, kind: c.kind, label: c.label || '', x: c.pos.x, y: c.pos.y, w: W, h: nodeHeight(c), c });
     const sp = sysPorts(d);
     for (const n of sp.ins) { const p = d.layout.sys[n] || { x: 0, y: 0 }; out.push({ id: `sys:${n}`, kind: 'sysin', label: 'system input', x: p.x, y: p.y, w: SW, h: SH }); }
     for (const n of sp.outs) { const p = d.layout.sys[n] || { x: 0, y: 0 }; out.push({ id: `sys:${n}`, kind: 'sysout', label: 'system output', x: p.x, y: p.y, w: SW, h: SH }); }
     return out;
   }
+
+  /** Where each component port sits: on the border facing what the port is wired to. */
+  ports(byId) {
+    const d = S.doc, out = {};
+    const centre = (n) => ({ x: n.x + n.w / 2, y: n.y + n.h / 2 });
+    for (const c of d.components) {
+      const n = byId[c.id]; if (!n) continue;
+      const C = centre(n);
+      const items = [];
+      for (const side of ['in', 'out']) {
+        for (const p of c[side]) {
+          const ref = `${c.id}.${p}`;
+          const peers = d.edges.filter((e) => (side === 'in' ? e.to : e.from) === ref).map((e) => (side === 'in' ? e.from : e.to));
+          let vx = 0, vy = 0;
+          for (const r of peers) {
+            const m = byId[nodeIdOfRef(r)]; if (!m || m === n) continue;
+            const P = centre(m); const L = Math.hypot(P.x - C.x, P.y - C.y) || 1;
+            vx += (P.x - C.x) / L; vy += (P.y - C.y) / L;
+          }
+          if (Math.abs(vx) + Math.abs(vy) < 1e-6) { vx = side === 'in' ? -1 : 1; vy = 0; }
+          const tx = Math.abs(vx) / (n.w / 2), ty = Math.abs(vy) / (n.h / 2);
+          const it = { key: `${c.id}|${side}|${p}`, side, name: p, comp: c.id };
+          if (tx >= ty) { it.border = vx < 0 ? 'L' : 'R'; it.t = C.y + vy / tx; } else { it.border = vy < 0 ? 'T' : 'B'; it.t = C.x + vx / ty; }
+          items.push(it);
+        }
+      }
+      for (const b of ['L', 'R', 'T', 'B']) {
+        // two ports facing the same neighbour: put them so that the pair of edges does not cross
+        // (outputs first on the right and bottom borders, inputs first on the left and top ones)
+        const outFirst = b === 'R' || b === 'B';
+        const rank = (x) => ((x.side === 'out') === outFirst ? 0 : 1);
+        const g = items.filter((i) => i.border === b).sort((a, z) => (Math.abs(a.t - z.t) > 0.5 ? a.t - z.t : rank(a) - rank(z)));
+        if (!g.length) continue;
+        const vertical = b === 'L' || b === 'R';
+        const lo = vertical ? n.y + 11 : n.x + 16, hi = vertical ? n.y + n.h - 11 : n.x + n.w - 16;
+        const gap = Math.min(vertical ? 16 : 60, g.length > 1 ? (hi - lo) / (g.length - 1) : 99);
+        let prev = -Infinity;
+        for (const it of g) { it.t = Math.max(it.t, prev + gap); prev = it.t; }
+        const over = g[g.length - 1].t - hi; if (over > 0) g.forEach((it) => { it.t -= over; });
+        const under = lo - g[0].t; if (under > 0) g.forEach((it) => { it.t += under; });
+        g.forEach((it, i) => {
+          it.t = Math.min(hi, Math.max(lo, it.t));
+          // on the top and bottom borders the left half writes its name to the left of the dot
+          it.labelLeft = !vertical && g.length > 1 && i < g.length / 2;
+          out[it.key] = { ...it, x: b === 'L' ? n.x : b === 'R' ? n.x + n.w : it.t, y: b === 'T' ? n.y : b === 'B' ? n.y + n.h : it.t };
+        });
+      }
+    }
+    return out;
+  }
+
+  endPoint(ref, side, byId, ports, toward) {
+    const [o, p] = parseRef(ref);
+    if (o !== 'sys') return ports[`${o}|${side}|${p}`];
+    const n = byId[`sys:${p}`];
+    return n ? clip(n, toward, { x: n.x + n.w / 2, y: n.y + n.h / 2 }) : null;
+  }
+
   toWorld(ev) {
     const r = this.svg.getBoundingClientRect();
     return { x: (ev.clientX - r.left - this.t.x) / this.t.k, y: (ev.clientY - r.top - this.t.y) / this.t.k };
@@ -53,8 +115,8 @@ export class Canvas {
   fit() {
     const ns = this.nodes();
     if (!ns.length) { this.t = { x: 40, y: 40, k: 1 }; this.applyT(); return; }
-    const x0 = Math.min(...ns.map((n) => n.x)) - 40, y0 = Math.min(...ns.map((n) => n.y)) - 40;
-    const x1 = Math.max(...ns.map((n) => n.x + n.w)) + 60, y1 = Math.max(...ns.map((n) => n.y + n.h)) + 60;
+    const x0 = Math.min(...ns.map((n) => n.x)) - 60, y0 = Math.min(...ns.map((n) => n.y)) - 50;
+    const x1 = Math.max(...ns.map((n) => n.x + n.w)) + 80, y1 = Math.max(...ns.map((n) => n.y + n.h)) + 60;
     const r = this.svg.getBoundingClientRect();
     const k = Math.min(1.2, Math.max(0.3, Math.min(r.width / (x1 - x0), r.height / (y1 - y0))));
     this.t = { k, x: (r.width - (x1 - x0) * k) / 2 - x0 * k, y: (r.height - (y1 - y0) * k) / 2 - y0 * k };
@@ -64,25 +126,27 @@ export class Canvas {
   // ---------------------------------------------------------------- drawing
   render() {
     if (!S.doc) return;
-    clear(this.gEdges); clear(this.gNodes); clear(this.gDeco);
+    clear(this.gEdges); clear(this.gNodes); clear(this.gDeco); clear(this.gPorts);
     const d = S.doc, ns = this.nodes();
     const byId = Object.fromEntries(ns.map((n) => [n.id, n]));
+    const ports = this.ports(byId);
+    this.lastPorts = ports;
     const sel = S.selection || {};
     const verdictAt = this.verdictsByObs();
-    // pairs of nodes joined in both directions get their edges offset
-    const pairCount = {};
-    for (const e of d.edges) { const a = nodeIdOfRef(e.from), b = nodeIdOfRef(e.to); const k = [a, b].sort().join('|'); pairCount[k] = (pairCount[k] || 0) + 1; }
-    const pairSeen = {};
     for (const e of d.edges) {
       const a = byId[nodeIdOfRef(e.from)], b = byId[nodeIdOfRef(e.to)];
       if (!a || !b) continue;
-      const key = [a.id, b.id].sort().join('|');
-      const idx = (pairSeen[key] = (pairSeen[key] || 0) + 1);
-      const off = pairCount[key] > 1 ? (idx - (pairCount[key] + 1) / 2) * 22 * (a.id < b.id ? 1 : -1) : 0;
-      const g = this.edgeShape(e, a, b, off, sel, verdictAt);
-      this.gEdges.appendChild(g);
+      const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      const pa0 = parseRef(e.from)[0] === 'sys' ? null : ports[`${parseRef(e.from)[0]}|out|${parseRef(e.from)[1]}`];
+      const pb0 = parseRef(e.to)[0] === 'sys' ? null : ports[`${parseRef(e.to)[0]}|in|${parseRef(e.to)[1]}`];
+      const pa = pa0 || this.endPoint(e.from, 'out', byId, ports, pb0 || cb);
+      const pb = pb0 || this.endPoint(e.to, 'in', byId, ports, pa0 || ca);
+      if (!pa || !pb) continue;
+      this.gEdges.appendChild(this.edgeShape(e, pa, pb, sel, verdictAt));
     }
     for (const n of ns) this.gNodes.appendChild(this.nodeShape(n, sel));
+    const selPort = sel.type === 'port' ? sel.id : null;
+    for (const p of Object.values(ports)) this.gPorts.appendChild(this.portShape(p, selPort, sel));
     this.applyT();
   }
 
@@ -98,7 +162,7 @@ export class Canvas {
   }
 
   nodeShape(n, sel) {
-    const isSel = (sel.type === 'component' && sel.id === n.id) || (sel.type === 'sys' && sel.id === n.id);
+    const isSel = (sel.type === 'component' && sel.id === n.id) || (sel.type === 'sys' && sel.id === n.id) || (sel.type === 'port' && sel.id.split('|')[0] === n.id);
     const g = s('g', { class: `node${isSel ? ' selected' : ''}`, transform: `translate(${n.x},${n.y})`, 'data-node': n.id });
     let fill = '#FFFFFF', stroke = '#A9A79F', dash = null, rx = 10, sw = 1.2;
     if (n.kind === 'llm') { fill = '#FBF3E4'; stroke = '#B7791F'; sw = 2; }
@@ -113,61 +177,95 @@ export class Canvas {
     g.appendChild(s('text', { x: n.w / 2, y: n.h / 2 - 3, 'text-anchor': 'middle' }, title));
     const sub = n.c ? (n.c.label || n.c.kind) : n.label;
     g.appendChild(s('text', { class: 'sub', x: n.w / 2, y: n.h / 2 + 13, 'text-anchor': 'middle' }, sub.length > 26 ? sub.slice(0, 25) + '…' : sub));
-    if (n.kind !== 'sysout') g.appendChild(s('circle', { class: 'handle', cx: n.w, cy: n.h / 2, r: 7, 'data-handle': n.id }));
+    if (n.kind === 'sysin') {
+      const ucs = useCasesAt(S.doc, n.id.slice(4));
+      const txt = ucs.length ? `starts ${ucs.map((u) => u.id).join(', ')}` : 'no use case starts here';
+      g.appendChild(s('text', { class: `uc${ucs.length ? '' : ' none'}`, x: n.w / 2, y: n.h + 14, 'text-anchor': 'middle' }, txt.length > 34 ? `${txt.slice(0, 33)}…` : txt));
+    }
+    if (n.kind !== 'sysout') {
+      // the handle opens a new output port (a system input simply starts another edge)
+      const hg = s('g', { class: 'handle', 'data-handle': n.id, transform: `translate(${n.w + 14},${n.h / 2})` });
+      hg.appendChild(s('title', {}, n.c ? 'Drag to connect from a new output port' : 'Drag to connect'));
+      hg.appendChild(s('circle', { r: 8, 'data-handle': n.id }));
+      hg.appendChild(s('path', { d: 'M -4 0 H 4 M 0 -4 V 4', 'data-handle': n.id }));
+      g.appendChild(hg);
+    }
     return g;
   }
 
-  edgeShape(e, a, b, off, sel, verdictAt) {
+  portShape(p, selPort, sel) {
+    const isSel = selPort === p.key;
+    const c = comp(S.doc, p.comp);
+    const llmOut = c && c.kind === 'llm' && p.side === 'out';
+    const free = !S.doc.edges.some((e) => (p.side === 'in' ? e.to : e.from) === `${p.comp}.${p.name}`);
+    const g = s('g', { class: `port ${p.side}${isSel ? ' selected' : ''}${llmOut ? ' llm' : ''}${free ? ' free' : ''}`, 'data-port': p.key, transform: `translate(${p.x},${p.y})` });
+    g.appendChild(s('title', {}, `${p.side === 'in' ? 'input' : 'output'} port ${p.comp}.${p.name}${free ? ' (unconnected)' : ''} — drag to connect, click to select`));
+    g.appendChild(s('circle', { class: 'hit', r: 9, 'data-port': p.key }));
+    g.appendChild(s('circle', { class: 'dot', r: isSel ? 5.5 : 4.5, 'data-port': p.key }));
+    const show = this.portNames || isSel || (sel.type === 'component' && sel.id === p.comp);
+    if (show) {
+      const lab = p.name.length > 18 ? `${p.name.slice(0, 17)}…` : p.name;
+      const at = { L: [-7, -6, 'end'], R: [7, -6, 'start'], T: p.labelLeft ? [-7, -6, 'end'] : [7, -6, 'start'], B: p.labelLeft ? [-7, 14, 'end'] : [7, 14, 'start'] }[p.border];
+      g.appendChild(s('text', { x: at[0], y: at[1], 'text-anchor': at[2] }, lab));
+    }
+    return g;
+  }
+
+  edgeShape(e, pa, pb, sel, verdictAt) {
     const d = S.doc;
-    const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
-    const dx = cb.x - ca.x, dy = cb.y - ca.y, len = Math.hypot(dx, dy) || 1;
+    const dx = pb.x - pa.x, dy = pb.y - pa.y, len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len, ny = dx / len;
-    const pa = clip(a, { x: cb.x + nx * off, y: cb.y + ny * off }, { x: ca.x + nx * off, y: ca.y + ny * off });
-    const pb = clip(b, { x: ca.x + nx * off, y: ca.y + ny * off }, { x: cb.x + nx * off, y: cb.y + ny * off });
     const fromComp = comp(d, parseRef(e.from)[0]);
     const llm = fromComp && fromComp.kind === 'llm';
     const isSel = sel.type === 'edge' && sel.id === e.id;
     const g = s('g', { class: `edge${llm ? ' llm' : ''}${isSel ? ' selected' : ''}`, 'data-edge': e.id });
-    const path = `M ${pa.x} ${pa.y} L ${pb.x} ${pb.y}`;
+    // stop the arrow just short of an input port dot
+    const end = { x: pb.x - (dx / len) * 6, y: pb.y - (dy / len) * 6 };
+    const path = `M ${pa.x} ${pa.y} L ${end.x} ${end.y}`;
     g.appendChild(s('path', { class: 'hit', d: path, 'data-edge': e.id }));
     g.appendChild(s('path', { class: 'line', d: path, 'marker-end': `url(#${isSel ? 'arrow-sel' : llm ? 'arrow-llm' : 'arrow'})` }));
-    const at = (f) => ({ x: pa.x + (pb.x - pa.x) * f, y: pa.y + (pb.y - pa.y) * f });
+    const at = (f) => ({ x: pa.x + dx * f, y: pa.y + dy * f });
     const guards = d.guards.filter((gd) => gd.edge === e.id);
-    const o0 = d.observation_points.find((op) => op.edge === e.id);
+    const o = d.observation_points.find((op) => op.edge === e.id);
     const lab = e.label || '';
     if (lab) {
       const p = at(guards.length ? 0.22 : 0.5);
       const anchor = Math.abs(nx) > 0.6 ? (nx > 0 ? 'start' : 'end') : 'middle';
       g.appendChild(s('text', { x: p.x + nx * 10, y: p.y + ny * 12 + 4, 'text-anchor': anchor }, lab.length > 30 ? lab.slice(0, 29) + '…' : lab));
     }
+    const vertical = Math.abs(dy) > Math.abs(dx);
     guards.forEach((gd, i) => {
-      // several guards on one edge are stacked across it, as in the case figures
+      // several guards on one edge are stacked in the order they cut it
       const k = i - (guards.length - 1) / 2;
-      const segLen = Math.hypot(pb.x - pa.x, pb.y - pa.y) || 1;
-      const vertical = Math.abs(pb.y - pa.y) > Math.abs(pb.x - pa.x);
-      // across a horizontal edge, along a vertical one (pills are wider than tall)
-      const p = vertical ? at((o0 ? 0.5 : 0.55) + (k * 26) / segLen)
-        : (() => { const c0 = at(o0 ? 0.5 : 0.55); return { x: c0.x + nx * 26 * k, y: c0.y + ny * 26 * k }; })();
-      const label = gd.label || gd.id;
-      const w = Math.max(44, label.length * 6.6 + 16);
-      const gs = s('g', { class: `gpill${gd.learned ? ' learned' : ''}${sel.type === 'guard' && sel.id === gd.id ? ' selected' : ''}`, transform: `translate(${p.x - w / 2},${p.y - 11})`, 'data-guard': gd.id });
-      gs.appendChild(s('rect', { width: w, height: 22, rx: 6 }));
-      gs.appendChild(s('text', { x: w / 2, y: 15, 'text-anchor': 'middle' }, label));
-      this.gDeco.appendChild(gs);
+      const p = vertical ? at((o ? 0.5 : 0.55) + (k * 36) / len)
+        : (() => { const c0 = at(o ? 0.5 : 0.55); return { x: c0.x + nx * 36 * k, y: c0.y + ny * 36 * k }; })();
+      const gs = guardSummary(d, gd);
+      const name = gd.label || 'unnamed guard';
+      const w = Math.max(56, Math.max(name.length * 6.8, gs.text.length * 5.9) + 18);
+      const cls = `gpill${gd.learned ? ' learned' : ''}${gs.empty ? ' empty' : ''}${sel.type === 'guard' && sel.id === gd.id ? ' selected' : ''}`;
+      const pill = s('g', { class: cls, transform: `translate(${p.x - w / 2},${p.y - 16})`, 'data-guard': gd.id });
+      pill.appendChild(s('title', {}, `guard ${gd.id}: ${gs.long}`));
+      pill.appendChild(s('rect', { width: w, height: 32, rx: 7 }));
+      pill.appendChild(s('text', { class: 'n', x: w / 2, y: 13.5, 'text-anchor': 'middle' }, name));
+      pill.appendChild(s('text', { class: 't', x: w / 2, y: 26, 'text-anchor': 'middle' }, gs.text));
+      this.gDeco.appendChild(pill);
     });
-    const o = d.observation_points.find((op) => op.edge === e.id);
     if (o) {
-      const p = at(0.86);
+      const p = at(Math.max(0.6, 1 - 34 / len));
       const v = verdictAt[o.id];
       const [bg, ink] = v ? VERDICT_COLOURS[v] : ['#FFFFFF', '#2B6CB0'];
-      const eg = s('g', { class: 'eye', transform: `translate(${p.x},${p.y})`, 'data-obs': o.id });
-      eg.appendChild(s('title', {}, `${o.label || o.id}${v ? ` — worst verdict: ${v}` : ''}`));
-      eg.appendChild(s('ellipse', { rx: 13, ry: 9, fill: bg, stroke: ink, 'stroke-width': sel.type === 'obs' && sel.id === o.id ? 3 : 1.6 }));
-      eg.appendChild(s('circle', { r: 3.4, fill: ink }));
+      const os = obsSummary(d, o);
+      const eg = s('g', { class: `eye${os.empty ? ' empty' : ''}${sel.type === 'obs' && sel.id === o.id ? ' selected' : ''}`, transform: `translate(${p.x},${p.y})`, 'data-obs': o.id });
+      eg.appendChild(s('title', {}, `${o.label || o.id}: judges ${os.long}${v ? ` — worst verdict: ${v}` : ''}`));
+      eg.appendChild(s('ellipse', { rx: 13, ry: 9, fill: bg, stroke: os.empty ? '#A2241A' : ink, 'stroke-width': sel.type === 'obs' && sel.id === o.id ? 3 : 1.6 }));
+      eg.appendChild(s('circle', { r: 3.4, fill: os.empty ? '#A2241A' : ink }));
       this.gDeco.appendChild(eg);
-      const lp = at(0.86);
       const oa = Math.abs(nx) > 0.6 ? (nx > 0 ? 'start' : 'end') : 'middle';
-      this.gDeco.appendChild(s('text', { x: lp.x + nx * 18, y: lp.y + ny * 20 + 4, 'text-anchor': oa, style: 'font-size: 11px; fill: #1E4E8C; font-family: var(--sans)' }, o.label || o.id));
+      // the name and what it judges sit on the side of the edge given by its normal, away from the line
+      const above = Math.abs(nx) <= 0.6 && ny < 0;
+      const tx = p.x + nx * 18, ty = p.y + ny * 20 + 4;
+      this.gDeco.appendChild(s('text', { class: 'eye-label', x: tx, y: above ? ty - 13 : ty, 'text-anchor': oa }, o.label || o.id));
+      this.gDeco.appendChild(s('text', { class: `eye-sub${os.empty ? ' warn' : ''}`, x: tx, y: above ? ty : ty + 13, 'text-anchor': oa }, os.text));
     }
     return g;
   }
@@ -179,9 +277,16 @@ export class Canvas {
       if (ev.button !== 0) return;
       const tgt = ev.target;
       const handle = tgt.getAttribute && tgt.getAttribute('data-handle');
+      const portEl = tgt.closest && tgt.closest('[data-port]');
       const nodeEl = tgt.closest && tgt.closest('[data-node]');
       const w = this.toWorld(ev);
-      if (handle) { drag = { mode: 'connect', from: handle, start: w }; this.host.classList.add('connecting'); ev.preventDefault(); return; }
+      if (handle) { drag = { mode: 'connect', from: { node: handle, side: 'out' }, start: w, moved: false }; this.host.classList.add('connecting'); ev.preventDefault(); return; }
+      if (portEl) {
+        const [cid, side, name] = portEl.getAttribute('data-port').split('|');
+        drag = { mode: 'connect', from: { node: cid, side, port: name }, start: w, moved: false, key: portEl.getAttribute('data-port') };
+        this.host.classList.add(side === 'out' ? 'connecting' : 'connecting-rev');
+        ev.preventDefault(); return;
+      }
       if (nodeEl) {
         const id = nodeEl.getAttribute('data-node');
         const n = this.nodes().find((x) => x.id === id);
@@ -210,18 +315,33 @@ export class Canvas {
         if (drag.moved) this.render();
       } else if (drag.mode === 'connect') {
         const w = this.toWorld(ev);
-        const n = this.nodes().find((x) => x.id === drag.from);
-        clear(this.gTemp).appendChild(s('line', { x1: n.x + n.w, y1: n.y + n.h / 2, x2: w.x, y2: w.y, stroke: '#2B6CB0', 'stroke-width': 2, 'stroke-dasharray': '4 4' }));
+        if (Math.hypot(w.x - drag.start.x, w.y - drag.start.y) > 4) drag.moved = true;
+        let x1, y1;
+        if (drag.key && this.lastPorts[drag.key]) { x1 = this.lastPorts[drag.key].x; y1 = this.lastPorts[drag.key].y; }
+        else { const n = this.nodes().find((x) => x.id === drag.from.node); x1 = n.x + n.w + 14; y1 = n.y + n.h / 2; }
+        clear(this.gTemp).appendChild(s('line', { x1, y1, x2: w.x, y2: w.y, stroke: '#2B6CB0', 'stroke-width': 2, 'stroke-dasharray': '4 4' }));
       }
     });
     window.addEventListener('mouseup', (ev) => {
       if (!drag) return;
       const d0 = drag; drag = null;
       if (d0.mode === 'connect') {
-        clear(this.gTemp); this.host.classList.remove('connecting');
+        clear(this.gTemp); this.host.classList.remove('connecting', 'connecting-rev');
+        if (!d0.moved) {
+          if (d0.key) { S.selection = { type: 'port', id: d0.key }; this.select(); }
+          return;
+        }
         const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const portEl = el && el.closest && el.closest('[data-port]');
         const nodeEl = el && el.closest && el.closest('[data-node]');
-        if (nodeEl) { const id = connect(d0.from, nodeEl.getAttribute('data-node')); if (!id) this.flash('These two cannot be connected that way.'); }
+        let to = null;
+        if (portEl) { const [cid, side, name] = portEl.getAttribute('data-port').split('|'); to = { node: cid, side, port: name }; }
+        else if (nodeEl) to = { node: nodeEl.getAttribute('data-node') };
+        if (!to) return;
+        // dragging from an input port connects the other way round
+        const r = d0.from.side === 'in' ? connectPorts({ node: to.node, port: to.side === 'out' ? to.port : undefined }, d0.from)
+          : connectPorts(d0.from, { node: to.node, port: to.side === 'in' ? to.port : undefined });
+        if (!r.ok) this.flash(r.why);
       } else if (d0.mode === 'move') {
         if (d0.moved) changed(S.selection && S.selection.id === d0.id ? S.selection : { type: d0.id.startsWith('sys:') ? 'sys' : 'component', id: d0.id });
         else { S.selection = { type: d0.id.startsWith('sys:') ? 'sys' : 'component', id: d0.id }; this.select(); }
@@ -256,12 +376,16 @@ export class Canvas {
   select() { this.render(); import('./state.js').then((m) => m.emit('select')); this.svg.focus(); }
 
   nearestEdge(w) {
-    const d = S.doc, ns = Object.fromEntries(this.nodes().map((n) => [n.id, n]));
+    const d = S.doc;
+    const byId = Object.fromEntries(this.nodes().map((n) => [n.id, n]));
+    const ports = this.lastPorts || this.ports(byId);
     let best = null, bestD = 30;
     for (const e of d.edges) {
-      const a = ns[nodeIdOfRef(e.from)], b = ns[nodeIdOfRef(e.to)];
+      const a = byId[nodeIdOfRef(e.from)], b = byId[nodeIdOfRef(e.to)];
       if (!a || !b) continue;
-      const p = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, q = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      const [fo, fp] = parseRef(e.from), [to, tp] = parseRef(e.to);
+      const p = (fo !== 'sys' && ports[`${fo}|out|${fp}`]) || { x: a.x + a.w / 2, y: a.y + a.h / 2 };
+      const q = (to !== 'sys' && ports[`${to}|in|${tp}`]) || { x: b.x + b.w / 2, y: b.y + b.h / 2 };
       const dist = segDist(w, p, q);
       if (dist < bestD) { bestD = dist; best = e.id; }
     }

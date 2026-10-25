@@ -48,6 +48,15 @@ guard that catches `commission` catches `dup` too, and an observation point that
   pos: {x: 70, y: 320}       # canvas position (optional)
 ```
 
+### Ports
+
+`in` and `out` are the component's input and output ports, In(c) and Out(c). An edge runs from an
+output port (or a system input) to an input port (or a system output). One output port may feed
+several edges, which then carry the same message; one input port may receive several edges, whose
+tokens are merged. A port may stay unconnected. The workbench draws inputs as hollow dots and
+outputs as filled dots on the component's border, and lists the component's whole mapping table
+(analyst rows, pass-through, LLM defaults, absorbed failures) under the canvas.
+
 ### Rows
 
 A row says what a component does with a failure, or which failure it starts.
@@ -62,7 +71,8 @@ A row says what a component does with a failure, or which failure it starts.
 
 A row without `activation` is open: the analysis treats never, sometimes and always as candidates
 and lets the evidence choose. An LLM component's rows can only be sometimes or always (the LLM
-rule). `when: {"*": any}` matches any input.
+rule). `when: {"*": any}` matches a message on any input port; "any input" takes only `any` and
+stands alone, so a failure pattern names its port.
 
 ### Worst-case defaults of an LLM component
 
@@ -131,6 +141,10 @@ verdict table.
   requires: principal        # optional: the authority the receiver requires
 ```
 
+`clearance: receiver` and `requires: receiver` judge against the receiving component's own
+`clearance` and `requires`. A receiver outside the model (a system output) has neither, so the
+levels must be named there. A new observation point in the workbench judges every mode at 1.
+
 ## Claims
 
 ```yaml
@@ -142,7 +156,7 @@ vacuous (not exercised).
 
 ## Evidence
 
-Certificates (JSON or YAML):
+Certificates (JSON or YAML; one record, a list, or `{certificates: [...]}`):
 
 ```json
 {"id": "c_gm", "component": "gm", "targets": {"oom": "never"}, "version": "mandate-v2",
