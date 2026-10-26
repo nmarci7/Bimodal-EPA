@@ -117,7 +117,9 @@ epa/report/      explain.py, markdown.py (report and CRA export)
 epa/api/app.py   FastAPI: model check, evidence intake, analyses with server-sent events
 web/             the workbench (plain ES modules, no build step)
 cases/           the three demo cases
-docs/            model-format.md
+docs/            model-format.md; tdk/ (the paper's chapter arc and its figures)
 ```
 
-`docs/model-format.md` describes the model document field by field.
+`docs/model-format.md` describes the model document field by field. `docs/tdk/arc.md` is the arc of
+the TDK paper, chapter by chapter; `docs/tdk/figures/` holds the paper's figures (the three case
+figures are the same files as `cases/*/figure.svg`).

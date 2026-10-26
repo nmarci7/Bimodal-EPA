@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1010" height="640" viewBox="0 0 1010 640" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#222">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="1010" height="640" fill="white"/>
+
+  <!-- ================= INPUT COLUMN ================= -->
+  <text x="20" y="40" font-size="12" font-weight="bold" fill="#444">Input</text>
+
+  <!-- Claims -->
+  <rect x="20" y="55" width="200" height="85" rx="7" fill="white" stroke="#333" stroke-width="1.3"/>
+  <text x="32" y="76" font-size="12.5" font-weight="bold">Claims</text>
+  <text x="32" y="96">rows the analyst wants decided:</text>
+  <text x="32" y="111">(observation point, failure mode,</text>
+  <text x="32" y="126">severity class)</text>
+
+  <!-- Model -->
+  <rect x="20" y="175" width="200" height="120" rx="7" fill="white" stroke="#333" stroke-width="1.3"/>
+  <text x="32" y="196" font-size="12.5" font-weight="bold">Model</text>
+  <text x="32" y="216">components, connections</text>
+  <text x="32" y="231">error modes: omission, commission,</text>
+  <text x="32" y="246">timing, value</text>
+  <text x="32" y="261">rules: never / sometimes / always</text>
+  <text x="32" y="276">(LLM rules pinned: sometimes)</text>
+  <text x="32" y="290">observation points + toleration</text>
+
+  <!-- Evidence -->
+  <rect x="20" y="400" width="200" height="105" rx="7" fill="white" stroke="#333" stroke-width="1.3"/>
+  <text x="32" y="421" font-size="12.5" font-weight="bold">Evidence</text>
+  <text x="32" y="441"><tspan font-weight="bold">certificate</tspan> — about every run of</text>
+  <text x="32" y="456">a rule (audit, review + tests, proof)</text>
+  <text x="32" y="476"><tspan font-weight="bold">witness</tspan> — one observed run</text>
+  <text x="32" y="491">(log, trace, statement)</text>
+
+  <!-- ================= PIPELINE COLUMN (x 300..600) ================= -->
+  <!-- Coordinator -->
+  <rect x="300" y="55" width="300" height="85" rx="7" fill="white" stroke="#333" stroke-width="1.3"/>
+  <text x="450" y="77" text-anchor="middle" font-size="12.5" font-weight="bold">Coordinator</text>
+  <text x="450" y="97" text-anchor="middle">picks the next candidate not yet run-checked,</text>
+  <text x="450" y="112" text-anchor="middle">those bearing on open claims first;</text>
+  <text x="450" y="127" text-anchor="middle">stops when none is left</text>
+
+  <!-- Run checker (alethic) -->
+  <rect x="300" y="175" width="300" height="160" rx="7" fill="#E8F0FA" stroke="#333" stroke-width="1.3"/>
+  <text x="450" y="197" text-anchor="middle" font-size="12.5" font-weight="bold">Run checker — alethic (TLA+)</text>
+  <rect x="318" y="210" width="264" height="68" rx="5" fill="white" stroke="#6B8BB5" stroke-width="1"/>
+  <path d="M332,252 a9,9 0 1,1 9,9" fill="none" stroke="#6B8BB5" stroke-width="1.2" marker-end="url(#arr)"/>
+  <text x="462" y="229" text-anchor="middle">for every run of the candidate:</text>
+  <text x="462" y="245" text-anchor="middle">inject error token → propagate along the</text>
+  <text x="462" y="261" text-anchor="middle">active rules → read the observation points</text>
+  <text x="450" y="300" text-anchor="middle" font-style="italic" fill="#3B5A85">inner loop — over runs</text>
+  <text x="450" y="316" text-anchor="middle" font-style="italic" fill="#3B5A85">some run = possibly, every run = necessarily</text>
+
+  <!-- Reconcile (epistemic) -->
+  <rect x="300" y="395" width="300" height="200" rx="7" fill="#FBF0E4" stroke="#333" stroke-width="1.3"/>
+  <text x="450" y="417" text-anchor="middle" font-size="12.5" font-weight="bold">Reconcile — epistemic (ASP / eClingo)</text>
+  <text x="316" y="440">generates the candidates from the model</text>
+  <text x="316" y="458">certificate → fixes a rule's word</text>
+  <text x="316" y="473" fill="#555">(so it prunes before any run is needed)</text>
+  <text x="316" y="491">witness: seen → not never · unseen → not always</text>
+  <text x="316" y="509">contradiction → refute the certificate (minimal</text>
+  <text x="316" y="524">conflict sets) — or: the model is missing a path</text>
+  <text x="316" y="546" font-weight="bold">→ exclude candidates</text>
+  <text x="450" y="576" text-anchor="middle" font-style="italic" fill="#8A5A2B">outer loop — over candidates</text>
+  <text x="450" y="590" text-anchor="middle" font-style="italic" fill="#8A5A2B">known = true in every remaining candidate</text>
+
+  <!-- ================= STATE / OUTPUT COLUMN (x 740..990) ================= -->
+  <!-- Table of possibilities -->
+  <rect x="740" y="55" width="250" height="200" rx="7" fill="#FBF0E4" stroke="#333" stroke-width="1.3"/>
+  <text x="865" y="77" text-anchor="middle" font-size="12.5" font-weight="bold">Table of possibilities</text>
+  <text x="865" y="93" text-anchor="middle" fill="#555">candidates not yet ruled out — the loop state</text>
+  <!-- mini table -->
+  <g font-size="10">
+    <line x1="752" y1="128" x2="978" y2="128" stroke="#999" stroke-width="0.8"/>
+    <text x="756" y="122" font-weight="bold">cand.</text>
+    <text x="800" y="122" font-weight="bold">dedup</text>
+    <text x="860" y="122" font-weight="bold">mandate</text>
+    <text x="925" y="122" font-weight="bold">agent</text>
+    <text x="756" y="146">c1</text><text x="800" y="146">never</text><text x="860" y="146">never</text><text x="925" y="146">sometimes</text>
+    <g fill="#999"><text x="756" y="166">c2</text><text x="800" y="166">never</text><text x="860" y="166">sometimes</text><text x="925" y="166">sometimes</text></g>
+    <line x1="752" y1="162" x2="978" y2="162" stroke="#999" stroke-width="1"/>
+    <text x="756" y="186">c3</text><text x="800" y="186">sometimes</text><text x="860" y="186">never</text><text x="925" y="186">sometimes</text>
+    <g fill="#999"><text x="756" y="206">c4</text><text x="800" y="206">always</text><text x="860" y="206">never</text><text x="925" y="206">sometimes</text></g>
+    <line x1="752" y1="202" x2="978" y2="202" stroke="#999" stroke-width="1"/>
+    <text x="756" y="226">…</text>
+  </g>
+  <text x="865" y="246" text-anchor="middle" font-size="9.5" font-style="italic" fill="#555">struck = excluded by evidence · agent pinned</text>
+
+  <!-- Verdict table (output) -->
+  <rect x="740" y="400" width="250" height="195" rx="7" fill="white" stroke="#333" stroke-width="1.8"/>
+  <text x="865" y="422" text-anchor="middle" font-size="12.5" font-weight="bold">Verdict table — output</text>
+  <text x="752" y="443">per row: the words still possible across</text>
+  <text x="752" y="458">the remaining candidates</text>
+  <text x="752" y="480">{never}  <tspan font-weight="bold">guarantee</tspan>   {sometimes}  <tspan font-weight="bold">hope</tspan></text>
+  <text x="752" y="496">{always}  <tspan font-weight="bold">exposed</tspan>   ≥ 2 words  <tspan font-weight="bold">unchecked</tspan></text>
+  <text x="752" y="520">per claim: supported / refuted /</text>
+  <text x="752" y="535">unsupported / vacuous</text>
+  <text x="752" y="560" fill="#555">+ certify-next ranking, re-verify list</text>
+
+  <!-- ================= ARROWS ================= -->
+  <!-- Claims -> Coordinator -->
+  <line x1="220" y1="97" x2="298" y2="97" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="259" y="90" text-anchor="middle" font-size="9.5" fill="#444">rows to decide</text>
+
+  <!-- Model -> Run checker -->
+  <line x1="220" y1="235" x2="298" y2="235" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="259" y="228" text-anchor="middle" font-size="9.5" fill="#444">dynamics</text>
+
+  <!-- Model -> Reconcile (generate candidates) -->
+  <path d="M220,282 C254,282 254,395 312,395" fill="none" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="272" y="345" font-size="9.5" fill="#444">generate</text>
+  <text x="272" y="357" font-size="9.5" fill="#444">candidates</text>
+
+  <!-- Evidence -> Reconcile -->
+  <line x1="220" y1="452" x2="298" y2="452" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- Coordinator -> Run checker -->
+  <line x1="450" y1="140" x2="450" y2="173" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <g>
+    <circle cx="470" cy="157" r="7" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="470" y="160" text-anchor="middle" font-size="8.5" font-weight="bold">2</text>
+    <text x="482" y="160" font-size="9.5" fill="#444">next candidate</text>
+  </g>
+
+  <!-- Run checker -> Reconcile -->
+  <line x1="450" y1="335" x2="450" y2="393" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <g>
+    <circle cx="470" cy="355" r="7" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="470" y="358" text-anchor="middle" font-size="8.5" font-weight="bold">3</text>
+    <text x="482" y="358" font-size="9.5" fill="#444">activation per row:</text>
+    <text x="482" y="370" font-size="9.5" fill="#444">never / sometimes / always</text>
+    <text x="482" y="382" font-size="9.5" fill="#444">+ model traces</text>
+  </g>
+
+  <!-- Table -> Coordinator (read) -->
+  <line x1="740" y1="110" x2="602" y2="110" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <g>
+    <circle cx="628" cy="90" r="7" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="628" y="93" text-anchor="middle" font-size="8.5" font-weight="bold">1</text>
+    <text x="640" y="93" font-size="9.5" fill="#444">candidates still</text>
+    <text x="640" y="105" font-size="9.5" fill="#444">unchecked</text>
+  </g>
+
+  <!-- Reconcile -> Table (fill / update) -->
+  <path d="M600,420 C680,420 772,330 772,262" fill="none" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <g>
+    <circle cx="630" cy="447" r="7" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="630" y="450" text-anchor="middle" font-size="8.5" font-weight="bold">4</text>
+    <text x="642" y="450" font-size="9.5" fill="#444">exclude, update</text>
+    <text x="642" y="462" font-size="9.5" fill="#444">(first time: fill)</text>
+  </g>
+
+  <!-- Table -> Verdict table -->
+  <line x1="880" y1="255" x2="880" y2="398" stroke="#333" stroke-width="1.4" marker-end="url(#arr)"/>
+  <g>
+    <circle cx="896" cy="318" r="7" fill="white" stroke="#333" stroke-width="1"/>
+    <text x="896" y="321" text-anchor="middle" font-size="8.5" font-weight="bold">5</text>
+    <text x="908" y="321" font-size="9.5" fill="#444">nothing left</text>
+    <text x="908" y="333" font-size="9.5" fill="#444">to check:</text>
+    <text x="908" y="345" font-size="9.5" fill="#444">derive</text>
+  </g>
+</svg>
