@@ -96,8 +96,8 @@ def main(argv=None):
         for c in C.cells(m):
             k = C.cone_of_cell(m, c)
             print(f"  {c.id:<28} rows {len(k.rows):>2}  candidates {candidate_space(m, k.rows):>6}  {', '.join(k.rows)}")
-        for u in wellformed.unmatched_failures(m):
-            print(f"  unmatched: {u['mode']} at {u['component']}.{u['port']}")
+        for u in wellformed.absorbed(m):
+            print(f"  absorbs: {', '.join(u['modes'])} at {u['component']}.{u['port']} ({u['kind']}: {u['reason']})")
         return
     if a.cmd == "run":
         from .intake import cert_import, log_import

@@ -100,13 +100,15 @@ def module_for(m, cone, want=({},), done=(), schedule="rounds", name="Cone"):
         ) + "NoMsg]"
         starts.append(f'x = "{u.id}" -> {body}')
     L.append("Start(x) == CASE " + "\n             [] ".join(starts))
+    strata = guard_strata(m, cone)
+    L.append(f"MaxPhase == {max(strata.values() or [0])}")
     L.append("")
 
     for c in comps:
-        _component(m, c, cone, fields, vec_rows, always, in_cone, L)
+        _component(m, c, cone, fields, vec_rows, always, in_cone, L, strata.get(c.id, 0))
 
     # ---- one round: every component once, merged into its output edges
-    lets = [f"o_{_ident(c.id)} == Outs_{_ident(c.id)}(lab, F)" for c in comps]
+    lets = [f"o_{_ident(c.id)} == Outs_{_ident(c.id)}(lab, F, ph)" for c in comps]
     cases, fired = [], []
     for e in edge_ids:
         src = m.edges[e].src
@@ -115,20 +117,25 @@ def module_for(m, cone, want=({},), done=(), schedule="rounds", name="Cone"):
         cases.append(f'e = "{e}" -> MergeLab(lab[e], o_{_ident(src[0])}.{_ident(src[1])})')
     for c in comps:
         fired.append(f"o_{_ident(c.id)}.fired")
-    L.append("Step(lab, F) ==")
+    L.append("Step(lab, F, ph) ==")
     L.append("  LET " + "\n      ".join(lets) if lets else "  LET dummy == 0")
     L.append("  IN [lab |-> [e \\in Edges |-> CASE " + "\n                          [] ".join(cases + ["OTHER -> lab[e]"]) + "],")
     L.append("      fired |-> " + (" \\cup ".join(fired) if fired else "{}") + "]")
     L.append("")
-    L.append("VARIABLES uc, fire, lab, fired, rnd, done")
-    L.append("vars == <<uc, fire, lab, fired, rnd, done>>")
+    L.append("VARIABLES uc, fire, lab, fired, rnd, done, phase")
+    L.append("vars == <<uc, fire, lab, fired, rnd, done, phase>>")
     L.append("Init == /\\ uc \\in UseCases /\\ fire \\in Vectors /\\ lab = Start(uc)")
-    L.append("        /\\ fired = {} /\\ rnd = 0 /\\ done = FALSE")
-    L.append("\\* A round; the round that changes nothing marks the least fixpoint (done) and records")
-    L.append("\\* which rows fire on the final labels.")
+    L.append("        /\\ fired = {} /\\ rnd = 0 /\\ done = FALSE /\\ phase = 0")
+    L.append("\\* A round. A guard that may drop a message acts only from its phase on, once everything upstream")
+    L.append("\\* of it has settled; a round that changes nothing opens the next phase, and in the last phase it")
+    L.append("\\* marks the least fixpoint (done) and records which rows fire on the final labels.")
     L.append("Round == /\\ ~done")
-    L.append("         /\\ LET s == Step(lab, fire) IN /\\ lab' = s.lab /\\ fired' = s.fired")
-    L.append("                                       /\\ done' = (s.lab = lab)")
+    L.append("         /\\ LET s == Step(lab, fire, phase) IN")
+    L.append("              /\\ lab' = s.lab /\\ fired' = s.fired")
+    L.append("              /\\ IF s.lab = lab")
+    L.append("                   THEN IF phase = MaxPhase THEN done' = TRUE /\\ phase' = phase")
+    L.append("                        ELSE done' = FALSE /\\ phase' = phase + 1")
+    L.append("                   ELSE done' = FALSE /\\ phase' = phase")
     L.append("         /\\ rnd' = rnd + 1 /\\ UNCHANGED <<uc, fire>>")
     L.append("Next == Round")
     L.append("Spec == Init /\\ [][Next]_vars")
@@ -137,7 +144,27 @@ def module_for(m, cone, want=({},), done=(), schedule="rounds", name="Cone"):
     return "\n".join(L) + "\n", cfg
 
 
-def _component(m, c, cone, fields, vec_rows, always, in_cone, L):
+def guard_strata(m, cone):
+    """The phase from which each guard that may drop a message acts: one more than the guards of that
+    kind upstream of it, so that it reads its input only once everything upstream has settled (the
+    stratified fixpoint of the propagation property). Guards on a cycle never drop and act always."""
+    from ..model.cone import upstream
+    droppers = [c for c in cone.components if m.components[c].is_guard and not m.components[c].on_cycle]
+    memo = {}
+
+    def s(g):
+        if g not in memo:
+            memo[g] = 0
+            up = set()
+            for e in m.edges_into(g, "in"):
+                up |= upstream(m, e.id)
+            memo[g] = 1 + max([s(x) for x in droppers if x != g and x in up] or [0])
+        return memo[g]
+    return {g: s(g) for g in droppers}
+
+
+def _component(m, c, cone, fields, vec_rows, always, in_cone, L, stratum=0):
+    from ..model.cone import forwarding
     cid = _ident(c.id)
     edge_ids = set(cone.edges)
     in_edges = {p: [e.id for e in m.edges_into(c.id, p) if e.id in edge_ids] for p in c.ins}
@@ -220,7 +247,9 @@ def _component(m, c, cone, fields, vec_rows, always, in_cone, L):
         any_caught = " \\/ ".join(cd for _, cd in caught) or "FALSE"
         drop = "FALSE" if c.on_cycle else f"(~n_in /\\ ({any_caught}))"
         lets.append(f"drop == {drop}")
-        outs["out"] = (f"[u |-> u_in /\\ ~drop, n |-> n_in, k |-> [b |-> {_bexpr(parts)}, "
+        # a guard that may drop acts only from its phase on, when its input has settled
+        acts = f"ph >= {stratum} /\\ " if stratum else ""
+        outs["out"] = (f"[u |-> {acts}u_in /\\ ~drop, n |-> n_in, k |-> [b |-> {_bexpr(parts)}, "
                        f"c |-> {cexpr}, a |-> {aexpr}, t |-> {texpr}]]")
     else:
         rows = [m.rows[r] for r in sorted(in_cone) if m.rows[r].comp == c.id]
@@ -237,7 +266,8 @@ def _component(m, c, cone, fields, vec_rows, always, in_cone, L):
                         e = eff(f"i_{P}", f)
                         conds.append(f"{e} >= {th}")
                         mags.append(e)
-            lets.append(f"m_{R} == " + " /\\ ".join(conds))
+            # an internal fault needs no incoming message
+            lets.append(f"m_{R} == " + (" /\\ ".join(conds) if conds else "TRUE"))
             if mags:
                 lets.append(f"v_{R} == " + ("MaxSet({" + ", ".join(mags) + "})" if len(mags) > 1 else mags[0]))
             if r.id in always:
@@ -245,36 +275,61 @@ def _component(m, c, cone, fields, vec_rows, always, in_cone, L):
             else:
                 lets.append(f'f_{R} == m_{R} /\\ "{r.id}" \\in F')
                 fired_terms.append((r.id, f"f_{R}"))
+        sinks = [r for r in rows if r.kind == "sink"]
+
+        def sunk(p, f):
+            """A sink row at port p that matches f absorbs it in this round."""
+            cs = [f"f_{_ident(s.id)}" for s in sinks if any(f in m.family(g) for g in s.when.get(p, {}).get("modes", {}))]
+            return " \\/ ".join(cs)
+
         auth_out = f"{c.authority}" if c.raises else f"Min({c.authority}, all.a)"
         taint_out = "TRUE" if not c.trusted else "all.t"
+        fwds = [(ports, q, r, join) for ports, q, r, join in forwarding(m, c) if r is None or r.id in in_cone]
         for qp in c.outs:
-            srcs = [p for p in c.ins if qp in c.flow.get(p, [])]
-            sent_normal = " \\/ ".join(f"u_{_ident(p)}" for p in srcs) or "FALSE"
-            norm = " \\/ ".join(f"n_{_ident(p)}" for p in srcs) or "FALSE"
-            emitting = [r for r in rows if qp in r.then]
-            sent = " \\/ ".join([f"({sent_normal})"] + [f"f_{_ident(r.id)}" for r in emitting])
+            mine = [(ports, r, join) for ports, q, r, join in fwds if q == qp]
+            sent, norm = [], []
+            for ports, r, join in mine:
+                if r is None:
+                    sent.append(f"u_{_ident(ports[0])}")
+                    norm.append(f"n_{_ident(ports[0])}")
+                else:
+                    sent.append(f"f_{_ident(r.id)}")
+                    if r.kind == "fwd":
+                        nj = (" \\/ " if join == "any" else " /\\ ").join(f"n_{_ident(p)}" for p in ports)
+                        norm.append(f"(f_{_ident(r.id)} /\\ ({nj or 'FALSE'}))")
+            emitting = [r for r in rows if qp in r.then and r.kind in ("row", "default")]
+            sent += [f"f_{_ident(r.id)}" for r in emitting]
+            sent_x = " \\/ ".join(dict.fromkeys(sent)) or "FALSE"
+            norm_x = " \\/ ".join(norm) or "FALSE"
             parts = []
             for f in fields:
                 terms = []
-                for p in srcs:
-                    if f in c.passes:
-                        terms.append(f'IF u_{_ident(p)} THEN i_{_ident(p)}.b["{f}"] ELSE 0')
+                for ports, r, join in mine:
+                    gate = "" if r is None else f"f_{_ident(r.id)} /\\ "
+                    for p in ports:
+                        if f not in c.passes.get(p, []):
+                            continue
+                        sk = sunk(p, f)
+                        cond = f"{gate}u_{_ident(p)}" + (f" /\\ ~({sk})" if sk else "")
+                        terms.append(f'IF {cond} THEN i_{_ident(p)}.b["{f}"] ELSE 0')
                 for r in emitting:
                     if f in r.then[qp]:
                         op, k = r.then[qp][f]
                         R = _ident(r.id)
                         val = {"const": str(k), "keep": f"v_{R}", "max": f"v_{R}", "plus": f"Sat(v_{R} + {k})"}[op]
                         terms.append(f"IF f_{R} THEN {val} ELSE 0")
+                terms = list(dict.fromkeys(terms))
                 if len(terms) == 1:
                     parts.append((f, f"({terms[0]})"))
                 elif terms:
                     parts.append((f, "MaxSet({" + ", ".join(terms) + "})"))
-            outs[qp] = (f"[u |-> {sent}, n |-> {norm}, k |-> [b |-> {_bexpr(parts)}, "
+            outs[qp] = (f"[u |-> {sent_x}, n |-> {norm_x}, k |-> [b |-> {_bexpr(parts)}, "
                         f"c |-> all.c, a |-> {auth_out}, t |-> {taint_out}]]")
     fired = " \\cup ".join(f'(IF {x} THEN {{"{rid}"}} ELSE {{}})' for rid, x in fired_terms) or "{}"
     rec = ",\n         ".join(f"{_ident(qp)} |-> {v}" for qp, v in outs.items())
-    L.append(f"\\* {c.kind} {c.id}" + (f" (guard on {c.on_edge}{', on a cycle' if c.on_cycle else ''})" if c.is_guard else ""))
-    L.append(f"Outs_{cid}(lab, F) ==")
+    L.append(f"\\* {c.kind} {c.id}" + (f" (guard on {c.on_edge}{', on a cycle' if c.on_cycle else ''}"
+                                        f"{f', acts from phase {stratum}' if stratum else ''})" if c.is_guard else ""))
+    L.append(f"Outs_{cid}(lab, F, ph) ==")
     L.append("  LET " + "\n      ".join(lets))
     L.append(f"  IN [{rec},\n         fired |-> {fired}]")
     L.append("")

@@ -1,7 +1,8 @@
 % The epistemic layer for one cell: candidates, the runs each admits, statuses, evidence.
 %
 % Input facts
-%   row(R)           a row of the cell's cone whose activation is open (a candidate chooses it)
+%   row(R)           an open row: of the cell's cone (crow(R)), or of the cone of a witness linked to it
+%   crow(R)          a row of the cell's own cone; counts are projected onto these
 %   llm(R)           an LLM row or a learned guard's row: never N (the LLM rule)
 %   leak(R)          a guard's leak row;  decidable(R): its target is decidable from the edge
 %   run(F)           a run explored by TLC: a use case and a firing choice
@@ -9,6 +10,8 @@
 %   uses(F)          the run sends a message over the observation point
 %   reaches(F)       the failure reaches the observation point in that run
 %   match(F,W)       the run matches witness W on the fields W logs
+%   wrun(W,F)        a run of witness W's own cone; wrow(W,R): an open row of that cone;
+%   wfires(W,F,R)    R is in that run's firing choice; wmatch(W,F): the run matches all W logged
 %   cert(K,R,X)      certificate K states activation X (n, s, a) for row R
 %   wit(W)           a witness
 % The externals switch evidence on and off without grounding again (suspension, what-if).
@@ -23,7 +26,7 @@
 
 % ---- the runs a candidate admits ---------------------------------------------
 violates(F) :- fires(F,R), act(R,n).
-violates(F) :- run(F), act(R,a), not fires(F,R).
+violates(F) :- run(F), crow(R), act(R,a), not fires(F,R).
 admits(F) :- run(F), not violates(F).
 
 % ---- status of the failure in this candidate (box / diamond over its runs) ----
@@ -46,7 +49,12 @@ status(U,s) :- some_reach(U), use_clean(U).
 
 % ---- witnesses: a remaining candidate has a run matching every witness in force
 matched(W) :- admits(F), match(F,W).
+% a linked witness is matched by a run of its own cone that the candidate admits
+wviolates(W,F) :- wfires(W,F,R), act(R,n).
+wviolates(W,F) :- wrun(W,F), wrow(W,R), act(R,a), not wfires(W,F,R).
+matched(W) :- wrun(W,F), wmatch(W,F), not wviolates(W,F).
 :- wit_on(W), not matched(W).
+
 
 #show act/2.
 #show status/1.

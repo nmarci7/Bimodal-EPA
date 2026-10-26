@@ -70,7 +70,7 @@ export class ModelView {
       h('span', {}, `${rows.length} rows (${gen} generated, ${open} open)`),
       h('span', {}, `${ch.cells.length} cells`),
       h('span', {}, `largest cone: ${maxc} candidates`),
-      (ch.unmatched || []).length ? h('span', { style: 'color: var(--h-ink)' }, `${ch.unmatched.length} failure(s) absorbed without a row`) : null].filter(Boolean));
+      (ch.absorbed || []).length ? h('span', { class: 'muted' }, `${ch.absorbed.length} absorption(s) declared`) : null].filter(Boolean));
   }
 
   syncMapBtn() { this.mapBtn.setAttribute('aria-pressed', String(this.table.open)); this.mapBtn.textContent = this.table.open ? 'Mapping table: on' : 'Mapping table: off'; }

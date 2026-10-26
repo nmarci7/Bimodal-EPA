@@ -20,11 +20,13 @@ EXPECTED = {
     ("wallet", "S4"): {"oom@o_statement": ("guarantee", 2), "dup@o_statement": ("guarantee", 6)},
     ("smart-home", "S0"): {"conf@o_egress": ("exposed", 1), "unsafe@o_actuator": ("unchecked", 72),
                            "auth@o_actuator": ("unchecked", 3), "value@o_report": ("unchecked", 4)},
+    # c_hub_failover and c_gs2 are scoped to voice and calendar, but the offline use case also reaches the
+    # planner through the hub's context and can fire their rows: by the scope rule they do not count there
     ("smart-home", "S1"): {"unsafe@o_actuator": ("guarantee", 24), "commission@o_actuator": ("guarantee", 48),
-                           "omission@o_actuator": ("guarantee", 4), "value@o_actuator": ("unchecked", 4)},
+                           "omission@o_actuator": ("unchecked", 12), "value@o_actuator": ("unchecked", 4)},
     ("smart-home", "S2"): {"value@o_report": ("hope", 1), "conf@o_skill": ("hope", 1)},
     ("smart-home", "S3"): {"conf@o_egress": ("guarantee", 1), "value@o_report": ("guarantee", 1),
-                           "conf@o_skill": ("guarantee", 1)},
+                           "conf@o_skill": ("unchecked", 3)},
     ("mcp-coding-agent", "S0"): {"auth@o_process": ("exposed", 1), "auth@o_mcp": ("exposed", 1),
                                  "conf@o_pr": ("unchecked", 3)},
     ("mcp-coding-agent", "S1"): {"taint@o_process": ("guarantee", 1), "malicious@o_release": ("guarantee", 6),

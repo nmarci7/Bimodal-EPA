@@ -149,7 +149,7 @@ def model_check(body: Doc):
         cones.append({"cell": c.id, "rows": k.rows, "fields": k.fields, "components": k.components,
                       "candidates": candidate_space(m, k.rows), "runs": (2 ** len(k.rows)) * max(1, len(k.use_cases))})
     return {"ok": True, "problems": [], "summary": m.summary(), "cells": cones,
-            "unmatched": wellformed.unmatched_failures(m), "decisions": m.decisions}
+            "absorbed": wellformed.absorbed(m), "decisions": m.decisions}
 
 
 @app.post("/api/model/yaml")

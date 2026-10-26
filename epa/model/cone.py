@@ -12,6 +12,10 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
+# Bumped whenever the meaning of a run changes, so that cached runs of an older engine are not reused.
+# 2: formal core draft 4 - pass-through by default, forwarding / internal-fault / sink rows, phased guards.
+SEMANTICS = 2
+
 
 @dataclass(frozen=True)
 class Cell:
@@ -44,9 +48,11 @@ class Cone:
     cell_fields: dict = field(default_factory=dict) # cell id -> the mode fields that cell's cone reads
     rel: set = field(default_factory=set)            # (edge, field) pairs the runs compute exactly
     cell_rel: dict = field(default_factory=dict)     # cell id -> the (edge, field) pairs its own rows decide
+    scope_ucs: list = None                           # use cases that can send over the point (the scope rule)
 
     def key(self, m):
         payload = {
+            "semantics": SEMANTICS,
             "rows": {r: m.rows[r].to_json() for r in self.rows + self.always},
             "comps": {c: _comp_sig(m.components[c]) for c in self.components},
             "edges": {e: [list(m.edges[e].src), list(m.edges[e].dst)] for e in self.edges},
@@ -105,23 +111,44 @@ def _when_ports(m, r):
     return list(r.when)
 
 
+def forwarding(m, c):
+    """Every way a component forwards a message: (input ports, output port, row or None, join).
+    The `flow` of a port is a forwarding of that port alone; a forwarding row names its ports (all of
+    them must arrive, a fork-join) or any input ("*"). A row's "as it is" outputs forward too, but the
+    message they send exists because a failure row fired, so it is not a normal message."""
+    out = []
+    for p, qs in c.flow.items():
+        for q in qs:
+            out.append(([p], q, None, "all"))
+    for r in m.comp_rows(c.id):
+        if r.kind not in ("fwd", "row") or r.fixed == "N":
+            continue
+        ports = list(c.ins) if "*" in r.when else list(r.when)
+        for q in r.asis:
+            out.append((ports, q, r, "any" if "*" in r.when else "all"))
+    return out
+
+
 def normal_edges(m):
-    """Per use case, the edges the normal flow uses (every guard passes a normal message)."""
+    """Per use case, the edges the normal flow uses (every guard passes a normal message): the flow,
+    and forwarding rows whose input ports all carry a normal message."""
     out = {}
     for u in m.use_cases:
         used = {eid for eid, _ in u.entries}
-        stack = list(used)
-        while stack:
-            e = m.edges[stack.pop()]
-            c = e.dst[0]
-            if c == "sys":
-                continue
-            comp = m.components[c]
-            for q in comp.flow.get(e.dst[1], []):
-                for e2 in m.edges_from(c, q):
-                    if e2.id not in used:
-                        used.add(e2.id)
-                        stack.append(e2.id)
+        changed = True
+        while changed:
+            changed = False
+            for c in m.components.values():
+                at = {p for p in c.ins if any(e.id in used for e in m.edges_into(c.id, p))}
+                for ports, q, r, join in forwarding(m, c):
+                    if r is not None and r.kind != "fwd":
+                        continue
+                    ok = (any(p in at for p in ports) if join == "any" else all(p in at for p in ports)) if ports else False
+                    if ok:
+                        for e2 in m.edges_from(c.id, q):
+                            if e2.id not in used:
+                                used.add(e2.id)
+                                changed = True
         out[u.id] = used
     return out
 
@@ -139,15 +166,18 @@ def possible(m):
                 inp = {p: [e.id for e in m.edges_into(c.id, p) if e.id in pos] for p in c.ins}
                 fields_at = {p: set().union(*[pos[e] for e in es]) if es else set() for p, es in inp.items()}
                 emit = {}
-                for p, es in inp.items():
-                    if not es:
+                for ports, qp, r, join in forwarding(m, c):
+                    arrived = [p for p in ports if inp.get(p)]
+                    if not arrived or (join == "all" and len(arrived) < len(ports)):
                         continue
-                    for qp in c.flow.get(p, []):
-                        emit.setdefault(qp, set())
-                        emit[qp] |= fields_at[p] if c.is_guard else (fields_at[p] & set(c.passes))
+                    if r is not None and not _trigger_possible(m, c, r, inp, fields_at):
+                        continue
+                    emit.setdefault(qp, set())
+                    for p in arrived:
+                        emit[qp] |= fields_at[p] & set(c.passes.get(p, []))
                 if not c.is_guard:
                     for r in m.comp_rows(c.id):
-                        if _trigger_possible(m, c, r, inp, fields_at):
+                        if r.kind in ("row", "default") and _trigger_possible(m, c, r, inp, fields_at):
                             for qp, d in r.then.items():
                                 emit.setdefault(qp, set())
                                 emit[qp] |= set(d)
@@ -301,19 +331,37 @@ def cone_of_cell(m, cell):
         for r in m.comp_rows(c.id):
             if f in r.then.get(src[1], {}):
                 add_row(r)
-        if f in c.passes:
-            for p in c.ins:
-                if src[1] in c.flow.get(p, []):
-                    for e in m.edges_into(c.id, p):
-                        if e.id in sub:
-                            mark(e.id, [f])
+        # pass-through: the field comes from every input port that forwards to this output, unless a
+        # sink row there may absorb it
+        for ports, q, r, _ in forwarding(m, c):
+            if q != src[1]:
+                continue
+            if r is not None:
+                add_row(r)
+            for p in ports:
+                if f not in c.passes.get(p, []):
+                    continue
+                for e in m.edges_into(c.id, p):
+                    if e.id in sub:
+                        mark(e.id, [f])
+                for s in m.comp_rows(c.id):
+                    if s.kind == "sink" and any(f in m.family(g) for g in s.when.get(p, {}).get("modes", {})):
+                        add_row(s)
+    # forwarding rows are structure: they decide which messages exist and which are normal
+    for r in m.rows.values():
+        if r.kind == "fwd" and r.comp in U and r.fixed != "N":
+            include.add(r.id)
     rows = sorted(r for r in include if m.rows[r].open or m.rows[r].fixed == "S")
     always = sorted(r for r in include if m.rows[r].fixed == "A")
     fields = [f for f in m.fields if any(f == ff for _, ff in rel)]
     comps = sorted(U)
+    if not hasattr(m, "_possible"):
+        m._normal_edges = normal_edges(m)
+        m._possible = possible(m)
+    scope_ucs = [u for u in ucs if o.edge in m._possible[u]]
     return Cone(cells=[cell], obs=cell.obs, components=comps, edges=sub_edges, use_cases=ucs,
                 rows=rows, always=always, fields=fields, cell_rows={cell.id: rows},
-                cell_fields={cell.id: fields}, rel=set(rel), cell_rel={cell.id: set(rel)})
+                cell_fields={cell.id: fields}, rel=set(rel), cell_rel={cell.id: set(rel)}, scope_ucs=scope_ucs)
 
 
 def cones(m, cell_list, merge_limit=10):
@@ -344,7 +392,7 @@ def cones(m, cell_list, merge_limit=10):
                                    use_cases=k.use_cases, rows=list(k.rows), always=list(k.always),
                                    fields=list(k.fields), cell_rows=dict(k.cell_rows),
                                    cell_fields=dict(k.cell_fields), rel=set(k.rel),
-                                   cell_rel=dict(k.cell_rel)))
+                                   cell_rel=dict(k.cell_rel), scope_ucs=k.scope_ucs))
         out += groups
     return out
 

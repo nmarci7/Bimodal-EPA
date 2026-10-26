@@ -38,7 +38,8 @@ class Component:
     ins: list = field(default_factory=list)
     outs: list = field(default_factory=list)
     flow: dict = field(default_factory=dict)        # in port -> [out ports]
-    passes: list = field(default_factory=list)      # mode fields passed unchanged along the normal flow
+    passes: dict = field(default_factory=dict)      # in port -> mode fields passed unchanged where it forwards
+    absorbs: list = field(default_factory=list)     # [{port, modes, reason}] declared absorptions
     trusted: bool = True
     authority: int = 0
     raises: bool = False
@@ -84,8 +85,9 @@ class Edge:
 class Row:
     id: str
     comp: str
-    kind: str                     # row | default | leak | fp
-    when: dict                    # port -> {"any": True} | {"modes": {field: threshold}}; port "*" = any input
+    kind: str                     # row | fwd | sink | default | leak | fp
+    when: dict                    # port -> {"any": True} | {"modes": {field: threshold}}; port "*" = any input;
+                                  # {} for an internal fault (needs no incoming message)
     then: dict                    # port -> {field: (op, k)}  op in const | keep | plus | max
     open: bool = True             # part of the candidate space (False: fixed by structure)
     llm: bool = False             # can never be N (LLM rule; learned guards)
@@ -94,12 +96,17 @@ class Row:
     label: str = ""
     reason: str = ""
     fixed: str | None = None      # N | S | A when the activation is fixed by structure (not a candidate choice)
+    asis: list = field(default_factory=list)   # output ports the row sends the message on "as it is"
+
+    @property
+    def emits_failure(self):
+        return any(self.then.get(p) for p in self.then)
 
     def to_json(self):
         return {"id": self.id, "comp": self.comp, "kind": self.kind, "when": self.when,
                 "then": {p: {m: list(v) for m, v in d.items()} for p, d in self.then.items()},
-                "open": self.open, "fixed": self.fixed, "llm": self.llm, "decidable": self.decidable, "target": self.target,
-                "label": self.label}
+                "asis": self.asis, "open": self.open, "fixed": self.fixed, "llm": self.llm,
+                "decidable": self.decidable, "target": self.target, "label": self.label}
 
 
 @dataclass
@@ -275,33 +282,68 @@ def validate(doc) -> list:
         for key, levels in (("authority", auth), ("requires", auth), ("clearance", conf)):
             if key in c and c[key] not in levels:
                 p.append(f"component {cid}: {key} {c[key]!r} is not a level of its lattice")
+        if "pass" in c:
+            p.append(f"component {cid}: 'pass' is gone - every failure now passes through where the component "
+                     f"forwards; declare what it absorbs with 'absorbs: [{{port, modes, reason}}]'")
+        for a in c.get("absorbs", []):
+            if a.get("port") not in c.get("in", []):
+                p.append(f"component {cid}: absorbs on unknown input port {a.get('port')!r}")
+            for mname in _absorbed_modes(a, []):
+                if mname not in fields:
+                    p.append(f"component {cid}: absorbs unknown mode {mname!r}")
+            if not a.get("reason"):
+                p.append(f"component {cid}: absorbing at {a.get('port')} needs a reason")
+            if c.get("kind") == "llm":
+                p.append(f"component {cid}: an LLM component passes nothing through, so it has nothing to absorb")
         for r in c.get("rows", []):
             rid = r.get("id")
             if not rid:
                 p.append(f"component {cid}: a row without an id")
                 continue
-            for port, pat in (r.get("when") or {}).items():
+            when = r.get("when") or {}
+            for port, pat in when.items():
                 if port != "*" and port not in c.get("in", []):
                     p.append(f"row {rid}: unknown input port {cid}.{port}")
                 if port == "*" and pat not in ("any", None, True):
                     p.append(f"row {rid}: 'any input' takes only 'any message'; "
                              f"name the input port to match a failure")
-                if port == "*" and len(r.get("when") or {}) > 1:
+                if port == "*" and len(when) > 1:
                     p.append(f"row {rid}: 'any input' cannot be combined with named ports")
                 if isinstance(pat, dict):
                     for mname in pat:
                         if mname not in fields:
                             p.append(f"row {rid}: unknown mode {mname!r}")
-            for port, emits in (r.get("then") or {}).items():
+            then = r.get("then") or {}
+            if not isinstance(then, dict):
+                p.append(f"row {rid}: 'then' maps output ports to what is emitted there")
+                continue
+            for port, emits in then.items():
                 if port not in c.get("out", []):
                     p.append(f"row {rid}: unknown output port {cid}.{port}")
-                for mname, op in (emits or {}).items():
+                if _is_asis(emits):
+                    continue
+                if not isinstance(emits, dict):
+                    p.append(f"row {rid}: emit on {port} must be a mapping of modes, or 'as it is'")
+                    continue
+                for mname, op in emits.items():
                     if mname not in fields:
                         p.append(f"row {rid}: unknown mode {mname!r}")
                     try:
                         _parse_op(op)
                     except ValueError as e:
                         p.append(f"row {rid}: {e}")
+            failure_in = any(isinstance(pat, dict) for pat in when.values())
+            failure_out = any(not _is_asis(e) and e for e in then.values())
+            if not then and c.get("kind") == "llm":
+                p.append(f"row {rid}: an LLM component passes nothing through, so a sink row has nothing to absorb")
+            if not then and not failure_in:
+                p.append(f"row {rid}: a row without an emission is a sink, and a sink names the failures it absorbs "
+                         f"(e.g. when: {{port: {{late: 3}}}})")
+            if not when and not failure_out:
+                p.append(f"row {rid}: an internal fault (no condition) must emit a failure")
+            if c.get("kind") == "llm" and failure_out and r.get("activation") == "never":
+                p.append(f"row {rid}: an LLM row that emits a failure is never 'never' (the LLM rule); "
+                         f"remove the row, or drop the default with a structural reason")
         for d in c.get("drop_defaults", []):
             if not d.get("reason"):
                 p.append(f"component {cid}: dropping the default {d.get('port')}/{d.get('mode')} needs a reason")
@@ -382,6 +424,22 @@ def _entries(u):
     return [{"port": str(u.get("entry", "")).replace("sys.", ""), "token": u.get("token") or {}}]
 
 
+ASIS = ("as it is", "as-is", "asis")
+
+
+def _is_asis(emits):
+    """An emission that sends the message on with nothing added: {} or 'as it is'."""
+    return emits in (None, {}) or (isinstance(emits, str) and emits.strip().lower() in ASIS)
+
+
+def _absorbed_modes(a, fields):
+    """The modes an `absorbs` entry names ('all' expands to every mode field)."""
+    ms = a.get("modes", a.get("mode", []))
+    if ms == "all":
+        return list(fields)
+    return [ms] if isinstance(ms, str) else list(ms or [])
+
+
 def _parse_op(op):
     """'const 9' | 9 | 'keep' | '+2' | 'max'  ->  (op, k)"""
     if isinstance(op, int):
@@ -429,17 +487,22 @@ def normalise(doc) -> Model:
         flow = c.get("flow")
         if flow is None:
             flow = {p: list(outs) for p in ins}
-        passes = c.get("pass", "all" if kind == "store" else [])
-        if passes == "all":
-            passes = list(fields)
-        else:
-            expanded = []
-            for mname in passes or []:
-                expanded += [mname] + [s for s, p in parent.items() if p == mname]
-            passes = [f for f in fields if f in expanded]
+        # every failure passes through where a non-LLM component forwards, unless it is declared absorbed
+        # (A6, pessimistic); an LLM component's failures come from its rows alone
+        absorbs, passes = [], {}
+        for a in c.get("absorbs", []):
+            ms = _absorbed_modes(a, fields)
+            absorbs.append({"port": a["port"], "modes": ms, "reason": a["reason"]})
+        for p in ins:
+            gone = set()
+            for a in absorbs:
+                if a["port"] == p:
+                    for mname in a["modes"]:
+                        gone |= {mname} | {s for s, q in parent.items() if q == mname}
+            passes[p] = [] if kind == "llm" else [f for f in fields if f not in gone]
         comps[c["id"]] = Component(
             id=c["id"], kind=kind, label=c.get("label", ""), ins=ins, outs=outs,
-            flow={p: list(v) for p, v in flow.items()}, passes=passes,
+            flow={p: list(v) for p, v in flow.items()}, passes=passes, absorbs=absorbs,
             trusted=c.get("trusted", kind not in ("external", "user")),
             authority=auth.index(c.get("authority", auth[-1])),
             raises=bool(c.get("raises", False)),
@@ -477,7 +540,7 @@ def normalise(doc) -> Model:
                 targets.append(tt)
             comps[g["id"]] = Component(
                 id=g["id"], kind="guard", label=g.get("label", g["id"]), ins=["in"], outs=["out"],
-                flow={"in": ["out"]}, passes=[], trusted=True, authority=len(auth) - 1, raises=False,
+                flow={"in": ["out"]}, passes={"in": list(fields)}, trusted=True, authority=len(auth) - 1, raises=False,
                 clearance=len(conf) - 1, requires=0, version=g.get("version"), targets=targets,
                 learned=bool(g.get("learned", False)), closed_output=bool(g.get("closed_output", False)),
                 fp_omission=int(g.get("fp_omission", 10 if g.get("learned") else 0)),
@@ -491,10 +554,16 @@ def normalise(doc) -> Model:
     doc_edges = {e["id"]: e for e in doc["edges"]}
     for o in doc.get("observation_points", []):
         tol = {m: int(v) for m, v in (o.get("tolerate") or {}).items()}
-        # 'receiver': judge against the receiving component's own clearance / required authority
+        # 'receiver': judge against the receiving component's own clearance / required authority. A point
+        # that names neither is judged against a receiving component whose levels can be violated at all.
         recv = comps.get(_parse_ref(doc_edges[o["edge"]]["to"])[0])
         clr = o.get("clearance")
         req = o.get("requires")
+        if clr is None and req is None and recv is not None:
+            if recv.clearance < len(conf) - 1:
+                clr = "receiver"
+            if recv.requires > 0:
+                req = "receiver"
         obs[o["id"]] = ObsPoint(
             id=o["id"], edge=seg_of.get(o["edge"], o["edge"]), doc_edge=o["edge"], label=o.get("label", ""),
             log=o.get("log", ""), tolerate=tol, taint=o.get("taint", "accept"),
@@ -515,18 +584,32 @@ def normalise(doc) -> Model:
     for c in doc["components"]:
         comp = comps[c["id"]]
         for r in c.get("rows", []):
-            then = {port: {mname: _parse_op(op) for mname, op in (emits or {}).items()}
-                    for port, emits in (r.get("then") or {}).items()}
-            act = r.get("activation", "open")
+            raw_then = r.get("then") or {}
+            asis = [port for port, emits in raw_then.items() if _is_asis(emits)]
+            then = {port: ({} if port in asis else {mname: _parse_op(op) for mname, op in emits.items()})
+                    for port, emits in raw_then.items()}
+            when = _parse_when(r.get("when"))
+            failure_in = any("modes" in pat for pat in when.values())
+            if not then:
+                kind = "sink"           # consumes the failures it matches
+            elif not failure_in and when and all(port in asis for port in then):
+                kind = "fwd"            # plain forwarding: the message goes on, nothing is added
+            else:
+                kind = "row"            # a failure row (an internal fault when `when` is empty)
+            act = r.get("activation", "always" if kind == "fwd" else "open")
             fixed = {"always": "A", "sometimes": "S", "never": "N"}.get(act)
-            rows[r["id"]] = Row(id=r["id"], comp=c["id"], kind="row", when=_parse_when(r.get("when")),
-                                then=then, open=fixed is None, llm=comp.llm, fixed=fixed,
+            rows[r["id"]] = Row(id=r["id"], comp=c["id"], kind=kind, when=when, then=then, asis=asis,
+                                open=fixed is None, llm=comp.llm and any(then.get(p) for p in then), fixed=fixed,
                                 label=r.get("label", ""), reason=r.get("reason", ""))
 
     m = Model(name=doc.get("name", "model"), description=doc.get("description", ""), top_modes=top,
               fields=fields, parent=parent, conf_levels=conf, auth_levels=auth, components=comps,
               edges=edges, rows=rows, obs=obs, use_cases=ucs, claims=list(doc.get("claims", [])),
               decisions=list(doc.get("decisions", [])), doc=doc)
+    for c in comps.values():
+        for a in c.absorbs:
+            m.decisions.append({"kind": "absorb", "component": c.id, "port": a["port"], "modes": a["modes"],
+                                "reason": a["reason"]})
     defaults.add_llm_defaults(m)
     defaults.add_guard_rows(m)
     _mark_cycles(m)

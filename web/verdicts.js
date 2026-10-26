@@ -90,7 +90,7 @@ export class VerdictsView {
       panel.appendChild(h('div', { class: 'conflictbox' },
         c.lacks_path ? 'The witnesses alone leave no candidate: some run the logs show is not a run of the model. The model lacks a path.'
           : [h('b', {}, 'The evidence was in conflict. '), `Minimal conflict set(s): ${c.conflicts.map((s) => `{${s.join(', ')}}`).join(', ')}. `,
-            `The engine suspended ${c.suspended.join(', ')} and decided the cell on the rest. A witness is what happened; the certificate is what someone signed. Withdraw the certificate, or reject the witness with a second reviewer.`]));
+            `The engine suspended ${c.suspended.join(', ')} in every cell and decided this one on the rest. A witness is what happened; the certificate is what someone signed. Withdraw the certificate, or reject the witness with a second reviewer.`]));
     }
     const kv = h('dl', { class: 'kv' });
     const add = (k, v) => { if (v !== null && v !== undefined && v !== '') kv.append(h('dt', {}, k), h('dd', {}, v)); };
@@ -103,6 +103,7 @@ export class VerdictsView {
     add('Root causes', (c.root_causes || []).length ? h('span', { class: 'mono small' }, c.root_causes.map((s) => (s.length ? `{${s.join(', ')}}` : 'no row needs to fire: the normal flow delivers it')).join('  ')) : null);
     add('Severity', c.severity ? `${c.severity} of 10` : null);
     add('Certificates used', c.certs_used.length ? c.certs_used.join(', ') : null);
+    add('Not counted here', (c.scope_withheld || []).length ? c.scope_withheld.map((w) => `${w.certificate}: its scope (${(w.scope || []).join(', ')}) does not cover ${w.uncovered.join(', ')}, in which this point can carry a message and its rows can fire`).join('; ') : null);
     add('Witnesses used', c.witnesses_used.length ? `${c.witnesses_used.length}: ${c.witnesses_used.slice(0, 6).join(', ')}${c.witnesses_used.length > 6 ? ', …' : ''}` : null);
     panel.appendChild(kv);
     const actions = h('div', { class: 'inline' },
@@ -191,10 +192,10 @@ export class VerdictsView {
       for (const r of rep.reverify) panel.appendChild(h('div', { class: 'wit' }, h('b', { class: 'mono' }, r.certificate), h('span', {}, r.changes.map((x) => `${x.component}: signed with ${x.signed_with}, now ${x.now}`).join('; ')),
         h('span', { class: 'muted' }, 'still in force (the guard is unchanged), but its upstream changed: re-run its verification')));
     } else panel.appendChild(h('p', { class: 'hint' }, 'No certificate was signed against a version that has since changed.'));
-    if (rep.unmatched.length) {
-      panel.appendChild(h('span', { class: 'section-title' }, 'Failures absorbed without a row'));
-      panel.appendChild(h('p', { class: 'hint' }, 'These modes can arrive at a deterministic component that has no row and no pass-through for them, so the model drops them silently. That is optimistic; add a row or a pass-through if the component can forward them.'));
-      panel.appendChild(h('ul', { class: 'story' }, rep.unmatched.map((u) => h('li', {}, h('span', { class: 'mono small' }, `${u.mode} at ${u.component}.${u.port}`)))));
+    if ((rep.absorbed || []).length) {
+      panel.appendChild(h('span', { class: 'section-title' }, 'Where failures stop'));
+      panel.appendChild(h('p', { class: 'hint' }, 'Every other failure passes through where a component forwards its message. Each of these is a claim of the model, with its reason; a verdict that depends on one is only as good as the claim.'));
+      panel.appendChild(h('ul', { class: 'story' }, rep.absorbed.map((u) => h('li', {}, h('span', { class: 'mono small' }, `${u.modes.join(', ')} at ${u.component}.${u.port}`), ` — ${u.reason || 'no reason given'}`))));
     }
     const rej = rep.register.certificates.filter((c) => c.state !== 'in force');
     if (rej.length) {

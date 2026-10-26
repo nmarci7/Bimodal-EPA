@@ -41,6 +41,8 @@ components:
     in: [plan, scripts]
     out: [edits, cmd, call]
     flow: {plan: [edits, cmd, call], scripts: []}
+    absorbs:
+      - {port: plan, modes: all, reason: "the runner splits a plan into its edits, commands and tool calls; what each carries is its own row (r_cmd, r_call, r_edit, r_drift)"}
     authority: maintainer
     clearance: private
     rows:
@@ -98,7 +100,6 @@ components:
     version: ci-2026-10
     in: [source, packages]
     out: [release]
-    pass: all
     clearance: private
     pos: {x: 1166, y: 336}
 

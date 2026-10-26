@@ -22,51 +22,18 @@ def check(m) -> list:
     return p
 
 
-def mode_reach(m):
-    """Over-approximation: which mode fields can be non-zero on which edge (any activation)."""
-    on = {e: set() for e in m.edges}
-    for u in m.use_cases:
-        for eid, tok in u.entries:
-            on[eid] |= {f for f, v in tok["b"].items() if v > 0}
-    changed = True
-    while changed:
-        changed = False
-        for c in m.components.values():
-            incoming = {p: set().union(*[on[e.id] for e in m.edges_into(c.id, p)]) if m.edges_into(c.id, p) else set()
-                        for p in c.ins}
-            out = {q: set() for q in c.outs}
-            for p, qs in c.flow.items():
-                for q in qs:
-                    out[q] |= incoming.get(p, set()) & set(c.passes)
-                    if c.is_guard:
-                        out[q] |= incoming.get(p, set())
-            for r in m.comp_rows(c.id):
-                for q, emits in r.then.items():
-                    out[q] |= set(emits)
-            for q, fs in out.items():
-                for e in m.edges_from(c.id, q):
-                    if not fs <= on[e.id]:
-                        on[e.id] |= fs
-                        changed = True
-    return on
-
-
-def unmatched_failures(m):
-    """Failure modes that can arrive at a non-LLM component's input port and match no row and no
-    pass-through there: they are absorbed silently, which is optimistic (A6). Listed for review."""
-    on = mode_reach(m)
+def absorbed(m):
+    """What the model says is absorbed, for review: the declared absorptions (with their reasons) and
+    the sink rows. Since every other failure passes through where a component forwards (A6), these are
+    the places where a failure stops, and each is a claim an auditor can dispute."""
     out = []
     for c in m.components.values():
-        if c.llm or c.is_guard:
-            continue
-        for p in c.ins:
-            arriving = set().union(*[on[e.id] for e in m.edges_into(c.id, p)]) if m.edges_into(c.id, p) else set()
-            handled = set(c.passes)
-            for r in m.comp_rows(c.id):
-                pat = r.when.get(p) or r.when.get("*")
-                if pat and "modes" in pat:
-                    for f in pat["modes"]:
-                        handled |= set(m.family(f))
-            for f in sorted(arriving - handled, key=m.fields.index):
-                out.append({"component": c.id, "port": p, "mode": f})
+        for a in c.absorbs:
+            out.append({"component": c.id, "port": a["port"], "modes": a["modes"], "reason": a["reason"],
+                        "kind": "declared"})
+    for r in m.rows.values():
+        if r.kind == "sink":
+            for p, pat in r.when.items():
+                out.append({"component": r.comp, "port": p, "modes": sorted(pat.get("modes", {})),
+                            "reason": r.label or r.reason, "kind": "sink", "row": r.id})
     return out

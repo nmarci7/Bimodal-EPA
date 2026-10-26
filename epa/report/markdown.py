@@ -61,11 +61,11 @@ def report(rep):
             ch = "; ".join(f"{x['component']} {x['signed_with']} → {x['now']}" for x in r["changes"])
             L.append(f"- `{r['certificate']}`: {ch}")
         L.append("")
-    if rep.get("unmatched"):
-        L.append("## Unmatched failures (absorbed silently: check the tables)")
+    if rep.get("absorbed"):
+        L.append("## Absorbed failures (every other failure passes through)")
         L.append("")
-        for u in rep["unmatched"]:
-            L.append(f"- {u['mode']} at {u['component']}.{u['port']}")
+        for u in rep["absorbed"]:
+            L.append(f"- {', '.join(u['modes'])} at {u['component']}.{u['port']} ({u['kind']}): {u['reason']}")
         L.append("")
     return "\n".join(L)
 

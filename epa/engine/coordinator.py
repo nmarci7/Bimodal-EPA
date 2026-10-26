@@ -96,25 +96,144 @@ class Engine:
                   nonconfluent=len(bad))
         return stats["hash"]
 
+    # ------------------------------------------------------------------ evidence across cells
+    def applies(self, cert, cone):
+        """The scope rule: a certificate counts for a cell only if its scope covers every use case in which
+        the cell's point can carry a message (no scope: every use case). A use case outside the scope does
+        not stand in the way if none of the rows the certificate states can fire in it: then the statement
+        changes none of that use case's runs."""
+        scope = cert.get("scope")
+        if not scope:
+            return True
+        ucs = cone.scope_ucs if cone.scope_ucs is not None else cone.use_cases
+        return all(self.inert(r, u) for u in set(ucs) - set(scope) for r in cert["resolved"])
+
+    def inert(self, rid, u):
+        """No run of use case u can make this row fire (an over-approximation of what reaches it)."""
+        m = self.m
+        row = m.rows.get(rid)
+        if row is None:
+            return False
+        if not hasattr(m, "_possible"):
+            m._normal_edges = C.normal_edges(m)
+            m._possible = C.possible(m)
+        pos = m._possible[u]
+        comp = m.components[row.comp]
+        inp = {p: [e.id for e in m.edges_into(comp.id, p) if e.id in pos] for p in comp.ins}
+        fields_at = {p: set().union(*[pos[e] for e in es]) if es else set() for p, es in inp.items()}
+        if row.kind in ("leak", "fp"):
+            if not inp.get("in"):
+                return True
+            t = row.target or {}
+            return row.kind == "leak" and t.get("kind") == "mode" and not (set(m.family(t["mode"])) & fields_at["in"])
+        return not C._trigger_possible(m, comp, row, inp, fields_at)
+
+    def witness_cone(self, w):
+        """One cone that computes every field a witness logs, at every point it logs: the union of the
+        cones of those fields there. Its runs decide exactly whether a candidate allows a matching run."""
+        m = self.m
+        parts = []
+        for obs_id, logged in w["at"].items():
+            fs = [C.Cell("mode", f, obs_id) for f in (logged.get("modes") or {})]
+            fs += [C.Cell(k, k, obs_id) for k in ("taint", "conf", "auth") if k in logged]
+            if not fs:      # only `used` is logged: any cell's cone holds the rows that create the message
+                fs = [C.Cell("mode", m.top_modes[0], obs_id)]
+            parts += [C.cone_of_cell(m, c) for c in fs]
+        u = lambda attr: sorted(set().union(*[set(getattr(k, attr)) for k in parts]))
+        rel = set().union(*[k.rel for k in parts])
+        fields = [f for f in m.fields if any(f in k.fields for k in parts)]
+        return C.Cone(cells=[c for k in parts for c in k.cells], obs=parts[0].obs, components=u("components"),
+                      edges=u("edges"), use_cases=u("use_cases"), rows=u("rows"), always=u("always"),
+                      fields=fields, rel=rel)
+
+    def suspension(self, reg):
+        """The certificates the evidence refutes, for the whole model: every certificate in a subset-minimal
+        set that, with one witness, leaves no candidate (Reiter), and any two certificates that pin one row
+        to different activations. Witnesses alone leaving no candidate mean the model lacks a path."""
+        m = self.m
+        certs = [c for c in reg["certificates"] if c["state"] == "in force"]
+        wits = [w for w in reg["witnesses"] if w["state"] == "in force"]
+        susp, conflicts, lacking = set(), [], []
+        pinned = {}
+        for c in certs:
+            for r, x in c["resolved"].items():
+                pinned.setdefault(r, {}).setdefault(x, set()).add(c["id"])
+        for r, by in pinned.items():
+            if len(by) > 1:
+                ids = set().union(*by.values())
+                susp |= ids
+                conflicts.append({"certificates": sorted(ids), "witness": None, "row": r})
+        for w in wits:
+            cone = self.witness_cone(w)
+            self.ensure(cone, [{}])
+            runs = []
+            for i, r in enumerate(self.cache.runs(cone.key(m)).values(), start=1):
+                ok = R.matches(m, w["at"], r, w.get("use_case"))
+                runs.append({"id": i, "uc": r.uc, "fires": set(r.fire), "uses": False, "reaches": False,
+                             "matches": {w["id"]} if ok else set()})
+            mine = [c for c in certs if not c.get("scope") or not w.get("use_case") or w["use_case"] in c["scope"]]
+            cl = [(c["id"], c["resolved"]) for c in mine if set(c["resolved"]) & set(cone.rows)]
+            prob = CellProblem(m, cone.rows, runs, cl, [w["id"]])
+            if not prob.satisfiable(set(), {w["id"]}):
+                lacking.append(w["id"])
+                self.emit("conflict", f"witness {w['id']} matches no run of the model: the model lacks a path",
+                          witness=w["id"])
+                continue
+            on = {k for k, _ in cl}
+            if prob.satisfiable(on, {w["id"]}):
+                continue
+            for S in prob.minimal_conflicts(on, {w["id"]}):
+                susp |= S
+                conflicts.append({"certificates": sorted(S), "witness": w["id"]})
+                self.emit("conflict", f"witness {w['id']} contradicts {sorted(S)}: suspended", witness=w["id"],
+                          certificates=sorted(S))
+        return {"suspended": susp, "conflicts": conflicts, "lacking": lacking}
+
     # ------------------------------------------------------------------ one cell
+    def wcone(self, w):
+        if not hasattr(self, "_wcones"):
+            self._wcones = {}
+        if w["id"] not in self._wcones:
+            self._wcones[w["id"]] = self.witness_cone(w)
+        return self._wcones[w["id"]]
+
+    def witness_runs(self, w, cone):
+        """The runs of a witness's own cone, each with whether it matches everything the witness logged."""
+        self.ensure(cone, [{}])
+        out = {}
+        for r in self.cache.runs(cone.key(self.m)).values():
+            k = (r.uc, frozenset(r.fire), R.matches(self.m, w["at"], r, w.get("use_case")))
+            out[k] = k
+        return list(out)
+
     def problem(self, cone, cell, certs, witnesses, extra_certs=()):
         m = self.m
         rows = cone.cell_rows[cell.id]
+        certs = [c for c in certs if self.applies(c, cone)]
         key = cone.key(m)
         allruns = self.cache.runs(key)
-        exact = set(C.exact_points(m, cone))
-        proj = {}
-        crel = cone.cell_rel.get(cell.id, cone.rel)
-        for w in witnesses:
-            p = R.witness_fields_for_cell(m, cone, cell, w, crel)
-            p = {o: f for o, f in p.items() if o in exact}
-            if p:
-                proj[w["id"]] = (p, w.get("use_case"))
+        # A witness constrains this cell through the rows its own cone shares with the cell's, directly or
+        # through other witnesses. Each linked witness brings the runs of its cone, so that a remaining
+        # candidate is one the whole model's evidence leaves, projected onto this cell's rows.
+        linked, reach = {}, set(rows)
+        grew = True
+        while grew:
+            grew = False
+            for w in witnesses:
+                if w["id"] in linked:
+                    continue
+                wc = self.wcone(w)
+                if set(wc.rows) & reach:
+                    linked[w["id"]] = (w, wc)
+                    reach |= set(wc.rows)
+                    grew = True
+        wruns = {wid: (set(wc.rows), self.witness_runs(w, wc)) for wid, (w, wc) in linked.items()}
+        extra_rows = sorted(reach - set(rows))
+        proj = {wid: (w["at"], w.get("use_case")) for wid, (w, _) in linked.items()}
         grouped = {}
         for r in allruns.values():
             k = (r.uc, frozenset(r.fire & set(rows)))
-            out = (R.used(m, cell, r), R.reaches(m, cell, r),
-                   frozenset(wid for wid, (p, uc) in proj.items() if R.matches(m, p, r, uc)))
+            out = (R.used(m, cell, r), R.reaches(m, cell, r), frozenset())
             g = grouped.setdefault(k, {"out": out, "fired": set(), "sev": 0, "example": r, "agree": True})
             if g["out"] != out:
                 g["agree"] = False
@@ -126,9 +245,9 @@ class Engine:
             runs.append({"id": i, "uc": uc, "fires": set(F), "uses": uses, "reaches": reaches,
                          "matches": set(matched), "fired": g["fired"], "sev": g["sev"], "example": g["example"],
                          "agree": g["agree"]})
-        cert_list = [(c["id"], c["resolved"]) for c in certs if set(c["resolved"]) & set(rows)]
+        cert_list = [(c["id"], c["resolved"]) for c in certs if set(c["resolved"]) & reach]
         cert_list += list(extra_certs)
-        prob = CellProblem(m, rows, runs, cert_list, list(proj))
+        prob = CellProblem(m, rows, runs, cert_list, list(proj), extra_rows=extra_rows, wruns=wruns)
         return prob, runs, proj
 
     def decide(self, cone, cell, certs_on, wits_on, register):
@@ -138,13 +257,18 @@ class Engine:
         rows = cone.cell_rows[cell.id]
         prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
         cert_ids = {k for k in prob.cert_ids}
-        on = set(certs_on) & cert_ids
+        gs = self.gsusp
+        # the suspension is the whole model's (computed once per analysis); a cell reports the part of it
+        # that concerns its own rows
+        suspended = gs["suspended"] & cert_ids
+        conflicts = [set(c["certificates"]) for c in gs["conflicts"] if set(c["certificates"]) & cert_ids]
+        on = (set(certs_on) & cert_ids) - gs["suspended"]
         won = {w for w in wits_on if w in prob.wit_ids}
-        b = prob.brave(on, won)
-        conflicts, suspended, lacks_path = [], set(), False
-        if b is None:
-            # the runs explored so far may be only those the certificates allow: explore every
-            # firing choice before deciding whether the witnesses or the certificates are at fault
+        lacks_path = bool(gs["lacking"])
+        b = None if lacks_path else prob.brave(on, won)
+        if b is None and not lacks_path:
+            # not expected once the global suspension is applied; kept as a safety net: explore every
+            # firing choice, then blame the witnesses or find this cell's own conflict sets
             self.ensure(cone, [{}])
             prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
             if not prob.satisfiable(set(), won):
@@ -152,12 +276,15 @@ class Engine:
                 self.emit("conflict", f"{cell.id}: the witnesses alone leave no candidate - the model lacks a path",
                           cell=cell.id)
             else:
-                conflicts = prob.minimal_conflicts(on, won)
-                suspended = set().union(*conflicts) if conflicts else set()
+                extra = prob.minimal_conflicts(on, won)
+                conflicts += extra
+                more = set().union(*extra) if extra else set()
+                suspended |= more
+                self.extra_susp |= more
                 self.emit("conflict", f"{cell.id}: evidence in conflict; minimal sets "
-                                      f"{[sorted(c) for c in conflicts]}; suspending {sorted(suspended)}",
-                          cell=cell.id, conflicts=[sorted(c) for c in conflicts])
-                on = on - suspended
+                                      f"{[sorted(c) for c in extra]}; suspending {sorted(more)}",
+                          cell=cell.id, conflicts=[sorted(c) for c in extra])
+                on = on - more
                 b = prob.brave(on, won)
         verdict = "conflict" if lacks_path else V.verdict_of(b["seen"] if b else None)
         seen = b["seen"] if b else None
@@ -165,9 +292,14 @@ class Engine:
             "cell": cell.id, "kind": cell.kind, "field": cell.field, "obs": cell.obs,
             "verdict": verdict, "statuses": V.statuses_for_display(seen), "raw": seen,
             "per_uc": b["per_uc"] if b else {}, "advice": V.advice(verdict, seen),
-            "conflicts": [sorted(c) for c in conflicts], "suspended": sorted(suspended), "lacks_path": lacks_path,
+            "conflicts": sorted(sorted(c) for c in {frozenset(c) for c in conflicts}),
+            "suspended": sorted(suspended), "lacks_path": lacks_path,
             "rows": rows, "cone": cone.key(m), "fields": cone.fields,
             "witnesses_used": sorted(won), "certs_used": sorted(on),
+            "scope_withheld": [{"certificate": c["id"], "scope": c.get("scope"),
+                                "uncovered": sorted(u for u in set(cone.scope_ucs or cone.use_cases) - set(c.get("scope") or [])
+                                                    if not all(self.inert(r, u) for r in c["resolved"]))}
+                               for c in in_force if set(c["resolved"]) & set(rows) and not self.applies(c, cone)],
             "witness_projection": {w: p for w, (p, _) in proj.items()},
         }
         space = candidate_space(m, rows)
@@ -255,30 +387,45 @@ class Engine:
         cone_list = C.cones(m, cell_list)
         self.emit("cells", f"{len(cell_list)} cells in {len(cone_list)} cone(s)",
                   cells=[c.id for c in cell_list])
-        results = []
-        for cone in cone_list:
-            all_rows = cone.rows
-            pins = self.pins(reg, certs_on, all_rows)
-            want = [pins] if pins is not None else [{}]
-            pruned = _count_vectors(all_rows, [{}], []) - _count_vectors(all_rows, want, [])
-            self.emit("cone", f"cone at {cone.obs}: {len(cone.cells)} cell(s), rows {', '.join(all_rows) or '(none)'}"
-                              + (f"; certificates prune {pruned} firing choice(s) before any run" if pruned else ""),
-                      obs=cone.obs, cells=[c.id for c in cone.cells], rows=all_rows, fields=cone.fields,
-                      components=cone.components, key=cone.key(m))
-            self.ensure(cone, want)
-            for cell in cone.cells:
-                res = self.decide(cone, cell, certs_on, wits_on, reg)
-                results.append(res)
-                self.emit("verdict", f"{cell.id}: {res['verdict']} {{{','.join(res['statuses'])}}}",
-                          cell=cell.id, verdict=res["verdict"], statuses=res["statuses"])
+        # which certificates the evidence refutes is a question about the whole model, settled before
+        # any cell is decided, so that every cell sees the same suspension
+        self.gsusp = self.suspension(reg)
+        self.extra_susp = set()
+        for _ in range(2):
+            results = []
+            for cone in cone_list:
+                all_rows = cone.rows
+                usable = {c["id"] for c in reg["certificates"]
+                          if c["id"] in certs_on and self.applies(c, cone)} - self.gsusp["suspended"]
+                pins = self.pins(reg, usable, all_rows)
+                want = [pins] if pins is not None else [{}]
+                pruned = _count_vectors(all_rows, [{}], []) - _count_vectors(all_rows, want, [])
+                self.emit("cone", f"cone at {cone.obs}: {len(cone.cells)} cell(s), rows {', '.join(all_rows) or '(none)'}"
+                                  + (f"; certificates prune {pruned} firing choice(s) before any run" if pruned else ""),
+                          obs=cone.obs, cells=[c.id for c in cone.cells], rows=all_rows, fields=cone.fields,
+                          components=cone.components, key=cone.key(m))
+                self.ensure(cone, want)
+                for cell in cone.cells:
+                    res = self.decide(cone, cell, certs_on, wits_on, reg)
+                    results.append(res)
+                    self.emit("verdict", f"{cell.id}: {res['verdict']} {{{','.join(res['statuses'])}}}",
+                              cell=cell.id, verdict=res["verdict"], statuses=res["statuses"])
+            if not self.extra_susp - self.gsusp["suspended"]:
+                break
+            # a cell found a conflict the witness checks did not: suspend it everywhere and decide again
+            self.gsusp["suspended"] |= self.extra_susp
+        for c in reg["certificates"]:
+            c["suspended"] = c["id"] in self.gsusp["suspended"]
         by_cell = {r["cell"]: r for r in results}
         report = {
             "model": m.summary(), "register": reg, "cells": results,
+            "suspension": {"suspended": sorted(self.gsusp["suspended"]), "conflicts": self.gsusp["conflicts"],
+                           "lacking": self.gsusp["lacking"]},
             "cones": [{"key": k.key(m), "obs": k.obs, "cells": [c.id for c in k.cells], "rows": k.rows,
                        "always": k.always, "fields": k.fields, "components": k.components,
                        "use_cases": k.use_cases} for k in cone_list],
             "tlc_calls": self.tlc_calls,
-            "unmatched": wellformed.unmatched_failures(m),
+            "absorbed": wellformed.absorbed(m),
             "reverify": [{"certificate": c["id"], "changes": c["reverify"]} for c in reg["certificates"]
                          if c["reverify"] and c["state"] == "in force"],
             "claims": judge_claims(m.claims, by_cell),
@@ -303,7 +450,7 @@ class Engine:
         certifiable = []
         pinned = set()
         for c in reg["certificates"]:
-            if c["state"] == "in force" and c["id"] in certs_on:
+            if c["state"] == "in force" and c["id"] in certs_on and c["id"] not in self.gsusp["suspended"]:
                 pinned |= {r for r, x in c["resolved"].items() if x == "N"}
         for g in guards:
             dec_rows = {t["row"] for t in g.targets if t["decidable"] and not g.learned}
@@ -336,7 +483,7 @@ class Engine:
                 if not hyps:
                     continue
                 prob, _, _ = self.problem(cone, cell, inf, wit, extra_certs=hyps)
-                base = (set(certs_on) - set(cur["suspended"])) & set(prob.cert_ids)
+                base = (set(certs_on) - self.gsusp["suspended"]) & set(prob.cert_ids)
                 problems[cell.id] = (prob, base, set(cur["witnesses_used"]), cur)
         for combo in combos:
             moved = []
@@ -374,14 +521,11 @@ class Engine:
         prob, runs, proj = self.problem(cone, cell, inf, wit)
         rows = [r for r in cone.cell_rows[cell_id] if m.rows[r].open]
         space = candidate_space(m, rows)
-        # certificates in a minimal conflict are suspended, as in the verdict
-        on = {c for c in prob.cert_ids}
+        # certificates the evidence refutes are suspended, as in the verdict
+        gs = self.suspension(reg)
+        suspended = gs["suspended"] & set(prob.cert_ids)
+        on = set(prob.cert_ids) - gs["suspended"]
         won = set(prob.wit_ids)
-        suspended = set()
-        if not prob.satisfiable(on, won):
-            conf = prob.minimal_conflicts(on, won)
-            suspended = set().union(*conf) if conf else set()
-            on -= suspended
         if space > cap:
             # too many to enumerate in Python: list the remaining ones with clingo instead
             listed = prob.listing(on, won, cap=240)
@@ -393,6 +537,24 @@ class Engine:
         for r in rows:
             row = m.rows[r]
             choices.append(("S", "A") if (row.llm or (row.kind == "leak" and not row.decidable)) else ("N", "S", "A"))
+        # a linked witness strikes a candidate if no run of the witness's own cone matches it and is
+        # allowed by the candidate on this cell's rows and by the certificates in force on the others
+        # (every other row may be sometimes, which allows any run)
+        pinsx = {}
+        for c in inf:
+            if c["id"] in gs["suspended"] or not self.applies(c, cone):
+                continue
+            for q, x in c["resolved"].items():
+                if q not in rows and x in ("N", "A"):
+                    pinsx[q] = x
+        wrs = {wid: self.witness_runs(next(w for w in wit if w["id"] == wid), self.wcone(next(w for w in wit if w["id"] == wid)))
+               for wid in proj}
+
+        def allows(act, fire):
+            for q, x in list(act.items()) + list(pinsx.items()):
+                if (x == "N" and q in fire) or (x == "A" and q not in fire):
+                    return False
+            return True
         out = []
         for combo in itertools.product(*choices):
             if len(out) >= cap:
@@ -411,8 +573,8 @@ class Engine:
                     if q in act and act[q] != x:
                         struck.append(c["id"])
                         break
-            for wid in proj:
-                if not any(wid in r["matches"] for r in adm):
+            for wid, runs_w in wrs.items():
+                if not any(ok and allows(act, fire) for _, fire, ok in runs_w):
                     struck.append(wid)
             out.append({"act": act, "status": st, "struck_by": struck})
         return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs), "space": space,

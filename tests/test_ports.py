@@ -17,10 +17,10 @@ def doc():
         "lattices": {"confidentiality": ["public", "internal", "confidential"], "authority": ["none", "user", "admin"]},
         "components": [
             {"id": "planner", "kind": "llm", "in": ["input", "from_tool", "from_store"], "out": ["to_tool", "to_det"], "rows": []},
-            {"id": "tool", "kind": "tool", "in": ["from_planner", "from_store"], "out": ["to_planner", "to_store"], "pass": "all", "rows": []},
+            {"id": "tool", "kind": "tool", "in": ["from_planner", "from_store"], "out": ["to_planner", "to_store"], "rows": []},
             {"id": "store", "kind": "store", "in": ["from_tool"], "out": ["to_tool"], "rows": []},
-            {"id": "det", "kind": "deterministic", "in": ["from_planner"], "out": ["to_det2"], "pass": "all", "clearance": "internal", "rows": []},
-            {"id": "det2", "kind": "deterministic", "in": ["from_det"], "out": ["output"], "pass": "all", "rows": []},
+            {"id": "det", "kind": "deterministic", "in": ["from_planner"], "out": ["to_det2"], "clearance": "internal", "rows": []},
+            {"id": "det2", "kind": "deterministic", "in": ["from_det"], "out": ["output"], "rows": []},
         ],
         "guards": [{"id": "g", "label": "schema check", "edge": "e_pd", "targets": [{"mode": "commission", "threshold": 1, "decidable": True}]}],
         "edges": [

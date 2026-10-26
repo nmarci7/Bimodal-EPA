@@ -45,8 +45,9 @@ any JDK from adoptium.net. `GET /api/health` reports what the server found.
    external systems and users, system inputs and outputs, guards and observation points. Drag a
    component onto the canvas, drag from the round handle on its right to another component to
    connect them (ports are named for you), drop a guard or an eye onto an edge. The inspector
-   edits whatever is selected: kind, version, pass-through modes, authority and clearance, the
-   normal flow matrix, rows (when … then emit …, with the activation of fixed rows), the LLM
+   edits whatever is selected: kind, version, what a component absorbs (everything else passes
+   through), authority and clearance, the normal flow matrix, rows (failure rows, internal faults,
+   forwarding and sink rows, with the activation of fixed rows), the LLM
    worst-case defaults and their recorded drops, guard targets and decidability, observation
    point tolerations, and with nothing selected the model itself: failure modes, lattices, use
    cases, claims. The model is checked as you edit (the badge and the footer). `Import YAML / JSON`

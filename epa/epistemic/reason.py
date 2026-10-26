@@ -24,19 +24,26 @@ def _q(s):
 
 
 class CellProblem:
-    def __init__(self, m, cell_rows, runs, certs, witnesses):
+    def __init__(self, m, cell_rows, runs, certs, witnesses, extra_rows=(), wruns=None):
         """cell_rows: the open rows of the cell's cone; runs: list of dicts with keys
         id, uc, fires (set of rows), uses, reaches, matches (set of witness ids);
-        certs: list of (id, {row: 'N'|'S'|'A'}); witnesses: list of ids."""
+        certs: list of (id, {row: 'N'|'S'|'A'}); witnesses: list of ids;
+        extra_rows: rows only the cones of linked witnesses bring (candidates range over them too, and
+        counts are projected onto the cell's rows); wruns: witness id -> (rows of its cone,
+        [(use case, firing choice, matches)]) - the runs of each linked witness's own cone."""
         self.m = m
         self.rows = [r for r in cell_rows if m.rows[r].open]
+        self.extra = [r for r in extra_rows if m.rows[r].open and r not in self.rows]
         self.free = [r for r in cell_rows if not m.rows[r].open]
         self.cert_ids = [k for k, _ in certs]
         self.wit_ids = list(witnesses)
-        facts = []
-        for r in self.rows:
+        every = set(self.rows) | set(self.extra)
+        facts = ["val(n). val(s). val(a)."]
+        for r in self.rows + self.extra:
             row = m.rows[r]
             facts.append(f"row({_q(r)}).")
+            if r in self.rows:
+                facts.append(f"crow({_q(r)}).")
             if row.llm:
                 facts.append(f"llm({_q(r)}).")
             if row.kind == "leak":
@@ -55,9 +62,20 @@ class CellProblem:
                 facts.append(f"reaches({F}).")
             for w in run["matches"]:
                 facts.append(f"match({F},{_q(w)}).")
+        for w, (wrows, wrs) in (wruns or {}).items():
+            W = _q(w)
+            for r in sorted(set(wrows) & every):
+                facts.append(f"wrow({W},{_q(r)}).")
+            for i, (_, fire, ok) in enumerate(wrs, start=1):
+                facts.append(f"wrun({W},{i}).")
+                for r in fire:
+                    if r in every:
+                        facts.append(f"wfires({W},{i},{_q(r)}).")
+                if ok:
+                    facts.append(f"wmatch({W},{i}).")
         for k, rows in certs:
             for r, x in rows.items():
-                if r in self.rows:
+                if r in every:
                     facts.append(f"cert({_q(k)},{_q(r)},{x.lower()}).")
             facts.append(f"cert_meta({_q(k)}).")
         for w in self.wit_ids:
@@ -103,25 +121,37 @@ class CellProblem:
         return self.ctl.solve().satisfiable
 
     def count(self, certs_on=(), wits_on=(), cap=20000):
+        """How many candidates remain, counted on the cell's own rows: answer sets that differ only in
+        the rows a linked witness brings are one candidate of this cell."""
         self._set(certs_on, wits_on)
-        self.ctl.configuration.solve.models = cap
-        n = 0
+        self.ctl.configuration.solve.models = 0 if self.extra else cap
+        seen = set()
         with self.ctl.solve(yield_=True) as h:
-            for _ in h:
-                n += 1
+            for model in h:
+                seen.add(frozenset((s.arguments[0].string, str(s.arguments[1])) for s in model.symbols(shown=True)
+                                   if s.name == "act" and s.arguments[0].string in self.rows))
+                if len(seen) >= cap:
+                    break
         self.ctl.configuration.solve.models = 0
-        return n
+        return len(seen)
 
     def listing(self, certs_on=(), wits_on=(), cap=400):
         self._set(certs_on, wits_on)
-        self.ctl.configuration.solve.models = cap
-        out = []
+        self.ctl.configuration.solve.models = 0 if self.extra else cap
+        out, seen = [], set()
         with self.ctl.solve(yield_=True) as h:
             for model in h:
                 syms = model.symbols(shown=True)
-                act = {s.arguments[0].string: X[str(s.arguments[1])] for s in syms if s.name == "act"}
+                act = {s.arguments[0].string: X[str(s.arguments[1])] for s in syms
+                       if s.name == "act" and s.arguments[0].string in self.rows}
                 st = next(X[str(s.arguments[0])] for s in syms if s.name == "status" and len(s.arguments) == 1)
+                key = tuple(sorted(act.items()))
+                if key in seen:
+                    continue
+                seen.add(key)
                 out.append({"act": act, "status": st})
+                if len(out) >= cap:
+                    break
         self.ctl.configuration.solve.models = 0
         out.sort(key=lambda c: tuple("NSA".index(c["act"][r]) for r in self.rows))
         return out

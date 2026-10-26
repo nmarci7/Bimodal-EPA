@@ -43,7 +43,17 @@ export function normaliseDoc(doc) {
   d.layout = d.layout || {};
   d.layout.sys = d.layout.sys || {};
   for (const g of d.guards) { if (g.on && !g.edge) { g.edge = g.on; delete g.on; } }
-  for (const c of d.components) { c.in = c.in || []; c.out = c.out || []; c.rows = c.rows || []; }
+  for (const c of d.components) {
+    c.in = c.in || []; c.out = c.out || []; c.rows = c.rows || [];
+    // older documents named what passes; now everything passes unless it is absorbed, with a reason
+    if (c.pass !== undefined) {
+      const tops = topModes(d);
+      const kept = c.pass === 'all' ? tops : [].concat(c.pass || []);
+      const gone = c.kind === 'llm' ? [] : tops.filter((m) => !kept.includes(m));
+      if (gone.length) c.absorbs = (c.absorbs || []).concat(c.in.map((p) => ({ port: p, modes: gone, reason: '' })));
+      delete c.pass;
+    }
+  }
   autoLayout(d);
   return d;
 }
@@ -92,8 +102,7 @@ export function addComponent(kind, x, y) {
   const d = S.doc;
   const id = uniqueId(kind === 'llm' ? 'planner' : kind, allIds(d));
   const c = { id, kind, label: KIND_LABEL[kind] || kind, in: [], out: [], rows: [], pos: { x: Math.round(x), y: Math.round(y) } };
-  // failures pass through a new non-LLM component until the analyst says otherwise (the pessimistic default)
-  if (kind !== 'llm') c.pass = 'all';
+  // failures pass through a non-LLM component until the analyst declares otherwise (A6, pessimistic)
   d.components.push(c);
   changed({ type: 'component', id });
   return c;
