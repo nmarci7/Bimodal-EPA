@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .dump_reader import parse_value, read_dump, read_dump_raw
+from .dump_reader import parse_labels, parse_value, read_dump, read_dump_raw
 
 
 @dataclass
@@ -25,11 +25,12 @@ class Run:
 
 def runs_from_dump(dump_path, keep_edges):
     """One Run per (use case, firing choice); checks that every interleaving ends in one fixpoint."""
-    runs = {}
+    runs, cache = {}, {}
     for raw in read_dump_raw(dump_path):
         if raw.get("done") != "TRUE":
             continue
-        s = {k: parse_value(raw[k]) for k in ("uc", "fire", "fired", "lab", "rnd")}
+        s = {k: parse_value(raw[k]) for k in ("uc", "fire", "fired", "rnd")}
+        s["lab"] = parse_labels(raw["lab"], cache)
         labels = {e: s["lab"][e] for e in keep_edges if e in s["lab"]}
         key = (s["uc"], frozenset(s["fire"]))
         r = Run(uc=s["uc"], fire=frozenset(s["fire"]), fired=frozenset(s["fired"]), labels=labels, rounds=s["rnd"])

@@ -320,9 +320,11 @@ class Engine:
         # root causes: minimal sets of firing rows behind reaching runs some remaining candidate admits
         if b:
             reach_sets = [frozenset(r["fired"]) for r in runs if r["reaches"] and r["id"] in b["admits"]]
-            res["root_causes"] = [sorted(s) for s in _minimal(reach_sets)]
+            minimal = _minimal(reach_sets)
+            res["root_causes"] = [sorted(s) for s in minimal]
+            minimal = set(minimal)
             ex = next((r for r in runs if r["reaches"] and r["id"] in b["admits"]
-                       and frozenset(r["fired"]) in set(_minimal(reach_sets))), None)
+                       and frozenset(r["fired"]) in minimal), None)
             res["example_run"] = {"uc": ex["uc"], "fire": sorted(ex["example"].fire)} if ex else None
         else:
             res["root_causes"], res["example_run"] = [], None

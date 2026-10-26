@@ -124,7 +124,15 @@ class CellProblem:
         """How many candidates remain, counted on the cell's own rows: answer sets that differ only in
         the rows a linked witness brings are one candidate of this cell."""
         self._set(certs_on, wits_on)
-        self.ctl.configuration.solve.models = 0 if self.extra else cap
+        if not self.extra:          # every answer set is one candidate of this cell: just count them
+            self.ctl.configuration.solve.models = cap
+            n = 0
+            with self.ctl.solve(yield_=True) as h:
+                for _ in h:
+                    n += 1
+            self.ctl.configuration.solve.models = 0
+            return n
+        self.ctl.configuration.solve.models = 0
         seen = set()
         with self.ctl.solve(yield_=True) as h:
             for model in h:
