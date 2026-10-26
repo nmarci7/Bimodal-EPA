@@ -1,5 +1,7 @@
 # EPA engine v2 — bimodal error propagation analysis for agentic systems
 
+BME VIK TDK 2026 project.
+
 This repository is the tool of the TDK paper. It takes a model of an agentic system (components,
 edges, guards, observation points, use cases), runs every firing choice of the rows that matter
 for each observation point through **TLA+/TLC**, hands those runs to **clingo** as facts, and
