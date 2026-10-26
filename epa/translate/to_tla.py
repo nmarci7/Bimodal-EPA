@@ -148,8 +148,21 @@ def guard_strata(m, cone):
     """The phase from which each guard that may drop a message acts: one more than the guards of that
     kind upstream of it, so that it reads its input only once everything upstream has settled (the
     stratified fixpoint of the propagation property). Guards on a cycle never drop and act always."""
-    from ..model.cone import upstream
-    droppers = [c for c in cone.components if m.components[c].is_guard and not m.components[c].on_cycle]
+    from ..model.cone import normal_edges, possible, upstream
+    if not hasattr(m, "_possible"):
+        m._normal_edges = normal_edges(m)
+        m._possible = possible(m)
+
+    def may_drop(g):
+        # a guard drops only a message that no forwarding sent: if, in every use case, whatever reaches
+        # it is a normal message, it never drops and needs no phase of its own
+        for u in cone.use_cases:
+            for e in m.edges_into(g, "in"):
+                if e.id in m._possible[u] and e.id not in m._normal_edges[u]:
+                    return True
+        return False
+    droppers = [c for c in cone.components if m.components[c].is_guard and not m.components[c].on_cycle
+                and may_drop(c)]
     memo = {}
 
     def s(g):

@@ -163,6 +163,13 @@ class Engine:
                 ids = set().union(*by.values())
                 susp |= ids
                 conflicts.append({"certificates": sorted(ids), "witness": None, "row": r})
+            row = m.rows.get(r)
+            if row is not None and not row.open:
+                # the model fixes this row: a certificate stating another activation leaves no candidate
+                for x, ids in by.items():
+                    if x != row.fixed:
+                        susp |= ids
+                        conflicts.append({"certificates": sorted(ids), "witness": None, "row": r})
         for w in wits:
             cone = self.witness_cone(w)
             self.ensure(cone, [{}])
