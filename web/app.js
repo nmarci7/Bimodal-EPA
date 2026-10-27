@@ -1,12 +1,12 @@
 // The workbench: wires the four views, the demo cases and their scenario stages, import/export,
 // and the bootstrap from traces.
-import { h, clear, api, readFile, download, toast, modal, dropZone } from './lib.js';
+import { h, clear, api, readFile, download, toast, modal, dropZone, store } from './lib.js';
 import { S, on, emit, blankDoc, normaliseDoc, emptyEvidence, runCheck, persist, restore } from './state.js';
 import { ModelView } from './modelview.js';
 import { EvidenceView } from './evidence.js';
 import { AnalysisView } from './analysis.js';
 import { VerdictsView } from './verdicts.js';
-import { dropdown, button, infoDialog } from './dialog.js';
+import { dropdown, button, infoDialog, confirmDialog } from './dialog.js';
 
 const $ = (id) => document.getElementById(id);
 let views = {};
@@ -148,6 +148,47 @@ function bootstrapDialog() {
     h('div', { class: 'inline' }, h('label', { class: 'inline small' }, 'MCP server component', server), h('span', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: go }, 'Build')), out));
 }
 
+// ---------------------------------------------------------------- the shared workspace (epa/workspace.py)
+const when = (t) => (t ? new Date(t * 1000).toLocaleString() : 'never');
+
+async function openWorkspace() {
+  let ws;
+  try { ws = await api('/api/workspace'); } catch (e) { toast(e.message, 6000); return; }
+  S.caseId = null; S.bundle = null; S.stage = null; $('case-select').value = '';
+  setDoc(normaliseDoc(ws.doc), { ...emptyEvidence(), ...ws.evidence, files: ws.evidence.files || [] });
+  drawStagebar();
+  show('model');
+  store('epa.wsSeen', ws.updated);
+  toast(`Opened the shared workspace: ${ws.doc.name || 'model'}, written by ${ws.by === 'mcp' ? 'the assistant' : 'the workbench'} on ${when(ws.updated)}.`, 6000);
+}
+
+async function saveWorkspace() {
+  const meta = await api('/api/workspace/meta');
+  if (meta.exists) {
+    const ok = await confirmDialog(`This replaces the model in the shared workspace (${meta.name || 'a model'}, written by ${meta.by === 'mcp' ? 'the assistant' : 'the workbench'} on ${when(meta.updated)}) with ${S.doc.name || 'this model'} and its evidence.`,
+      { title: 'Save to the shared workspace', okText: 'Replace it' });
+    if (!ok) return;
+  }
+  // a demo case keeps its recognisers, manifest and lookup files in its bundle: hand them over too
+  const b = S.bundle || {};
+  const evidence = { ...S.evidence, recognisers: { ...(b.recognisers || {}), ...(S.evidence.recognisers || {}) },
+    deployments: S.evidence.deployments || b.deployments || null, lookups: { ...(b.lookups || {}), ...(S.evidence.lookups || {}) } };
+  const r = await api('/api/workspace', { doc: S.doc, evidence, case: S.caseId, stage: S.stage }, 'PUT');
+  store('epa.wsSeen', r.updated);
+  toast(`Saved to the shared workspace (${r.path}). An MCP client sees it now.`, 6000);
+}
+
+/** When the window comes back, say if an assistant changed the shared workspace in the meantime. */
+async function watchWorkspace() {
+  try {
+    const meta = await api('/api/workspace/meta');
+    if (meta.exists && meta.by === 'mcp' && meta.updated > (store('epa.wsSeen') || 0)) {
+      store('epa.wsSeen', meta.updated);
+      toast(`The assistant changed the shared workspace (${meta.name || 'a model'}, ${when(meta.updated)}). File → Open the shared workspace shows it.`, 9000);
+    }
+  } catch (e) { /* an older server without the workspace: nothing to say */ }
+}
+
 // ---------------------------------------------------------------- help
 function helpDialog() {
   const step = (n, t, x) => h('li', {}, h('b', {}, `${n} ${t}. `), x);
@@ -192,7 +233,10 @@ async function main() {
     { label: 'Export the model as YAML', onClick: exportYaml },
     'sep',
     { label: 'Bootstrap from traces…', hint: 'spans and an MCP tools list', onClick: bootstrapDialog },
-  ], { title: 'new, import, export, bootstrap' });
+    'sep',
+    { label: 'Open the shared workspace', hint: 'what an assistant built through the MCP server', onClick: openWorkspace },
+    { label: 'Save to the shared workspace…', hint: 'hand this model to an assistant', onClick: saveWorkspace },
+  ], { title: 'new, import, export, bootstrap, shared workspace' });
   $('actions').prepend(fileMenu, button('Help', helpDialog, { title: 'how the workbench works, and its shortcuts' }));
   const cases = await loadCases();
   const params = new URLSearchParams(location.search);
@@ -207,6 +251,8 @@ async function main() {
   else setDoc(normaliseDoc(blankDoc()), emptyEvidence());
   show(params.get('view') || 'model');
   if (params.get('run')) views.analysis.run();
+  window.addEventListener('focus', watchWorkspace);
+  watchWorkspace();
 }
 
 main().catch((e) => { console.error(e); toast(`Could not start: ${e.message}`); });

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "epa-workbench": {
+      "command": "./mcp.sh",
+      "args": []
+    }
+  }
+}

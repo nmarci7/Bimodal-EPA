@@ -7,6 +7,7 @@
   python -m epa case CASE [--stage S]               run a demo case (all stages, or one)
   python -m epa tla MODEL CELL                      print the TLA+ module generated for a cell's cone
   python -m epa bootstrap --traces F [--tools F] [--answers F]   draft a model from traces
+  python -m epa mcp [--workspace F] [--work DIR]   the workbench as an MCP server (stdio), on the shared workspace
 """
 from __future__ import annotations
 
@@ -79,7 +80,15 @@ def main(argv=None):
     s.add_argument("--answers")
     s.add_argument("--server", default="mcp", help="the component the traces show for the MCP server")
     s.add_argument("--name", default="bootstrapped")
+    s = sub.add_parser("mcp", help="the workbench as an MCP server (stdio) on the shared workspace")
+    s.add_argument("--workspace", help="the shared workspace file (default: <work>/workspace.json)")
+    s.add_argument("--work", help="the work folder: run cache and TLC files (default: EPA_WORK or .epa-work)")
     a = ap.parse_args(argv)
+
+    if a.cmd == "mcp":
+        from .mcp.server import Workbench, build_server
+        build_server(Workbench(a.workspace, a.work)).run("stdio")
+        return
 
     if a.cmd == "serve":
         import uvicorn
