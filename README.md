@@ -39,25 +39,38 @@ python -m epa serve --port 8765
 On macOS without Java: `brew install openjdk@21` (and follow brew's note about the symlink), or
 any JDK from adoptium.net. `GET /api/health` reports what the server found.
 
+**Documentation.** [docs/user-guide.md](docs/user-guide.md) is how to use the workbench, step by
+step, with screenshots. [docs/developer-guide.md](docs/developer-guide.md) is how it is built: the
+architecture, the call structure, sequence diagrams of every workflow, and a reference page for every
+file and function (`docs/dev/`). [docs/model-format.md](docs/model-format.md) is the model document.
+
+**From an assistant.** `./mcp.sh` is an MCP server (stdio) with the workbench's tools: open a case,
+build and change the model, add evidence, run the analysis, explain the verdicts. `.mcp.json`
+registers it for Claude Code in this repository; the user guide (section 8) has the setup for other
+clients. The assistant and the browser share one model through `.epa-work/workspace.json`
+(File → Open / Save to the shared workspace).
+
 ## The workbench
 
 1. **Model.** A canvas with a palette: LLM components, deterministic components, tools, stores,
    external systems and users, system inputs and outputs, guards and observation points. Drag a
    component onto the canvas, drag from the round handle on its right to another component to
-   connect them (ports are named for you), drop a guard or an eye onto an edge. The inspector
-   edits whatever is selected: kind, version, what a component absorbs (everything else passes
-   through), authority and clearance, the normal flow matrix, rows (failure rows, internal faults,
-   forwarding and sink rows, with the activation of fixed rows), the LLM
-   worst-case defaults and their recorded drops, guard targets and decidability, observation
-   point tolerations, and with nothing selected the model itself: failure modes, lattices, use
-   cases, claims. The model is checked as you edit (the badge and the footer). `Import YAML / JSON`
-   and `Export YAML` round-trip the same document the CLI reads. `Bootstrap from traces` drafts a
-   model from OpenTelemetry-style spans and an MCP tools list.
+   connect them (ports are named for you), drop a guard or an eye onto an edge. Everything is added
+   and changed in windows: a step-by-step window for a row (kind, when, then, name and activation,
+   with the row read back as a sentence), and one window each for a component (properties, ports,
+   flow, absorptions, LLM defaults), a guard, an observation point, an edge, a use case, a claim and
+   the model's settings; *Edit…* opens the same window filled in. The inspector and the rows table
+   say in words what is selected; the Outline lists everything in the model, and *All rows* shows
+   every row at once. The model is checked as you edit (the badge and the footer), and a window
+   that would add problems says so before it saves. `Import YAML / JSON` and `Export YAML`
+   round-trip the same document the CLI reads. `Bootstrap from traces` drafts a model from
+   OpenTelemetry-style spans and an MCP tools list.
 2. **Evidence.** Drop log files: a recogniser (YAML) turns their lines into witnesses at
    observation points; a deployment manifest makes witnesses from before a version change stale.
    Drop certificates: they are classified against the model (the LLM rule rejects a certificate
    that would make an LLM row never; undecidable targets and stale versions are rejected too).
-   Withdraw a certificate or reject a witness (two reviewers), with the reason recorded.
+   *New certificate…* and *New witness…* write one by hand, step by step. Withdraw a certificate or
+   reject a witness (two reviewers), with the reason recorded.
 3. **Analysis.** Runs the coordinator and streams its log: cells and cones, each TLC call (firing
    choices, distinct states, depth, seconds), each ASP decision, each conflict. The generated
    TLA+ module of every cone and the ASP program of every cell can be opened.
@@ -99,14 +112,16 @@ python -m epa tla cases/wallet/model.yaml oom@o_statement     # the TLA+ module 
 python -m epa bootstrap --traces cases/mcp-coding-agent/intake/traces.jsonl \
     --tools cases/mcp-coding-agent/intake/tools_list.json --server mcp \
     --answers cases/mcp-coding-agent/intake/answers.yaml
-pytest -q                                # the paper's table, the cases, ASP against enumeration
+python -m epa mcp                        # the MCP server on stdio (what ./mcp.sh runs)
+pytest -q                                # the paper's table, the cases, ASP against enumeration, the MCP server, the docs
 ```
 
 ## How it is built
 
 ```
 epa/model/       load.py (the YAML/JSON document → Model), defaults.py (LLM worst-case rows, guard
-                 leak and false-positive rows), wellformed.py, cone.py (cells, path-sensitive cones)
+                 leak and false-positive rows), wellformed.py, cone.py (cells, path-sensitive cones),
+                 edit.py (edits of a model document, used by the MCP server)
 epa/translate/   to_tla.py: one TLA+ module per cone; Init picks a use case and a firing choice,
                  Next is one synchronous round, the run ends at the fixpoint
 epa/alethic/     tlc_runner.py (runs TLC, caches by module hash), dump_reader.py, runs.py
@@ -115,10 +130,13 @@ epa/intake/      cert_import.py, log_import.py (recognisers), mcp_import.py, boo
 epa/engine/      coordinator.py (certificates prune firing choices before TLC; conflicts; reasons;
                  certify-next ranking), cache.py (SQLite run cache), scenario.py (case stages)
 epa/report/      explain.py, markdown.py (report and CRA export)
-epa/api/app.py   FastAPI: model check, evidence intake, analyses with server-sent events
+epa/api/app.py   FastAPI: model check, evidence intake, analyses with server-sent events, the shared workspace
+epa/mcp/         server.py: the MCP server (tools over the shared workspace); epa/workspace.py stores it
 web/             the workbench (plain ES modules, no build step)
 cases/           the three demo cases
-docs/            model-format.md; tdk/ (the paper's chapter arc and its figures)
+tools/           inventory.py: every definition and call, for the developer reference
+docs/            user-guide.md, developer-guide.md and dev/ (the reference), model-format.md;
+                 tdk/ (the paper's chapter arc and its figures)
 ```
 
 `docs/model-format.md` describes the model document field by field. `docs/tdk/arc.md` is the arc of
