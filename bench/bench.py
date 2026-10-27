@@ -1,4 +1,4 @@
-"""Performance benchmarks for the EPA workbench engine.
+"""Performance benchmarks for the Bimodal Agentic System Reasoner engine.
 
     python bench/bench.py --root . --out results.json [--only B1,B4] [--max-seconds 600]
 

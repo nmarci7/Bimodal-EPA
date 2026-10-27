@@ -4,7 +4,7 @@ Each function changes the document (a dict in the format of docs/model-format.md
 returns a short note of what it did. It refuses what can never be right (an unknown component, a
 duplicate id) with an EditError; everything else is left to the model check (validate and
 load_model), which the caller runs afterwards, so the rules live in one place. The functions mirror
-what the workbench does in web/state.js and web/modeldialogs.js: wiring creates the ports it names,
+what the reasoner does in web/state.js and web/modeldialogs.js: wiring creates the ports it names,
 renaming a component or a port follows the edges and rows that use it, removing a component removes
 its edges and the guards and observation points on them.
 """
@@ -165,7 +165,7 @@ def _drop_edges(doc, ids):
 # ---------------------------------------------------------------- wiring
 def connect(doc, source, target, label="", edge_id=None):
     """An edge from source (component.port or sys.name) to target; missing ports are created. As in the
-    workbench, the first wire out of a system input gives the model its first use case."""
+    reasoner, the first wire out of a system input gives the model its first use case."""
     ensure_lists(doc)
     (fa, fp), (ta, tp) = _split(source), _split(target)
     if fa == "sys" and ta == "sys":
@@ -430,7 +430,7 @@ def set_settings(doc, name=None, description=None, modes=None, confidentiality=N
 
 
 def blank(name="new-system", description=""):
-    """A new, empty model, as File → New model in the workbench."""
+    """A new, empty model, as File → New model in the reasoner."""
     return {"name": name, "description": description,
             "modes": ["omission", {"commission": []}, "late", "value"],
             "lattices": {"confidentiality": ["public", "internal", "confidential"], "authority": ["none", "user", "admin"]},

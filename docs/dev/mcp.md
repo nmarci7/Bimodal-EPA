@@ -1,19 +1,19 @@
 # The MCP server, the shared workspace and model edits
 
 Part of the [developer guide](../developer-guide.md). Files: `epa/mcp/server.py`, `epa/workspace.py`,
-`epa/model/edit.py`, `mcp.sh`, `.mcp.json`; the workbench side is in `epa/api/app.py`
+`epa/model/edit.py`, `mcp.sh`, `.mcp.json`; the reasoner side is in `epa/api/app.py`
 (`/api/workspace`) and `web/app.js` (`openWorkspace`, `saveWorkspace`, `watchWorkspace`).
 
 ## 1. What it is for
 
 The MCP server lets an assistant (Claude Code, Claude Desktop, or any client of the Model Context
-Protocol) do what an analyst does in the workbench: open a demo case, build or change a model, add
+Protocol) do what an analyst does in the reasoner: open a demo case, build or change a model, add
 evidence, run the analysis and read the verdicts. It speaks MCP over stdio, built on the official
 Python SDK (`mcp` 2.x, `MCPServer`).
 
 It works on the **shared workspace**: one model and its evidence in a JSON file in the work folder
 (`.epa-work/workspace.json` by default, next to the run cache), saved after every change. The
-workbench in the browser can open that file (File → Open the shared workspace) and save its own model
+reasoner in the browser can open that file (File → Open the shared workspace) and save its own model
 into it (File → Save to the shared workspace…), and it says when the assistant has changed it. So an
 assistant and a person can take turns on one model.
 
@@ -23,7 +23,7 @@ flowchart LR
   S -- "load / save" --> WS[("workspace.json<br/>(epa/workspace.py)")]
   S -- "load_model, Engine.analyse,<br/>classify, recognise" --> E["the engine<br/>(epa/model, engine, intake, report)"]
   E --> TLC["TLC (Java)"] & CL["clingo"]
-  B["the workbench (browser)"] -- "GET / PUT /api/workspace" --> A["epa/api/app.py"]
+  B["the reasoner (browser)"] -- "GET / PUT /api/workspace" --> A["epa/api/app.py"]
   A -- "load / save" --> WS
 ```
 
@@ -57,7 +57,7 @@ Resources: `epa://docs/model-format` (the model format, so a client can write mo
 **Every edit is checked.** `Workbench._edit` applies the edit to a copy of the model, runs the model
 check (`validate` and `load_model`; anything the loader cannot read counts as a problem), and saves the
 copy only if it adds no problem. Otherwise it answers `{saved: false, new_problems, hint}`; the same
-call with `force=true` saves it anyway (as *Save anyway* in the workbench). An edit also drops the last
+call with `force=true` saves it anyway (as *Save anyway* in the reasoner). An edit also drops the last
 analysis report, which no longer matches the model.
 
 ## 4. Definitions
@@ -101,7 +101,7 @@ analysis report, which no longer matches the model.
 
 ### epa/model/edit.py
 
-Edits of a model document in place, mirroring what the workbench does in `web/state.js` and
+Edits of a model document in place, mirroring what the reasoner does in `web/state.js` and
 `web/modeldialogs.js`. They refuse what can never be right with `EditError` (an unknown component, a
 duplicate id, wiring two system ports); everything else is left to the model check that runs after
 them.
@@ -114,7 +114,7 @@ them.
 | `put_component(doc, spec)` | Creates a component (needs a kind) or changes the fields given; `inputs`/`outputs` add ports; `new_id` renames it (`rename_component`). |
 | `rename_component(doc, old, new)` | Renames a component and the edges that name it. |
 | `remove_component(doc, cid)`, `_drop_edges(doc, ids)` | Removes a component, its edges, and the guards and points on them. |
-| `connect(doc, source, target, label, edge_id)` | Adds an edge, creating the ports it names; as in the workbench, the first wire out of a system input creates the use case `uc1`. |
+| `connect(doc, source, target, label, edge_id)` | Adds an edge, creating the ports it names; as in the reasoner, the first wire out of a system input creates the use case `uc1`. |
 | `remove_edge(doc, eid)` | Removes an edge with its guards and point. |
 | `put_row(doc, cid, row, replace)`, `remove_row(doc, cid, rid)` | Adds a row, or replaces one by id (row ids are unique in the model). |
 | `set_absorbs`, `drop_default`, `restore_default` | What stops at an input (with the reason); an LLM default dropped (with the reason) or restored. |
@@ -133,7 +133,7 @@ sequenceDiagram
   participant CH as check (validate, load_model)
   participant WS as workspace.json
   participant API as HTTP API
-  participant UI as the workbench
+  participant UI as the reasoner
   C->>S: tools/call put_row {component, row}
   S->>WS: load
   S->>ED: put_row(copy of the model, ...)

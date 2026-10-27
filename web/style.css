@@ -246,6 +246,7 @@ pre.code { margin: 0; padding: 12px; background: #17191D; color: #E4E6EA; border
 .modal-close { position: absolute; top: 10px; right: 12px; border: 0; background: transparent; font-size: 24px; cursor: pointer; color: var(--muted); }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 60; max-width: 90vw; }
 @media (max-width: 1640px) { .brand-sub { display: none; } }
+@media (max-width: 1240px) { .brand-name { max-width: 9em; font-size: 14px; line-height: 1.15; } }
 @media (max-width: 900px) {
   body { height: auto; overflow: auto; }
   main, .view.active { overflow: visible; }

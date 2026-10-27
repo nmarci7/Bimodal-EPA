@@ -1,4 +1,4 @@
-"""The HTTP API the workbench uses: cases, stages, model check, evidence intake, bootstrap, an analysis."""
+"""The HTTP API the reasoner uses: cases, stages, model check, evidence intake, bootstrap, an analysis."""
 import os
 import time
 

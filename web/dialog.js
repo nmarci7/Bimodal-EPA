@@ -1,4 +1,4 @@
-// Dialogs: a window over the workbench for adding or editing one thing. They stack (a
+// Dialogs: a window over the reasoner for adding or editing one thing. They stack (a
 // confirmation over an editor), close with Escape or ×, and ask before throwing edits away.
 //
 // A wizard is a dialog with steps. Adding something walks through them with Next; editing it shows

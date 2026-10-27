@@ -1,4 +1,4 @@
-// The workbench state: the model document, the evidence, the last analysis, the selection.
+// The reasoner state: the model document, the evidence, the last analysis, the selection.
 import { api, store } from './lib.js';
 
 const listeners = {};

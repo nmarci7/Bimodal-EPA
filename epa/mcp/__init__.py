@@ -1,1 +1,1 @@
-"""The workbench as an MCP server (see server.py)."""
+"""The reasoner as an MCP server (see server.py)."""

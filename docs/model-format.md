@@ -1,6 +1,6 @@
 # The model document
 
-A model is one YAML (or JSON) document. The workbench reads and writes the same document as the
+A model is one YAML (or JSON) document. The reasoner reads and writes the same document as the
 command line; `Export YAML` gives it back with the canvas positions. `cases/*/model.yaml` are
 complete examples, and `tests/models/running_example.yaml` is the running example of the paper.
 
@@ -54,7 +54,7 @@ guard that catches `commission` catches `dup` too, and an observation point that
 `in` and `out` are the component's input and output ports, In(c) and Out(c). An edge runs from an
 output port (or a system input) to an input port (or a system output). One output port may feed
 several edges, which then carry the same message; one input port may receive several edges, whose
-tokens are merged. A port may stay unconnected. The workbench draws inputs as hollow dots and
+tokens are merged. A port may stay unconnected. The reasoner draws inputs as hollow dots and
 outputs as filled dots on the component's border, and lists the component's whole mapping table
 (analyst rows, pass-through, LLM defaults, absorbed failures) under the canvas.
 
@@ -177,7 +177,7 @@ verdict table.
 `clearance` and `requires`; a point that names neither is judged against a receiving component whose
 clearance is below the top level or whose required authority is above the bottom one. A receiver
 outside the model (a system output) has neither, so the levels must be named there. A new observation
-point in the workbench judges every mode at 1.
+point in the reasoner judges every mode at 1.
 
 ## Claims
 

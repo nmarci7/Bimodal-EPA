@@ -1,4 +1,4 @@
-"""The workbench's own logic that runs in the browser: web/tests/*.test.js under node, fed every row of
+"""The reasoner's own logic that runs in the browser: web/tests/*.test.js under node, fed every row of
 the shipped models with the kind the loader gives it. Skipped where node is not installed."""
 import glob
 import json

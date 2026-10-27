@@ -1,6 +1,6 @@
-# EPA workbench: user guide
+# Bimodal Agentic System Reasoner: user guide
 
-The EPA workbench answers one question about an agentic system (LLM components, tools, guards,
+The Bimodal Agentic System Reasoner answers one question about an agentic system (LLM components, tools, guards,
 logs): **for each place where you can read a log, and each kind of failure, what does the evidence
 you have still leave possible?** You draw the system, add what you know (certificates from the
 teams, witnesses from the logs), run the analysis, and read one verdict per observation point and
@@ -15,7 +15,7 @@ failure, with the reasons and what to certify next.
 | **not exercised** | no use case sends a message over this point |
 | **conflict** | the evidence contradicts itself; the engine names the smallest conflicting sets |
 
-This guide follows the four steps of the workbench: **Model → Evidence → Analysis → Verdicts**.
+This guide follows the four steps of the reasoner: **Model → Evidence → Analysis → Verdicts**.
 The format of the model file is in [model-format.md](model-format.md); how the code works is in
 [developer-guide.md](developer-guide.md).
 
@@ -30,7 +30,7 @@ flowchart LR
 
 ---
 
-## 1. Starting the workbench
+## 1. Starting the reasoner
 
 You need Python 3.10 or newer and Java 11 or newer (TLC, the TLA+ model checker, runs on Java; its
 jar ships in `vendor/`).
@@ -41,10 +41,10 @@ jar ships in `vendor/`).
 ```
 
 `GET /api/health` (open `http://127.0.0.1:8765/api/health`) says whether Java, the TLC jar and
-clingo were found. Without Java the workbench still opens, but analyses whose runs are not cached
+clingo were found. Without Java the reasoner still opens, but analyses whose runs are not cached
 fail.
 
-The workbench keeps your model and evidence in the browser (local storage), so a reload brings back
+The reasoner keeps your model and evidence in the browser (local storage), so a reload brings back
 where you were. To keep a model, export it (**File → Export the model as YAML**).
 
 ## 2. The screen
@@ -378,9 +378,9 @@ Each case under `cases/` tells a story in stages. For the wallet:
 From the command line: `python -m epa case wallet` (every stage) or
 `python -m epa case wallet --stage S2 --format md`.
 
-## 8. Using the workbench from an assistant
+## 8. Using the reasoner from an assistant
 
-The workbench has an **MCP server** (Model Context Protocol), so an assistant such as Claude Code or
+The reasoner has an **MCP server** (Model Context Protocol), so an assistant such as Claude Code or
 Claude Desktop can do what you do here: open a demo case, build or change a model, add certificates
 and witnesses, run the analysis and explain the verdicts. You can ask it, for example:
 
@@ -394,14 +394,14 @@ and witnesses, run the analysis and explain the verdicts. You can ask it, for ex
 Run `./run.sh` once first: it makes the `.venv` the server runs in. The server itself is `mcp.sh` in
 the repository; the client starts it, you never start it by hand.
 
-* **Claude Code, in this repository.** `.mcp.json` already registers the server as `epa-workbench`.
+* **Claude Code, in this repository.** `.mcp.json` already registers the server as `bimodal-reasoner`.
   Start `claude` in the repository folder and approve the server when asked; `/mcp` shows it and its
   tools.
 * **Claude Code, from anywhere.** Register it once for your user (quote the path: it may contain
   spaces):
 
   ```sh
-  claude mcp add --scope user epa-workbench -- "/path/to/epa-v2/mcp.sh"
+  claude mcp add --scope user bimodal-reasoner -- "/path/to/epa-v2/mcp.sh"
   ```
 
 * **Claude Desktop.** *Settings → Developer → Edit Config* opens `claude_desktop_config.json`
@@ -411,7 +411,7 @@ the repository; the client starts it, you never start it by hand.
   ```json
   {
     "mcpServers": {
-      "epa-workbench": { "command": "/path/to/epa-v2/mcp.sh" }
+      "bimodal-reasoner": { "command": "/path/to/epa-v2/mcp.sh" }
     }
   }
   ```
@@ -422,19 +422,19 @@ the repository; the client starts it, you never start it by hand.
 ### 8.2 Taking turns: the shared workspace
 
 The assistant works on the **shared workspace**, one model with its evidence in
-`.epa-work/workspace.json`, saved after every change. The workbench in the browser can open it and
+`.epa-work/workspace.json`, saved after every change. The reasoner in the browser can open it and
 write to it, so you and the assistant can take turns on one model:
 
 | you want to | do |
 |---|---|
 | see what the assistant built or changed | **File → Open the shared workspace** |
 | hand your model to the assistant | **File → Save to the shared workspace…** (it asks before replacing what is there) |
-| know when the assistant changed it | the workbench tells you when you come back to its window |
+| know when the assistant changed it | the reasoner tells you when you come back to its window |
 
-![A model the assistant built, opened in the workbench from the shared workspace](images/shared-workspace.jpg)
+![A model the assistant built, opened in the reasoner from the shared workspace](images/shared-workspace.jpg)
 
-Both sides must use the same work folder: start the workbench (`./run.sh`) from the same repository
-the client runs `mcp.sh` from, or point both at one file (`EPA_WORKSPACE` for the workbench,
+Both sides must use the same work folder: start the reasoner (`./run.sh`) from the same repository
+the client runs `mcp.sh` from, or point both at one file (`EPA_WORKSPACE` for the reasoner,
 `--workspace` for the server).
 
 ### 8.3 What the assistant can do
@@ -446,7 +446,7 @@ the client runs `mcp.sh` from, or point both at one file (`EPA_WORKSPACE` for th
 | evidence | list the register; add a certificate, a witness written by hand, or a log read with the recognisers; add a recogniser; set the deployment manifest; withdraw a certificate; reject a witness (with a second reviewer) |
 | analysis | run it; read one cell's verdict in full; explain a cell with a run that reaches it and the candidates; export the Markdown report or the CRA JSON |
 
-**Every change is checked**, as in the workbench's windows: if an edit would add problems to the
+**Every change is checked**, as in the reasoner's windows: if an edit would add problems to the
 model, the server does not save it and tells the assistant what is wrong. The assistant can still
 save it on purpose (the same as *Save anyway*), and it should tell you when it does.
 
@@ -458,10 +458,10 @@ save it on purpose (the same as *Save anyway*), and it should tell you when it d
 
 starts the server and talks to it as a real client does (the wallet case at S2: oom at o_statement is
 a hope, and the conflict names the mandate certificate). With a client connected, `claude mcp list`
-shows `epa-workbench` as connected, and
+shows `bimodal-reasoner` as connected, and
 
 ```sh
-claude -p "Use the epa-workbench tools: open the wallet case at stage S2, run the analysis and list the verdicts." --mcp-config .mcp.json --strict-mcp-config --allowedTools "mcp__epa-workbench"
+claude -p "Use the bimodal-reasoner tools: open the wallet case at stage S2, run the analysis and list the verdicts." --mcp-config .mcp.json --strict-mcp-config --allowedTools "mcp__bimodal-reasoner"
 ```
 
 runs one request from the command line. The MCP Inspector (`npx @modelcontextprotocol/inspector ./mcp.sh`,
@@ -477,8 +477,8 @@ needs Node) shows every tool and lets you call them by hand.
 | every cell is a **conflict** and "the model lacks a path" | a witness says something no run of the model can produce: check the witness (too exact a magnitude?) or the model (a missing row or edge) |
 | a window will not save | the step names on the left show what is missing; the list above the buttons says what |
 | the badge shows problems | select nothing to see the list in the inspector; the outline marks empty guards |
-| the assistant does not list the `epa-workbench` tools | run `./run.sh` once (the server needs `.venv`); `claude mcp list` says why it does not start; Claude Desktop needs the absolute path of `mcp.sh` and a restart |
-| the workbench does not show what the assistant did | **File → Open the shared workspace**; if it is empty, the workbench and the server use different work folders (section 8.2) |
+| the assistant does not list the `bimodal-reasoner` tools | run `./run.sh` once (the server needs `.venv`); `claude mcp list` says why it does not start; Claude Desktop needs the absolute path of `mcp.sh` and a restart |
+| the reasoner does not show what the assistant did | **File → Open the shared workspace**; if it is empty, the reasoner and the server use different work folders (section 8.2) |
 
 ## 10. Words
 

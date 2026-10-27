@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "epa-workbench": {
+    "bimodal-reasoner": {
       "command": "./mcp.sh",
       "args": []
     }

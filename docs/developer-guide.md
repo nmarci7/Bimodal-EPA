@@ -1,7 +1,7 @@
-# EPA workbench: developer guide
+# Bimodal Agentic System Reasoner: developer guide
 
-How the workbench is built: its parts, how they call each other, what happens in each workflow, and
-where every file and function is described. For using the workbench see the
+How the reasoner is built: its parts, how they call each other, what happens in each workflow, and
+where every file and function is described. For using the reasoner see the
 [user guide](user-guide.md); for the model document see [model-format.md](model-format.md).
 
 **Reference pages** (every file, class and function, with what it does and what it calls):
@@ -12,7 +12,7 @@ where every file and function is described. For using the workbench see the
 | [dev/alethic.md](dev/alethic.md) | `epa/translate/`, `epa/alethic/`: the TLA+ module of a cone, running TLC, reading runs |
 | [dev/engine.md](dev/engine.md) | `epa/epistemic/`, `epa/engine/`: the ASP encoding, the coordinator, the run cache, case scenarios |
 | [dev/intake-api.md](dev/intake-api.md) | `epa/intake/`, `epa/report/`, `epa/cli.py`, `epa/api/app.py`: evidence, reports, the CLI, the HTTP API |
-| [dev/web.md](dev/web.md) | `web/`: the browser workbench, its state, events, dialogs and views |
+| [dev/web.md](dev/web.md) | `web/`: the browser UI, its state, events, dialogs and views |
 | [dev/mcp.md](dev/mcp.md) | `epa/mcp/`, `epa/workspace.py`, `epa/model/edit.py`: the MCP server and the shared workspace |
 | [dev/call-graph.md](dev/call-graph.md) | generated: every call between the Python functions, the module dependencies, the browser's imports |
 
@@ -23,7 +23,7 @@ the call graph; `tests/test_docs.py` fails when a function is not described or t
 
 ## 1. System architecture
 
-The workbench is a Python engine with three front doors: a browser UI served by a FastAPI app, a
+The reasoner is a Python engine with three front doors: a browser UI served by a FastAPI app, a
 command line, and an MCP server. The engine calls two external solvers: **TLC** (the TLA+ model
 checker, Java) explores runs, and **clingo** (answer set programming, a Python module) reasons over
 them.
@@ -31,7 +31,7 @@ them.
 ```mermaid
 flowchart TB
   subgraph Clients
-    UI["Browser workbench<br/>web/*.js (ES modules)"]
+    UI["Browser UI<br/>web/*.js (ES modules)"]
     CLI["Command line<br/>python -m epa …<br/>(epa/cli.py)"]
     AS["MCP client<br/>(Claude Code, Claude Desktop, …)"]
   end
@@ -188,7 +188,7 @@ flowchart LR
 
 ## 4. Workflows
 
-### 4.1 Editing the model in the workbench
+### 4.1 Editing the model in the reasoner
 
 Direct edits on the canvas (drag, wire, delete) change `S.doc` and call `changed()`. Everything opened
 by *Edit…*, *Add row…* or a drop of a guard or an eye goes through a dialog that edits a copy:
@@ -342,7 +342,7 @@ module was run before), `runs.runs_from_dump`, and the cache stores the runs.
 
 See [dev/mcp.md](dev/mcp.md#5-sequence-an-assistant-changes-the-model-the-analyst-sees-it): every
 tool call loads the shared workspace, edits a copy with `epa/model/edit.py`, checks it, and saves it
-unless it adds problems; the workbench notices the change and opens it on request.
+unless it adds problems; the reasoner notices the change and opens it on request.
 
 ### 4.8 Bootstrapping a model from traces
 
@@ -388,7 +388,7 @@ sequenceDiagram
 | server memory (`ANALYSES` in `api/app.py`) | running and finished analyses, their events and reports | until the server restarts |
 | `.epa-work/runs.sqlite` | the run cache: runs and the firing choices covered, per cone | kept; safe to delete |
 | `.epa-work/tlc/<hash>/` | each generated module, its cfg, TLC's output and state dump | kept; safe to delete |
-| `.epa-work/workspace.json` | the shared workspace of the MCP server and the workbench | kept |
+| `.epa-work/workspace.json` | the shared workspace of the MCP server and the reasoner | kept |
 
 `EPA_WORK` moves the work folder; `EPA_WORKSPACE` moves the workspace file for the HTTP API.
 
@@ -435,7 +435,7 @@ demo cases, but they are worth fixing:
 * **Inputs that crash the loader instead of giving a problem** (the API's model check answers HTTP 500):
   `const` without a number, a guard target with no kind, an unknown level in a use-case token, an odd
   `when` pattern, an observation point without an id ([dev/model.md](dev/model.md#6-observations)).
-  The workbench's dialogs do not produce these; the MCP server reports them as problems.
+  The reasoner's dialogs do not produce these; the MCP server reports them as problems.
 * **Ids not checked for uniqueness** for rows, observation points and use cases; **leak row ids
   collide** when one guard has two targets of the same kind ([dev/model.md](dev/model.md#6-observations)).
 * **`fp_omission: 0`** on a learned guard means 10 in its row but 0 in the TLA+

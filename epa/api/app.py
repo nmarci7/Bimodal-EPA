@@ -316,7 +316,7 @@ def do_bootstrap(body: Boot):
 
 
 # ---------------------------------------------------------------------------- the shared workspace
-# The model and evidence the MCP server works on (python -m epa mcp); the workbench can open it, or
+# The model and evidence the MCP server works on (python -m epa mcp); the reasoner can open it, or
 # save its own model there for an assistant to work on (epa/workspace.py).
 @app.get("/api/workspace/meta")
 def workspace_meta():
@@ -328,7 +328,7 @@ def workspace_get():
     ws = WS.load(WORKSPACE)
     if not ws["doc"]:
         raise HTTPException(404, "the shared workspace is empty: an MCP client fills it (python -m epa mcp), "
-                                 "or save a model there from the workbench")
+                                 "or save a model there from the reasoner")
     return {k: ws[k] for k in ("doc", "evidence", "case", "stage", "updated", "by")}
 
 
@@ -486,7 +486,7 @@ def report_cra(aid: str):
 @app.middleware("http")
 async def revalidate_ui(request, call_next):
     """The browser asks again for every UI file (a 304 when it is unchanged), so a new version of the
-    workbench is never shown half old, half new from the cache."""
+    reasoner is never shown half old, half new from the cache."""
     resp = await call_next(request)
     if request.url.path == "/" or request.url.path.startswith("/web/"):
         resp.headers["Cache-Control"] = "no-cache"

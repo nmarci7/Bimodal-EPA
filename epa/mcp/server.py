@@ -1,10 +1,10 @@
-"""The workbench as an MCP server: an assistant (Claude Code, Claude Desktop, any MCP client) can open
+"""The reasoner as an MCP server: an assistant (Claude Code, Claude Desktop, any MCP client) can open
 a demo case, build or change a model, add evidence, run the analysis and read the verdicts.
 
     python -m epa mcp [--workspace FILE] [--work DIR]        stdio transport
 
 Everything happens in the shared workspace (epa/workspace.py): the model and the evidence the tools
-work on are saved there after every change, and the workbench in the browser can open them
+work on are saved there after every change, and the reasoner in the browser can open them
 (File → Open the shared workspace) or save its own model there for the assistant.
 
 `Workbench` holds the logic and returns plain dicts, so it can be tested without a client;
@@ -33,7 +33,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CASES = os.path.join(ROOT, "cases")
 DOCS = os.path.join(ROOT, "docs")
 
-INSTRUCTIONS = """EPA workbench: bimodal error propagation analysis of agentic systems.
+INSTRUCTIONS = """Bimodal Agentic System Reasoner: bimodal error propagation analysis of agentic systems.
 A model has components (LLM, deterministic, tool, store, external, user) with input and output ports,
 edges between ports, rows (what a component does with failures), guards on edges, observation points
 on edges where a log exists, and use cases (where messages enter). The analysis runs every firing choice
@@ -46,7 +46,7 @@ get_model and check_model; change with put_component, connect, put_row, put_guar
 put_use_case; add evidence with add_certificate, add_witness or ingest_log; run_analysis; then get_verdict,
 explain_cell and certify-next in the run summary. Every edit is checked: if it would add problems to the
 model it is not saved unless force=true. The model format is the resource epa://docs/model-format.
-Everything is saved in the shared workspace, which the workbench in the browser can open."""
+Everything is saved in the shared workspace, which the reasoner in the browser can open."""
 
 
 class ToolError(Exception):
@@ -54,7 +54,7 @@ class ToolError(Exception):
 
 
 def check(doc):
-    """The model check of the workbench: validate, then load (cells, cones). -> {ok, problems, model?}"""
+    """The model check of the reasoner: validate, then load (cells, cones). -> {ok, problems, model?}"""
     try:
         problems = validate(copy.deepcopy(doc))
         if problems:
@@ -544,7 +544,7 @@ def build_server(bench=None):
     from mcp.types import ToolAnnotations
 
     b = bench or Workbench()
-    srv = MCPServer(name="epa-workbench", title="EPA workbench", version="2.0", instructions=INSTRUCTIONS)
+    srv = MCPServer(name="bimodal-reasoner", title="Bimodal Agentic System Reasoner", version="2.0", instructions=INSTRUCTIONS)
     read = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
     gone = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
@@ -587,7 +587,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=read)
     def export_model(path: str | None = None) -> dict[str, Any]:
-        """The workspace model as YAML (the document the CLI and the workbench read); written to path if one is given."""
+        """The workspace model as YAML (the document the CLI and the reasoner read); written to path if one is given."""
         return wrap(lambda: b.export_model(path))
 
     @srv.tool(annotations=read)
@@ -782,9 +782,9 @@ def build_server(bench=None):
         """How a model is written: components, ports, rows, guards, edges, use cases, observation points, claims, evidence."""
         return open(os.path.join(DOCS, "model-format.md"), encoding="utf-8").read()
 
-    @srv.resource("epa://docs/user-guide", name="user-guide", title="The workbench user guide", mime_type="text/markdown")
+    @srv.resource("epa://docs/user-guide", name="user-guide", title="The reasoner user guide", mime_type="text/markdown")
     def user_guide() -> str:
-        """How the workbench is used, step by step."""
+        """How the reasoner is used, step by step."""
         return open(os.path.join(DOCS, "user-guide.md"), encoding="utf-8").read()
 
     @srv.resource("epa://workspace/model.yaml", name="workspace-model", title="The model in the shared workspace", mime_type="text/yaml")
@@ -798,7 +798,7 @@ def build_server(bench=None):
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(prog="python -m epa mcp", description="The EPA workbench as an MCP server (stdio).")
+    ap = argparse.ArgumentParser(prog="python -m epa mcp", description="The Bimodal Agentic System Reasoner as an MCP server (stdio).")
     ap.add_argument("--workspace", help="the shared workspace file (default: <work>/workspace.json)")
     ap.add_argument("--work", help="the work folder for the run cache and TLC (default: EPA_WORK or .epa-work)")
     a = ap.parse_args(argv)

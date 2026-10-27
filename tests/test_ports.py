@@ -1,4 +1,4 @@
-"""A model drawn port by port in the workbench: several ports per component, a fan-out from one
+"""A model drawn port by port in the reasoner: several ports per component, a fan-out from one
 output port, a guard with a decidable target, observation points that judge every mode and one that
 judges confidentiality against its receiver's clearance; YAML certificates; the 'any input' rule."""
 import time

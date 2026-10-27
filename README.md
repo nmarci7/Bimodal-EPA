@@ -1,4 +1,6 @@
-# EPA engine v2 — bimodal error propagation analysis for agentic systems
+# Bimodal Agentic System Reasoner
+
+Bimodal error propagation analysis (EPA) for agentic systems, engine v2.
 
 BME VIK TDK 2026 project.
 
@@ -39,18 +41,18 @@ python -m epa serve --port 8765
 On macOS without Java: `brew install openjdk@21` (and follow brew's note about the symlink), or
 any JDK from adoptium.net. `GET /api/health` reports what the server found.
 
-**Documentation.** [docs/user-guide.md](docs/user-guide.md) is how to use the workbench, step by
+**Documentation.** [docs/user-guide.md](docs/user-guide.md) is how to use the reasoner, step by
 step, with screenshots. [docs/developer-guide.md](docs/developer-guide.md) is how it is built: the
 architecture, the call structure, sequence diagrams of every workflow, and a reference page for every
 file and function (`docs/dev/`). [docs/model-format.md](docs/model-format.md) is the model document.
 
-**From an assistant.** `./mcp.sh` is an MCP server (stdio) with the workbench's tools: open a case,
+**From an assistant.** `./mcp.sh` is an MCP server (stdio) with the reasoner's tools: open a case,
 build and change the model, add evidence, run the analysis, explain the verdicts. `.mcp.json`
 registers it for Claude Code in this repository; the user guide (section 8) has the setup for other
 clients. The assistant and the browser share one model through `.epa-work/workspace.json`
 (File → Open / Save to the shared workspace).
 
-## The workbench
+## The reasoner
 
 1. **Model.** A canvas with a palette: LLM components, deterministic components, tools, stores,
    external systems and users, system inputs and outputs, guards and observation points. Drag a
@@ -132,7 +134,7 @@ epa/engine/      coordinator.py (certificates prune firing choices before TLC; c
 epa/report/      explain.py, markdown.py (report and CRA export)
 epa/api/app.py   FastAPI: model check, evidence intake, analyses with server-sent events, the shared workspace
 epa/mcp/         server.py: the MCP server (tools over the shared workspace); epa/workspace.py stores it
-web/             the workbench (plain ES modules, no build step)
+web/             the reasoner (plain ES modules, no build step)
 cases/           the three demo cases
 tools/           inventory.py: every definition and call, for the developer reference
 docs/            user-guide.md, developer-guide.md and dev/ (the reference), model-format.md;

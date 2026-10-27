@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Start the workbench's MCP server (stdio) with the project's virtual environment, from any folder.
+# Start the reasoner's MCP server (stdio) with the project's virtual environment, from any folder.
 # MCP clients run this: Claude Code through .mcp.json in this repository, Claude Desktop or any other
-# client through its own config (docs/user-guide.md, "Using the workbench from an assistant").
+# client through its own config (docs/user-guide.md, "Using the reasoner from an assistant").
 #   ./mcp.sh [--workspace FILE] [--work DIR]
 # stdout belongs to the MCP protocol: everything else goes to stderr.
 set -euo pipefail

@@ -1,4 +1,4 @@
-# The browser workbench (web/)
+# The browser UI (web/)
 
 Part of the [developer guide](../developer-guide.md). Plain ES modules, no build step, served by the
 API at `/web/*`. `web/package.json` only tells node that the files are modules (for `web/tests/`).
@@ -6,7 +6,7 @@ Line numbers are left out on purpose: `python tools/inventory.py` prints the cur
 
 ### The browser state and its events
 
-Everything the workbench holds lives in one object, `S` in `web/state.js`:
+Everything the reasoner holds lives in one object, `S` in `web/state.js`:
 
 | field | holds |
 |---|---|

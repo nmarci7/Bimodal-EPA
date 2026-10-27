@@ -263,7 +263,7 @@ class WitnessError(ValueError):
 
 
 def manual_witness(spec, m, deployments=None):
-    """A witness entered by hand (in the workbench, or by an agent through the MCP server), checked
+    """A witness entered by hand (in the reasoner, or by an agent through the MCP server), checked
     against the model and shaped as a recogniser would shape it.
 
     spec: {id?, use_case?, date? (YYYY-MM-DD), source?, note?,

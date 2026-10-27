@@ -5,7 +5,7 @@ uses (epa/model/edit.py).
 * a real MCP session over stdio with the official client (mcp.ClientSession): the tools are listed,
   the wallet case is opened at S2 and analysed, and the verdict is the one the engine gives directly;
 * the same server spoken to in raw JSON-RPC (no SDK on the client side), to check the protocol itself;
-* the workspace endpoints of the HTTP API, which the workbench uses to open what the assistant built.
+* the workspace endpoints of the HTTP API, which the reasoner uses to open what the assistant built.
 """
 import json
 import os
@@ -112,7 +112,7 @@ def test_mcp_session_over_stdio(tmp_path):
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
                 init = await s.initialize()
-                assert init.server_info.name == "epa-workbench" and "EPA workbench" in (init.instructions or "")
+                assert init.server_info.name == "bimodal-reasoner" and "Bimodal Agentic System Reasoner" in (init.instructions or "")
                 names = {t.name for t in (await s.list_tools()).tools}
                 assert {"open_case", "put_row", "add_witness", "run_analysis", "get_verdict", "explain_cell"} <= names
                 res = await s.call_tool("open_case", {"case": "wallet", "stage": "S2"})
@@ -152,7 +152,7 @@ def test_mcp_protocol_without_the_sdk(tmp_path):
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "raw-test", "version": "0"}}})
         r = reply()
-        assert r["id"] == 1 and r["result"]["serverInfo"]["name"] == "epa-workbench" and "tools" in r["result"]["capabilities"]
+        assert r["id"] == 1 and r["result"]["serverInfo"]["name"] == "bimodal-reasoner" and "tools" in r["result"]["capabilities"]
         send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         r = reply()
@@ -170,7 +170,7 @@ def test_mcp_protocol_without_the_sdk(tmp_path):
         p.wait()
 
 
-# ---------------------------------------------------------------- the workbench side of the workspace
+# ---------------------------------------------------------------- the reasoner side of the workspace
 def test_workspace_endpoints(tmp_path, monkeypatch):
     from epa.api import app as A
     monkeypatch.setattr(A, "WORKSPACE", str(tmp_path / "workspace.json"))

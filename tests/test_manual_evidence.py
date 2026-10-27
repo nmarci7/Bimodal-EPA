@@ -1,4 +1,4 @@
-"""Evidence written by hand (the workbench's New witness / New certificate, or an agent through the MCP
+"""Evidence written by hand (the reasoner's New witness / New certificate, or an agent through the MCP
 server): shaped and checked like evidence from files, and it moves the verdicts the same way."""
 import os
 

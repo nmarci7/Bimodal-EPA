@@ -79,7 +79,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 - Nothing in the repository reads `__version__`.
 
 ### epa/api/app.py
-- This is the FastAPI application behind the workbench UI. It is started by `python -m epa serve`, which calls `uvicorn epa.api.app:app`, and it is used through `TestClient` in `tests/test_api.py`, `tests/test_ports.py` and `tests/test_manual_evidence.py`.
+- This is the FastAPI application behind the reasoner UI. It is started by `python -m epa serve`, which calls `uvicorn epa.api.app:app`, and it is used through `TestClient` in `tests/test_api.py`, `tests/test_ports.py` and `tests/test_manual_evidence.py`.
 - The browser holds the model document and the evidence. The server parses, checks, classifies evidence, bootstraps, and runs analyses in background threads, streaming their events as Server-Sent Events.
 - Server state:
   - the in-memory dict `ANALYSES`

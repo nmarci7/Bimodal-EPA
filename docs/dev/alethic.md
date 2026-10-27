@@ -248,4 +248,4 @@ sequenceDiagram
   `a_b`); only edge ids are checked.
 * **`trace`** parses every state of the dump to keep one run: slow on large dumps.
 * **No use case**: a cone with no use case would emit `Start(x) == CASE` with no arms (invalid TLA+);
-  the model check requires at least one use case, so this does not happen through the workbench.
+  the model check requires at least one use case, so this does not happen through the reasoner.

@@ -159,7 +159,7 @@ claims:
   - {cell: unsafe@o_actuator, verdict: guarantee, by: hub firmware team, note: "no unsafe actuation reaches a device"}
   - {cell: conf@o_egress, verdict: guarantee, by: privacy office, note: "presence data never leaves the home"}
 
-# canvas layout of the system ports (the workbench reads it; the engine ignores it)
+# canvas layout of the system ports (the reasoner reads it; the engine ignores it)
 layout:
   sys:
     feeds: {x: 80, y: 76, dir: in}

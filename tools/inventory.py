@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The code inventory behind docs/developer-guide.md: every module, class and function of the engine
-(epa/) and the workbench (web/), and who calls whom.
+(epa/) and the reasoner (web/), and who calls whom.
 
     python tools/inventory.py            a summary per file (functions, line numbers, first docstring line)
     python tools/inventory.py --json     everything as JSON (used by tests/test_docs.py)

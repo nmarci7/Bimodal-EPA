@@ -1,4 +1,4 @@
-// The workbench: wires the four views, the demo cases and their scenario stages, import/export,
+// The reasoner: wires the four views, the demo cases and their scenario stages, import/export,
 // and the bootstrap from traces.
 import { h, clear, api, readFile, download, toast, modal, dropZone, store } from './lib.js';
 import { S, on, emit, blankDoc, normaliseDoc, emptyEvidence, runCheck, persist, restore } from './state.js';
@@ -159,13 +159,13 @@ async function openWorkspace() {
   drawStagebar();
   show('model');
   store('epa.wsSeen', ws.updated);
-  toast(`Opened the shared workspace: ${ws.doc.name || 'model'}, written by ${ws.by === 'mcp' ? 'the assistant' : 'the workbench'} on ${when(ws.updated)}.`, 6000);
+  toast(`Opened the shared workspace: ${ws.doc.name || 'model'}, written by ${ws.by === 'mcp' ? 'the assistant' : 'the browser'} on ${when(ws.updated)}.`, 6000);
 }
 
 async function saveWorkspace() {
   const meta = await api('/api/workspace/meta');
   if (meta.exists) {
-    const ok = await confirmDialog(`This replaces the model in the shared workspace (${meta.name || 'a model'}, written by ${meta.by === 'mcp' ? 'the assistant' : 'the workbench'} on ${when(meta.updated)}) with ${S.doc.name || 'this model'} and its evidence.`,
+    const ok = await confirmDialog(`This replaces the model in the shared workspace (${meta.name || 'a model'}, written by ${meta.by === 'mcp' ? 'the assistant' : 'the browser'} on ${when(meta.updated)}) with ${S.doc.name || 'this model'} and its evidence.`,
       { title: 'Save to the shared workspace', okText: 'Replace it' });
     if (!ok) return;
   }
@@ -192,7 +192,7 @@ async function watchWorkspace() {
 // ---------------------------------------------------------------- help
 function helpDialog() {
   const step = (n, t, x) => h('li', {}, h('b', {}, `${n} ${t}. `), x);
-  infoDialog('How the workbench works', h('div', { class: 'block help' },
+  infoDialog('How the reasoner works', h('div', { class: 'block help' },
     h('ol', { class: 'story' },
       step('1', 'Model', 'Draw the system: drag components from Add, wire output ports to input ports, drop guards and observation points onto edges. Select anything to read it in the inspector; Edit… or a double-click opens its dialog. A component\'s rows (what it does with failures) are under the canvas: Add row… walks you through one.'),
       step('2', 'Evidence', 'Drop logs (a recogniser turns their lines into witnesses) and certificates, or write either by hand with New witness… and New certificate…. The register says which are in force, rejected or stale, and why.'),
@@ -237,7 +237,7 @@ async function main() {
     { label: 'Open the shared workspace', hint: 'what an assistant built through the MCP server', onClick: openWorkspace },
     { label: 'Save to the shared workspace…', hint: 'hand this model to an assistant', onClick: saveWorkspace },
   ], { title: 'new, import, export, bootstrap, shared workspace' });
-  $('actions').prepend(fileMenu, button('Help', helpDialog, { title: 'how the workbench works, and its shortcuts' }));
+  $('actions').prepend(fileMenu, button('Help', helpDialog, { title: 'how the reasoner works, and its shortcuts' }));
   const cases = await loadCases();
   const params = new URLSearchParams(location.search);
   restore();

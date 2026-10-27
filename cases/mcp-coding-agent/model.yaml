@@ -155,7 +155,7 @@ claims:
   - {cell: conf@o_pr, verdict: guarantee, by: platform team, note: "private code never reaches a public pull request"}
   - {cell: taint@o_process, verdict: guarantee, by: platform team, note: "untrusted text never reaches the shell"}
 
-# canvas layout of the system ports (the workbench reads it; the engine ignores it)
+# canvas layout of the system ports (the reasoner reads it; the engine ignores it)
 layout:
   sys:
     issues: {x: 68, y: 76, dir: in}

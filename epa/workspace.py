@@ -1,5 +1,5 @@
 """The shared workspace: one model and its evidence in a JSON file that the MCP server edits and the
-workbench can open or save into (File → Open / Save the shared workspace). The file lives in the
+reasoner can open or save into (File → Open / Save the shared workspace). The file lives in the
 work folder (EPA_WORK, default .epa-work/) next to the run cache, so the browser's server and the MCP
 server, two processes, see the same one.
 
