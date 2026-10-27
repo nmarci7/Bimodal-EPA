@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the EPA workbench: a virtual environment, the requirements, a Java check, the server,
+# Start the Bimodal Agentic System Reasoner: a virtual environment, the requirements, a Java check, the server,
 # and the browser.   ./run.sh [port]
 set -euo pipefail
 cd "$(dirname "$0")"

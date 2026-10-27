@@ -21,6 +21,7 @@ Example:
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -252,6 +253,85 @@ def witnesses_from_text(text, filename, rec, m=None, deployments=None, base_dir=
         else:
             unmatched.append(line_no)
     return [groups[k] for k in order], unmatched
+
+
+class WitnessError(ValueError):
+    """A hand-entered witness that does not fit the model; .problems lists why."""
+    def __init__(self, problems):
+        super().__init__("; ".join(problems))
+        self.problems = problems
+
+
+def manual_witness(spec, m, deployments=None):
+    """A witness entered by hand (in the reasoner, or by an agent through the MCP server), checked
+    against the model and shaped as a recogniser would shape it.
+
+    spec: {id?, use_case?, date? (YYYY-MM-DD), source?, note?,
+           at: {obs_id: {modes: {field: k | [lo, hi]}, taint: bool, conf: level | [lo, hi],
+                         auth: level | [lo, hi], used: bool}}}
+    A magnitude k means exactly k (0: the failure was not there); [lo, hi] a range the log cannot
+    narrow. The versions are those in force on the date (deployment manifest), else the model's own.
+    Raises WitnessError listing every problem.
+    """
+    p = []
+    at_in = spec.get("at") or {}
+    if not isinstance(at_in, dict) or not at_in:
+        p.append("a witness logs at least one observation point")
+        at_in = {}
+    norm = {}
+    for obs_id, logged in at_in.items():
+        if obs_id not in m.obs:
+            p.append(f"unknown observation point {obs_id!r}")
+            continue
+        logged = logged or {}
+        x = {}
+        for f, v in (logged.get("modes") or {}).items():
+            if f not in m.fields:
+                p.append(f"{obs_id}: unknown failure mode {f!r}")
+                continue
+            lo, hi = (v, v) if not isinstance(v, (list, tuple)) else (v[0], v[1])
+            try:
+                lo, hi = int(lo), int(hi)
+            except (TypeError, ValueError):
+                p.append(f"{obs_id}: the magnitude of {f} must be a number from 0 to 10")
+                continue
+            if not 0 <= lo <= hi <= 10:
+                p.append(f"{obs_id}: the magnitude of {f} must lie in 0..10 (low <= high)")
+                continue
+            x.setdefault("modes", {})[f] = [lo, hi]
+        if "taint" in logged and logged["taint"] is not None:
+            x["taint"] = bool(logged["taint"])
+        for k, levels in (("conf", m.conf_levels), ("auth", m.auth_levels)):
+            v = logged.get(k)
+            if v is None or v == "":
+                continue
+            pair = list(v) if isinstance(v, (list, tuple)) else [v, v]
+            if any(lv not in levels for lv in pair if isinstance(lv, str)) or len(pair) != 2:
+                p.append(f"{obs_id}: {k} must name levels of {levels}")
+                continue
+            x[k] = pair
+        if "used" in logged and logged["used"] is not None:
+            x["used"] = bool(logged["used"])
+        if not x:
+            p.append(f"{obs_id}: say what was seen there (a failure magnitude, taint, confidentiality or authority)")
+        norm[obs_id] = x
+    uc = spec.get("use_case") or None
+    if uc and uc not in {u.id for u in m.use_cases}:
+        p.append(f"unknown use case {uc!r}")
+    date = str(spec.get("date") or "")[:10]
+    if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        p.append(f"the date {date!r} is not YYYY-MM-DD")
+    if p:
+        raise WitnessError(p)
+    at = _resolve_levels(norm, m)
+    if deployments and date:
+        versions = versions_at(load_deployments(deployments), date)
+    else:
+        versions = {c.id: c.version for c in m.components.values() if c.version is not None}
+    wid = spec.get("id") or "w_manual_" + hashlib.sha1(json.dumps([at, uc, date], sort_keys=True).encode()).hexdigest()[:6]
+    wid = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(wid))
+    return {"id": wid, "use_case": uc, "at": at, "date": date, "source": spec.get("source") or "entered by hand",
+            "recogniser": "manual", "versions": versions, "rule": spec.get("note") or "", "lines": []}
 
 
 def classify_witness(w, m, rejected=()):

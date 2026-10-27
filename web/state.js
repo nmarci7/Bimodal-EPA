@@ -1,4 +1,4 @@
-// The workbench state: the model document, the evidence, the last analysis, the selection.
+// The reasoner state: the model document, the evidence, the last analysis, the selection.
 import { api, store } from './lib.js';
 
 const listeners = {};
@@ -43,7 +43,17 @@ export function normaliseDoc(doc) {
   d.layout = d.layout || {};
   d.layout.sys = d.layout.sys || {};
   for (const g of d.guards) { if (g.on && !g.edge) { g.edge = g.on; delete g.on; } }
-  for (const c of d.components) { c.in = c.in || []; c.out = c.out || []; c.rows = c.rows || []; }
+  for (const c of d.components) {
+    c.in = c.in || []; c.out = c.out || []; c.rows = c.rows || [];
+    // older documents named what passes; now everything passes unless it is absorbed, with a reason
+    if (c.pass !== undefined) {
+      const tops = topModes(d);
+      const kept = c.pass === 'all' ? tops : [].concat(c.pass || []);
+      const gone = c.kind === 'llm' ? [] : tops.filter((m) => !kept.includes(m));
+      if (gone.length) c.absorbs = (c.absorbs || []).concat(c.in.map((p) => ({ port: p, modes: gone, reason: '' })));
+      delete c.pass;
+    }
+  }
   autoLayout(d);
   return d;
 }
@@ -92,8 +102,7 @@ export function addComponent(kind, x, y) {
   const d = S.doc;
   const id = uniqueId(kind === 'llm' ? 'planner' : kind, allIds(d));
   const c = { id, kind, label: KIND_LABEL[kind] || kind, in: [], out: [], rows: [], pos: { x: Math.round(x), y: Math.round(y) } };
-  // failures pass through a new non-LLM component until the analyst says otherwise (the pessimistic default)
-  if (kind !== 'llm') c.pass = 'all';
+  // failures pass through a non-LLM component until the analyst declares otherwise (A6, pessimistic)
   d.components.push(c);
   changed({ type: 'component', id });
   return c;
@@ -156,29 +165,18 @@ export function connectPorts(from, to) {
 export function connect(fromNode, toNode) { const r = connectPorts({ node: fromNode }, { node: toNode }); return r.ok ? r.id : null; }
 
 export function addPort(cid, side) {
-  const c = comp(S.doc, cid);
-  const name = uniquePort(c[side], side === 'in' ? 'in' : 'out');
-  c[side].push(name);
-  if (c.flow) { if (side === 'in') c.flow[name] = c.out.slice(); else for (const p of c.in) (c.flow[p] = c.flow[p] || []).push(name); }
+  const name = ops.addPort(S.doc, cid, side);
   changed({ type: 'port', id: `${cid}|${side}|${name}` });
   return name;
 }
 export function portEdges(d, cid, side, name) { const ref = `${cid}.${name}`; return d.edges.filter((e) => (side === 'in' ? e.to : e.from) === ref); }
 export function removePort(cid, side, name) {
-  const d = S.doc, c = comp(d, cid);
-  const gone = portEdges(d, cid, side, name).map((e) => e.id);
-  dropEdges(gone);
-  c[side] = c[side].filter((p) => p !== name);
-  if (c.flow) { if (side === 'in') delete c.flow[name]; else for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].filter((q) => q !== name); }
-  c.rows = (c.rows || []).filter((r) => !(side === 'in' ? (r.when || {})[name] : (r.then || {})[name]));
-  for (const x of c.drop_defaults || []) if (side === 'out' && x.port === name) c.drop_defaults = c.drop_defaults.filter((y) => y !== x);
+  ops.removePort(S.doc, cid, side, name);
   changed({ type: 'component', id: cid });
 }
 /** Re-attach one end of an edge to another port of the same component. */
 export function moveEdgeEnd(eid, end, port) {
-  const d = S.doc, e = edge(d, eid);
-  const [o] = parseRef(e[end]);
-  e[end] = `${o}.${port}`;
+  ops.moveEdgeEnd(S.doc, eid, end, port);
   changed({ type: 'edge', id: eid });
 }
 
@@ -214,10 +212,12 @@ export function addGuard(edgeId) {
   const id = uniqueId('g', allIds(d));
   d.guards.push({ id, label: '', edge: edgeId, targets: [] });
   changed({ type: 'guard', id });
+  return id;
 }
 export function addObs(edgeId) {
   const d = S.doc;
-  if (d.observation_points.find((o) => o.edge === edgeId)) return;
+  const there = d.observation_points.find((o) => o.edge === edgeId);
+  if (there) return there.id;
   const e = edge(d, edgeId);
   const recv = e ? nodeIdOfRef(e.to).replace('sys:', '') : edgeId.replace(/^e_/, '');
   const id = uniqueId(`o_${recv}`, new Set(d.observation_points.map((o) => o.id)));
@@ -225,6 +225,7 @@ export function addObs(edgeId) {
   const tolerate = Object.fromEntries(topModes(d).map((m) => [m, 1]));
   d.observation_points.push({ id, edge: edgeId, label: id, tolerate });
   changed({ type: 'obs', id });
+  return id;
 }
 export function removeSelection() {
   const d = S.doc, sel = S.selection;
@@ -245,44 +246,138 @@ export function removeSelection() {
   S.selection = null;
   changed(null);
 }
-function dropEdges(ids) {
-  // ports belong to their component (Definition: Component), so removing an edge leaves them in
-  // place, unconnected, until the analyst deletes them or wires them again
-  const d = S.doc, set = new Set(ids);
-  d.edges = d.edges.filter((e) => !set.has(e.id));
-  d.guards = d.guards.filter((g) => !set.has(g.edge));
-  d.observation_points = d.observation_points.filter((o) => !set.has(o.edge));
-}
+function dropEdges(ids) { ops.dropEdges(S.doc, ids); }
 export function renameComponent(oldId, newId) {
-  const d = S.doc;
-  if (!newId || oldId === newId) return false;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(newId) || allIds(d).has(newId)) return false;
-  const c = comp(d, oldId); c.id = newId;
-  for (const e of d.edges) {
-    if (parseRef(e.from)[0] === oldId) e.from = `${newId}.${parseRef(e.from)[1]}`;
-    if (parseRef(e.to)[0] === oldId) e.to = `${newId}.${parseRef(e.to)[1]}`;
-  }
+  if (!ops.renameComponent(S.doc, oldId, newId)) return false;
   S.selection = { type: 'component', id: newId };
   changed(S.selection);
   return true;
 }
 export function renamePort(cid, side, oldP, newP) {
-  const d = S.doc, c = comp(d, cid);
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(newP) || c[side].includes(newP)) return false;
-  c[side] = c[side].map((p) => (p === oldP ? newP : p));
-  for (const e of d.edges) {
-    const key = side === 'out' ? 'from' : 'to';
-    if (e[key] === `${cid}.${oldP}`) e[key] = `${cid}.${newP}`;
-  }
-  if (c.flow) {
-    if (side === 'in' && c.flow[oldP]) { c.flow[newP] = c.flow[oldP]; delete c.flow[oldP]; }
-    if (side === 'out') for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].map((q) => (q === oldP ? newP : q));
-  }
-  for (const r of c.rows || []) {
-    const part = side === 'in' ? r.when : r.then;
-    if (part && part[oldP] !== undefined) { part[newP] = part[oldP]; delete part[oldP]; }
-  }
+  if (!ops.renamePort(S.doc, cid, side, oldP, newP)) return false;
   changed(S.selection);
+  return true;
+}
+
+// ---------------------------------------------------------------- edits on a given document
+// The canvas edits S.doc directly. A dialog edits a copy (cloneDoc), checks it with the server, and
+// commits it in one go (saveChecked), so Cancel leaves the model as it was.
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const ops = {
+  addPort(d, cid, side) {
+    const c = comp(d, cid);
+    const name = uniquePort(c[side], side === 'in' ? 'in' : 'out');
+    c[side].push(name);
+    if (c.flow) { if (side === 'in') c.flow[name] = c.out.slice(); else for (const p of c.in) (c.flow[p] = c.flow[p] || []).push(name); }
+    return name;
+  },
+  removePort(d, cid, side, name) {
+    const c = comp(d, cid);
+    ops.dropEdges(d, portEdges(d, cid, side, name).map((e) => e.id));
+    c[side] = c[side].filter((p) => p !== name);
+    if (c.flow) { if (side === 'in') delete c.flow[name]; else for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].filter((q) => q !== name); }
+    c.rows = (c.rows || []).filter((r) => !(side === 'in' ? (r.when || {})[name] : (r.then || {})[name]));
+    if (side === 'out') c.drop_defaults = (c.drop_defaults || []).filter((x) => x.port !== name);
+    if (side === 'in') c.absorbs = (c.absorbs || []).filter((a) => a.port !== name);
+  },
+  moveEdgeEnd(d, eid, end, port) {
+    const e = edge(d, eid);
+    const [o] = parseRef(e[end]);
+    e[end] = `${o}.${port}`;
+  },
+  dropEdges(d, ids) {
+    // ports belong to their component (Definition: Component), so removing an edge leaves them in
+    // place, unconnected, until the analyst deletes them or wires them again
+    const set = new Set(ids);
+    d.edges = d.edges.filter((e) => !set.has(e.id));
+    d.guards = d.guards.filter((g) => !set.has(g.edge));
+    d.observation_points = d.observation_points.filter((o) => !set.has(o.edge));
+  },
+  renameComponent(d, oldId, newId) {
+    if (!newId || oldId === newId) return oldId === newId;
+    if (!IDENT.test(newId) || allIds(d).has(newId)) return false;
+    const c = comp(d, oldId); c.id = newId;
+    for (const e of d.edges) {
+      if (parseRef(e.from)[0] === oldId) e.from = `${newId}.${parseRef(e.from)[1]}`;
+      if (parseRef(e.to)[0] === oldId) e.to = `${newId}.${parseRef(e.to)[1]}`;
+    }
+    return true;
+  },
+  renamePort(d, cid, side, oldP, newP) {
+    const c = comp(d, cid);
+    if (oldP === newP) return true;
+    if (!IDENT.test(newP) || c[side].includes(newP)) return false;
+    c[side] = c[side].map((p) => (p === oldP ? newP : p));
+    for (const e of d.edges) {
+      const key = side === 'out' ? 'from' : 'to';
+      if (e[key] === `${cid}.${oldP}`) e[key] = `${cid}.${newP}`;
+    }
+    if (c.flow) {
+      if (side === 'in' && c.flow[oldP]) { c.flow[newP] = c.flow[oldP]; delete c.flow[oldP]; }
+      if (side === 'out') for (const k of Object.keys(c.flow)) c.flow[k] = c.flow[k].map((q) => (q === oldP ? newP : q));
+    }
+    for (const r of c.rows || []) {
+      const part = side === 'in' ? r.when : r.then;
+      if (part && part[oldP] !== undefined) { part[newP] = part[oldP]; delete part[oldP]; }
+    }
+    for (const a of c.absorbs || []) if (side === 'in' && a.port === oldP) a.port = newP;
+    for (const x of c.drop_defaults || []) if (side === 'out' && x.port === oldP) x.port = newP;
+    return true;
+  },
+  renameGuard(d, oldId, newId) {
+    if (oldId === newId) return true;
+    if (!IDENT.test(newId) || allIds(d).has(newId)) return false;
+    d.guards.find((g) => g.id === oldId).id = newId;
+    return true;
+  },
+  renameObs(d, oldId, newId) {
+    if (oldId === newId) return true;
+    if (!IDENT.test(newId) || d.observation_points.some((o) => o.id === newId)) return false;
+    d.observation_points.find((o) => o.id === oldId).id = newId;
+    for (const cl of d.claims || []) {
+      const [f, o] = String(cl.cell || '').split('@');
+      if (o === oldId) cl.cell = `${f}@${newId}`;
+    }
+    return true;
+  },
+  renameSysPort(d, oldName, newName) {
+    if (oldName === newName) return true;
+    if (!IDENT.test(newName) || d.layout.sys[newName] || sysPorts(d).ins.includes(newName) || sysPorts(d).outs.includes(newName)) return false;
+    for (const e of d.edges) { if (e.from === `sys.${oldName}`) e.from = `sys.${newName}`; if (e.to === `sys.${oldName}`) e.to = `sys.${newName}`; }
+    for (const u of d.use_cases) for (const en of u.entries || []) if (en.port === oldName) en.port = newName;
+    d.layout.sys[newName] = d.layout.sys[oldName] || {}; delete d.layout.sys[oldName];
+    return true;
+  },
+};
+
+export function cloneDoc(d = S.doc) { return JSON.parse(JSON.stringify(d)); }
+
+/** Replace the model with an edited copy and tell every view. */
+export function commitDoc(doc, selection) {
+  S.doc = doc;
+  changed(selection === undefined ? S.selection : selection);
+}
+
+export async function checkDoc(doc) {
+  try { return await api('/api/model/check', { doc }); }
+  catch (e) { return { ok: false, problems: e.problems || [e.message] }; }
+}
+
+/** The problems the edited copy has that the model as it stands does not. */
+export async function newProblems(doc) {
+  const before = S.check ? S.check : await checkDoc(S.doc);
+  const after = await checkDoc(doc);
+  const old = new Set((before && before.problems) || []);
+  return (after.problems || []).filter((p) => !old.has(p));
+}
+
+/** The save step of every editing dialog: commit, unless the check finds something new (then ask). */
+export async function saveChecked(doc, selection, force) {
+  if (!force) {
+    const fresh = await newProblems(doc);
+    if (fresh.length) return { problems: fresh, canForce: true };
+  }
+  commitDoc(doc, selection);
   return true;
 }
 

@@ -101,6 +101,23 @@ def parse_value(s):
     return _P(_tokens(s)).value()
 
 
+def parse_labels(s, cache):
+    """The edge labels of a state, `("e1" :> [..] @@ "e2" :> [..])`, parsed edge by edge. Many runs
+    leave an edge with the same label, so each distinct label text is parsed once (`cache`)."""
+    s = s.strip()
+    if not (s.startswith("(") and s.endswith(")")):
+        return parse_value(s)
+    out = {}
+    for part in s[1:-1].split("@@"):
+        key, val = part.split(":>", 1)
+        val = val.strip()
+        rec = cache.get(val)
+        if rec is None:
+            rec = cache[val] = parse_value(val)
+        out[key.strip().strip('"')] = rec
+    return out
+
+
 def read_dump_raw(path):
     """Yield each state as {variable: value text} without parsing the values."""
     cur, key, buf = None, None, []

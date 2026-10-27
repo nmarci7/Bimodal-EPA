@@ -2,6 +2,8 @@
 // classified against the model (the LLM rule, decidability, versions); decisions withdraw or reject.
 import { h, clear, api, readFile, dropZone, toast, modal } from './lib.js';
 import { S, on, emit, persist } from './state.js';
+import { button } from './dialog.js';
+import { openCertDialog, openCertDetails, openWitnessDialog, openWitnessDetails, openWithdrawDialog, openRejectDialog } from './evidencedialogs.js';
 
 const STATE_CLASS = { 'in force': 'in-force', rejected: 'rejected', stale: 'stale', withdrawn: 'withdrawn', suspended: 'suspended' };
 
@@ -16,7 +18,11 @@ export function fmtAt(at, doc) {
   for (const [obs, v] of Object.entries(at || {})) {
     const parts = [];
     for (const [f, r] of Object.entries(v.modes || {})) parts.push(`${f} ${rng(r)}`);
-    if (v.taint) parts.push(v.taint[0] === v.taint[1] ? (v.taint[0] ? 'tainted' : 'untainted') : 'taint unknown');
+    if (v.taint !== undefined && v.taint !== null) {
+      const t = Array.isArray(v.taint) ? v.taint : [v.taint, v.taint];
+      parts.push(Boolean(t[0]) === Boolean(t[1]) ? (t[0] ? 'tainted' : 'untainted') : 'taint unknown');
+    }
+    if (v.used !== undefined) parts.push(v.used ? 'a message was sent' : 'no message');
     if (v.conf) parts.push(`conf ${rng(v.conf, conf)}`);
     if (v.auth) parts.push(`authority ${rng(v.auth, auth)}`);
     out.push(`${obs}: ${parts.join(', ') || 'seen'}`);
@@ -135,7 +141,8 @@ export class EvidenceView {
 
   logsPanel(reg) {
     const byId = Object.fromEntries(reg.witnesses.map((w) => [w.id, w]));
-    const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Logs and traces'), h('span', { class: 'muted' }, 'become witnesses')),
+    const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Logs and witnesses'), h('span', { class: 'spacer' }),
+      button('New witness…', () => openWitnessDialog(null), { small: true, primary: true, title: 'write down one interaction you saw, step by step' })),
       dropZone('Drop log files here, or click to choose', 'CSV, JSON Lines, JSON or plain text; a recogniser must match the file name', (fs) => this.addFiles(fs, 'log')),
       this.available(S.bundle && S.bundle.logs, 'log'));
     const files = S.evidence.files.filter((f) => f.kind === 'log');
@@ -146,7 +153,7 @@ export class EvidenceView {
     const bySrc = {};
     for (const w of loose) { const src = (w.source || 'witnesses').split(' line')[0]; (bySrc[src] = bySrc[src] || []).push(w); }
     for (const [name, ws] of Object.entries(bySrc)) groups.push({ name, recs: [...new Set(ws.map((w) => w.recogniser).filter(Boolean))], ws });
-    if (!groups.length) panel.appendChild(h('p', { class: 'empty' }, 'No witnesses yet. Without them every LLM row stays open.'));
+    if (!groups.length) panel.appendChild(h('p', { class: 'empty' }, 'No witnesses yet. Without them every LLM row stays open. Drop a log above, or write one with New witness….'));
     for (const g of groups) panel.appendChild(this.fileCard(g));
     return panel;
   }
@@ -154,14 +161,14 @@ export class EvidenceView {
   fileCard(g) {
     const body = h('div', { class: 'filecard-body', hidden: true });
     const inForce = g.ws.filter((w) => w.state === 'in force').length;
-    const failures = g.ws.filter((w) => Object.values(w.at || {}).some((v) => Object.values(v.modes || {}).some((r) => r[1] > 0) || (v.taint && v.taint[0]))).length;
+    const tainted = (v) => v.taint === true || (Array.isArray(v.taint) && v.taint[0]);
+    const failures = g.ws.filter((w) => Object.values(w.at || {}).some((v) => Object.values(v.modes || {}).some((r) => r[1] > 0) || tainted(v))).length;
     for (const w of g.ws) {
-      body.appendChild(h('div', { class: 'wit' },
+      body.appendChild(h('div', { class: 'wit clickable', role: 'button', tabindex: 0, title: 'show the witness', onclick: () => openWitnessDetails(w, fmtAt), onkeydown: (e) => { if (e.key === 'Enter') openWitnessDetails(w, fmtAt); } },
         h('div', { class: 'inline' }, h('b', { class: 'mono' }, w.id), h('span', { class: 'spacer' }), h('span', { class: `state ${STATE_CLASS[w.state] || ''}` }, w.state)),
         h('span', { class: 'mono' }, fmtAt(w.at, S.doc)),
         h('span', { class: 'muted' }, `${w.rule || ''}${w.use_case ? ` · use case ${w.use_case}` : ''}${w.date ? ` · ${w.date}` : ''}`),
-        w.state !== 'in force' && w.reason ? h('span', { class: 'muted' }, w.reason) : null,
-        w.state === 'in force' ? h('div', {}, h('button', { class: 'btn small', onclick: () => this.rejectWitness(w) }, 'Reject…')) : null));
+        w.state !== 'in force' && w.reason ? h('span', { class: 'muted' }, w.reason) : null));
     }
     const head = h('div', { class: 'filecard-head', onclick: () => { body.hidden = !body.hidden; } },
       h('b', { class: 'mono small' }, g.name), (g.recs || []).map((r) => h('span', { class: 'tag' }, r)), h('span', { class: 'spacer' }),
@@ -171,23 +178,23 @@ export class EvidenceView {
   }
 
   certsPanel(reg) {
-    const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Certificates'), h('span', { class: 'muted' }, 'fix rows of guards')),
+    const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Certificates'), h('span', { class: 'spacer' }),
+      button('New certificate…', () => openCertDialog(null), { small: true, primary: true, title: 'write a certificate step by step' })),
       dropZone('Drop certificate files here, or click to choose', 'JSON or YAML: component, targets or rows, version, issuer, method', (fs) => this.addFiles(fs, 'cert'), '.json,.yaml,.yml'),
       this.available(S.bundle && S.bundle.certificates, 'cert'));
-    if (!reg.certificates.length) panel.appendChild(h('p', { class: 'empty' }, 'No certificates. Every decidable guard target stays open: never, sometimes or always.'));
+    if (!reg.certificates.length) panel.appendChild(h('p', { class: 'empty' }, 'No certificates. Every decidable guard target stays open: never, sometimes or always. Drop a file above, or write one with New certificate….'));
     const conflicts = new Set(((S.analysis && S.analysis.report) ? S.analysis.report.cells : []).flatMap((c) => c.suspended || []));
     for (const c of reg.certificates) {
       const what = Object.entries(c.targets || c.rows || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
       const st = conflicts.has(c.id) && c.state === 'in force' ? 'suspended' : c.state;
-      panel.appendChild(h('div', { class: 'wit' },
-        h('div', { class: 'inline' }, h('b', { class: 'mono' }, c.id), h('span', { class: 'tag guard' }, c.component), h('span', { class: 'spacer' }), h('span', { class: `state ${STATE_CLASS[st] || ''}` }, st)),
+      panel.appendChild(h('div', { class: 'wit clickable', role: 'button', tabindex: 0, title: 'show the certificate', onclick: () => openCertDetails(c, { suspended: conflicts.has(c.id) }), onkeydown: (e) => { if (e.key === 'Enter') openCertDetails(c, { suspended: conflicts.has(c.id) }); } },
+        h('div', { class: 'inline' }, h('b', { class: 'mono' }, c.id), h('span', { class: 'tag guard' }, c.component), c.manual ? h('span', { class: 'tag plain' }, 'by hand') : null, h('span', { class: 'spacer' }), h('span', { class: `state ${STATE_CLASS[st] || ''}` }, st)),
         h('span', { class: 'mono' }, `${what}${c.version ? ` · ${c.version}` : ''}`),
         h('span', { class: 'muted' }, `${c.issuer || ''}${c.date ? ` · ${c.date}` : ''}`),
         c.method ? h('span', {}, c.method) : null,
         c.state !== 'in force' && c.reason ? h('span', { style: 'color: var(--e-ink)' }, c.reason) : null,
         st === 'suspended' ? h('span', { style: 'color: var(--c-ink)' }, 'in a minimal conflict with a witness in the last analysis; withdraw it or reject the witness') : null,
-        (c.reverify || []).length ? h('span', { style: 'color: var(--h-ink)' }, `re-verify: ${c.reverify.map((x) => (typeof x === 'string' ? x : `${x.component} ${x.signed_with} → ${x.now}`)).join('; ')}`) : null,
-        c.state === 'in force' ? h('div', {}, h('button', { class: 'btn small', onclick: () => this.withdraw(c) }, 'Withdraw…')) : null));
+        (c.reverify || []).length ? h('span', { style: 'color: var(--h-ink)' }, `re-verify: ${c.reverify.map((x) => (typeof x === 'string' ? x : `${x.component} ${x.signed_with} → ${x.now}`)).join('; ')}`) : null));
     }
     return panel;
   }
@@ -214,27 +221,9 @@ export class EvidenceView {
     return panel;
   }
 
-  withdraw(c) {
-    const by = h('input', { value: 'analyst', style: 'height:34px;border:1px solid var(--line2);border-radius:6px;padding:0 8px' });
-    const reason = h('input', { placeholder: 'why the certificate no longer holds', style: 'height:34px;border:1px solid var(--line2);border-radius:6px;padding:0 8px' });
-    const close = modal(h('div', { class: 'block' }, h('h2', { style: 'margin:0' }, `Withdraw ${c.id}`),
-      h('p', { class: 'hint' }, 'The certificate leaves the register; its rows are open again in the next analysis.'),
-      h('label', { class: 'field' }, 'Decided by', by), h('label', { class: 'field' }, 'Reason', reason),
-      h('div', {}, h('button', { class: 'btn primary', onclick: () => { S.evidence.decisions.push({ kind: 'withdraw-cert', certificate: c.id, by: by.value, reason: reason.value }); close(); this.changed(); } }, 'Withdraw'))));
-  }
+  withdraw(c) { openWithdrawDialog(c); }
 
-  rejectWitness(w) {
-    const by = h('input', { value: 'analyst', style: 'height:34px;border:1px solid var(--line2);border-radius:6px;padding:0 8px' });
-    const second = h('input', { placeholder: 'a second reviewer (required)', style: 'height:34px;border:1px solid var(--line2);border-radius:6px;padding:0 8px' });
-    const reason = h('input', { placeholder: 'why the log line is wrong', style: 'height:34px;border:1px solid var(--line2);border-radius:6px;padding:0 8px' });
-    const close = modal(h('div', { class: 'block' }, h('h2', { style: 'margin:0' }, `Reject ${w.id}`),
-      h('p', { class: 'hint' }, 'A witness is what happened. Rejecting one says the log is wrong, so it takes two people.'),
-      h('label', { class: 'field' }, 'Decided by', by), h('label', { class: 'field' }, 'Second reviewer', second), h('label', { class: 'field' }, 'Reason', reason),
-      h('div', {}, h('button', { class: 'btn primary', onclick: () => {
-        if (!second.value.trim()) { toast('A rejection needs a second reviewer.'); return; }
-        S.evidence.decisions.push({ kind: 'reject-witness', witness: w.id, by: by.value, second_reviewer: second.value, reason: reason.value }); close(); this.changed();
-      } }, 'Reject'))));
-  }
+  rejectWitness(w) { openRejectDialog(w); }
 }
 
 function strip(x) {

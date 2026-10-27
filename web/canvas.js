@@ -7,7 +7,9 @@
 // inputs hollow and outputs filled, each on the side facing what it is wired to. An edge runs from
 // an output port (or a system input) to an input port (or a system output).
 import { s, clear } from './lib.js';
-import { S, on, comp, parseRef, nodeIdOfRef, sysPorts, connectPorts, addComponent, addSysPort, addGuard, addObs, changed, removeSelection, guardSummary, obsSummary, useCasesAt } from './state.js';
+import { S, on, emit, comp, parseRef, nodeIdOfRef, sysPorts, connectPorts, addComponent, addSysPort, changed, removeSelection, guardSummary, obsSummary, useCasesAt } from './state.js';
+import { confirmDialog, isDialogOpen } from './dialog.js';
+import { openComponentDialog, openGuardDialog, openObsDialog, openEdgeDialog, openSysDialog } from './modeldialogs.js';
 
 const W = 156, H = 58, SW = 132, SH = 48;
 const VERDICT_RANK = { exposed: 6, conflict: 5, unchecked: 4, hope: 3, 'not exercised': 2, guarantee: 1 };
@@ -355,8 +357,26 @@ export class Canvas {
       this.t.x = mx - (mx - this.t.x) * (k / this.t.k); this.t.y = my - (my - this.t.y) * (k / this.t.k); this.t.k = k;
       this.applyT();
     }, { passive: false });
-    this.svg.addEventListener('keydown', (ev) => {
-      if ((ev.key === 'Delete' || ev.key === 'Backspace') && S.selection) { ev.preventDefault(); removeSelection(); }
+    this.svg.addEventListener('keydown', async (ev) => {
+      if (isDialogOpen() || !S.selection) return;
+      if (ev.key === 'Delete' || ev.key === 'Backspace') {
+        ev.preventDefault();
+        const sel = S.selection;
+        const what = sel.type === 'sys' ? sel.id.replace('sys:', 'sys.') : sel.type === 'port' ? sel.id.split('|').join(' ') : sel.id;
+        if (sel.type === 'port') return;
+        const ok = await confirmDialog(`Delete ${what}?${sel.type === 'component' || sel.type === 'sys' ? ' Its edges, and the guards and observation points on them, go too.' : ''}`, { title: 'Delete', okText: 'Delete', danger: true });
+        if (ok) { S.selection = sel; removeSelection(); emit('select'); }
+      } else if (ev.key === 'Enter') { ev.preventDefault(); this.edit(S.selection); }
+    });
+    this.svg.addEventListener('dblclick', (ev) => {
+      const t = ev.target;
+      const at = (attr) => { const el = t.closest && t.closest(`[${attr}]`); return el ? el.getAttribute(attr) : null; };
+      const g = at('data-guard'), o = at('data-obs'), n = at('data-node'), e = at('data-edge'), p = at('data-port');
+      if (g) this.edit({ type: 'guard', id: g });
+      else if (o) this.edit({ type: 'obs', id: o });
+      else if (p) this.edit({ type: 'component', id: p.split('|')[0] });
+      else if (n) this.edit({ type: n.startsWith('sys:') ? 'sys' : 'component', id: n });
+      else if (e) this.edit({ type: 'edge', id: e });
     });
     this.host.addEventListener('dragover', (ev) => { ev.preventDefault(); });
     this.host.addEventListener('drop', (ev) => {
@@ -368,12 +388,46 @@ export class Canvas {
       else if (kind === 'guard' || kind === 'obs') {
         const eid = this.nearestEdge(w);
         if (!eid) { this.flash('Drop a guard or an observation point onto an edge.'); return; }
-        if (kind === 'guard') addGuard(eid); else addObs(eid);
+        // a window asks what the new guard catches, or what the point judges; Cancel adds nothing
+        if (kind === 'guard') openGuardDialog(null, { edge: eid });
+        else {
+          const there = S.doc.observation_points.find((x) => x.edge === eid);
+          if (there) { this.flash(`${eid} is already observed by ${there.id}.`); openObsDialog(there.id); } else openObsDialog(null, { edge: eid });
+        }
       } else addComponent(kind, w.x - W / 2, w.y - H / 2);
     });
   }
 
-  select() { this.render(); import('./state.js').then((m) => m.emit('select')); this.svg.focus(); }
+  select() { this.render(); emit('select'); this.svg.focus(); }
+
+  /** Open the dialog that edits a selection. */
+  edit(sel) {
+    if (!sel) return;
+    if (sel.type === 'component') openComponentDialog(sel.id);
+    else if (sel.type === 'port') openComponentDialog(sel.id.split('|')[0], { startAt: 'ports' });
+    else if (sel.type === 'guard') openGuardDialog(sel.id);
+    else if (sel.type === 'obs') openObsDialog(sel.id);
+    else if (sel.type === 'edge') openEdgeDialog(sel.id);
+    else if (sel.type === 'sys') openSysDialog(sel.id.slice(4));
+  }
+
+  /** Bring a selection into view: a node, or the middle of the edge a guard or point sits on. */
+  reveal(sel) {
+    if (!sel || !S.doc) return;
+    const byId = Object.fromEntries(this.nodes().map((n) => [n.id, n]));
+    let p = null;
+    const mid = (eid) => { const e = S.doc.edges.find((x) => x.id === eid); if (!e) return null; const a = byId[nodeIdOfRef(e.from)], b = byId[nodeIdOfRef(e.to)]; return a && b ? { x: (a.x + a.w / 2 + b.x + b.w / 2) / 2, y: (a.y + a.h / 2 + b.y + b.h / 2) / 2 } : null; };
+    if (sel.type === 'component' || sel.type === 'sys') { const n = byId[sel.id]; if (n) p = { x: n.x + n.w / 2, y: n.y + n.h / 2 }; }
+    else if (sel.type === 'guard') { const g = S.doc.guards.find((x) => x.id === sel.id); if (g) p = mid(g.edge); }
+    else if (sel.type === 'obs') { const o = S.doc.observation_points.find((x) => x.id === sel.id); if (o) p = mid(o.edge); }
+    else if (sel.type === 'edge') p = mid(sel.id);
+    if (!p) return;
+    const r = this.svg.getBoundingClientRect();
+    const sx = p.x * this.t.k + this.t.x, sy = p.y * this.t.k + this.t.y;
+    if (sx > 60 && sx < r.width - 60 && sy > 40 && sy < r.height - 40) return;   // already in view
+    this.t.x = r.width / 2 - p.x * this.t.k; this.t.y = r.height / 2 - p.y * this.t.k;
+    this.applyT();
+  }
 
   nearestEdge(w) {
     const d = S.doc;

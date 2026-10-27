@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import workspace as WS
 from ..alethic import tlc_runner
 from ..engine.cache import RunCache
 from ..engine.coordinator import Engine
@@ -36,6 +37,7 @@ WEB = os.path.join(ROOT, "web")
 CASES = os.path.join(ROOT, "cases")
 WORK = os.environ.get("EPA_WORK", os.path.join(ROOT, ".epa-work"))
 os.makedirs(WORK, exist_ok=True)
+WORKSPACE = os.environ.get("EPA_WORKSPACE") or WS.default_path(WORK)
 
 app = FastAPI(title="EPA engine v2", version="2.0")
 CACHE = RunCache(os.path.join(WORK, "runs.sqlite"))
@@ -149,7 +151,7 @@ def model_check(body: Doc):
         cones.append({"cell": c.id, "rows": k.rows, "fields": k.fields, "components": k.components,
                       "candidates": candidate_space(m, k.rows), "runs": (2 ** len(k.rows)) * max(1, len(k.use_cases))})
     return {"ok": True, "problems": [], "summary": m.summary(), "cells": cones,
-            "unmatched": wellformed.unmatched_failures(m), "decisions": m.decisions}
+            "absorbed": wellformed.absorbed(m), "decisions": m.decisions}
 
 
 @app.post("/api/model/yaml")
@@ -253,6 +255,24 @@ def evidence_certs(body: CertUpload):
     return {"certificates": out}
 
 
+class WitnessIn(BaseModel):
+    doc: dict
+    witness: dict
+    deployments: str | None = None
+
+
+@app.post("/api/evidence/witness")
+def evidence_witness(body: WitnessIn):
+    """A witness entered by hand: shaped as a recogniser would shape it, then classified."""
+    m = _model(body.doc)
+    try:
+        w = log_import.manual_witness(body.witness, m, body.deployments)
+    except log_import.WitnessError as e:
+        raise HTTPException(422, detail={"problems": e.problems})
+    w["state"], w["reason"] = log_import.classify_witness(w, m)
+    return {"witness": w}
+
+
 class EvidenceReq(BaseModel):
     doc: dict
     evidence: dict = {}
@@ -293,6 +313,38 @@ def do_bootstrap(body: Boot):
         except Exception as e:  # noqa: BLE001
             out["problems"] = [str(e)]
     return out
+
+
+# ---------------------------------------------------------------------------- the shared workspace
+# The model and evidence the MCP server works on (python -m epa mcp); the reasoner can open it, or
+# save its own model there for an assistant to work on (epa/workspace.py).
+@app.get("/api/workspace/meta")
+def workspace_meta():
+    return {**WS.meta(WORKSPACE), "path": WORKSPACE}
+
+
+@app.get("/api/workspace")
+def workspace_get():
+    ws = WS.load(WORKSPACE)
+    if not ws["doc"]:
+        raise HTTPException(404, "the shared workspace is empty: an MCP client fills it (python -m epa mcp), "
+                                 "or save a model there from the reasoner")
+    return {k: ws[k] for k in ("doc", "evidence", "case", "stage", "updated", "by")}
+
+
+class WorkspaceIn(BaseModel):
+    doc: dict
+    evidence: dict = {}
+    case: str | None = None
+    stage: str | None = None
+
+
+@app.put("/api/workspace")
+def workspace_put(body: WorkspaceIn):
+    keep = ("certificates", "witnesses", "decisions", "recognisers", "deployments", "lookups", "files")
+    ev = {**WS.empty_evidence(), **{k: v for k, v in body.evidence.items() if k in keep}}
+    WS.save(WORKSPACE, {"doc": body.doc, "evidence": ev, "case": body.case, "stage": body.stage, "report": None}, "browser")
+    return {**WS.meta(WORKSPACE), "path": WORKSPACE}
 
 
 # ---------------------------------------------------------------------------- analyses
@@ -431,6 +483,16 @@ def report_cra(aid: str):
 
 
 # ---------------------------------------------------------------------------- the UI
+@app.middleware("http")
+async def revalidate_ui(request, call_next):
+    """The browser asks again for every UI file (a 304 when it is unchanged), so a new version of the
+    reasoner is never shown half old, half new from the cache."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/web/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 if os.path.isdir(WEB):
     app.mount("/web", StaticFiles(directory=WEB), name="web")
 
