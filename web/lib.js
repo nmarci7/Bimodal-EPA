@@ -24,6 +24,12 @@ export const s = (tag, attrs = {}, ...kids) => h(tag, { ...attrs, svg: true }, .
 
 export function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
 
+/** Append children, skipping null, undefined and false (Element.append would write them as text). */
+export function add(el, ...kids) {
+  for (const k of kids.flat(Infinity)) if (k !== null && k !== undefined && k !== false) el.append(k);
+  return el;
+}
+
 export async function api(path, body, method) {
   const opts = { method: method || (body === undefined ? 'GET' : 'POST'), headers: {} };
   if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }

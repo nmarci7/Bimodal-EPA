@@ -6,6 +6,7 @@ import { ModelView } from './modelview.js';
 import { EvidenceView } from './evidence.js';
 import { AnalysisView } from './analysis.js';
 import { VerdictsView } from './verdicts.js';
+import { dropdown, button, infoDialog } from './dialog.js';
 
 const $ = (id) => document.getElementById(id);
 let views = {};
@@ -147,6 +148,25 @@ function bootstrapDialog() {
     h('div', { class: 'inline' }, h('label', { class: 'inline small' }, 'MCP server component', server), h('span', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: go }, 'Build')), out));
 }
 
+// ---------------------------------------------------------------- help
+function helpDialog() {
+  const step = (n, t, x) => h('li', {}, h('b', {}, `${n} ${t}. `), x);
+  infoDialog('How the workbench works', h('div', { class: 'block help' },
+    h('ol', { class: 'story' },
+      step('1', 'Model', 'Draw the system: drag components from Add, wire output ports to input ports, drop guards and observation points onto edges. Select anything to read it in the inspector; Edit… or a double-click opens its dialog. A component\'s rows (what it does with failures) are under the canvas: Add row… walks you through one.'),
+      step('2', 'Evidence', 'Drop logs (a recogniser turns their lines into witnesses) and certificates, or write either by hand with New witness… and New certificate…. The register says which are in force, rejected or stale, and why.'),
+      step('3', 'Analysis', 'Run analysis: every firing choice of the rows that matter goes through TLA+/TLC, then clingo keeps the candidates the evidence allows.'),
+      step('4', 'Verdicts', 'Each observation point and failure gets guarantee, hope, exposed, unchecked, not exercised or conflict, with the reasons, a reaching run, and which guard to certify next.')),
+    h('span', { class: 'section-title' }, 'Shortcuts'),
+    h('dl', { class: 'kv' },
+      h('dt', {}, 'Double-click'), h('dd', {}, 'edit what you clicked'),
+      h('dt', {}, 'Enter'), h('dd', {}, 'edit the selection'),
+      h('dt', {}, 'Delete / Backspace'), h('dd', {}, 'delete the selection (it asks first)'),
+      h('dt', {}, 'Escape'), h('dd', {}, 'close a dialog (it asks before throwing edits away)'),
+      h('dt', {}, 'Drag the background · scroll'), h('dd', {}, 'pan · zoom')),
+    h('p', { class: 'hint' }, 'The full guide is docs/user-guide.md in the repository; the model document is described in docs/model-format.md.')), { size: 'md' });
+}
+
 // ---------------------------------------------------------------- start
 async function main() {
   views = {
@@ -165,11 +185,15 @@ async function main() {
     }
   });
   $('btn-run').addEventListener('click', () => views.analysis.run());
-  $('btn-new').addEventListener('click', newModel);
-  $('btn-import').addEventListener('click', () => $('file-import').click());
   $('file-import').addEventListener('change', (e) => { if (e.target.files[0]) importFile(e.target.files[0]); e.target.value = ''; });
-  $('btn-export').addEventListener('click', exportYaml);
-  $('btn-bootstrap').addEventListener('click', bootstrapDialog);
+  const fileMenu = dropdown('File', [
+    { label: 'New model…', hint: 'start from a blank canvas', onClick: newModel },
+    { label: 'Import a model…', hint: 'YAML or JSON', onClick: () => $('file-import').click() },
+    { label: 'Export the model as YAML', onClick: exportYaml },
+    'sep',
+    { label: 'Bootstrap from traces…', hint: 'spans and an MCP tools list', onClick: bootstrapDialog },
+  ], { title: 'new, import, export, bootstrap' });
+  $('actions').prepend(fileMenu, button('Help', helpDialog, { title: 'how the workbench works, and its shortcuts' }));
   const cases = await loadCases();
   const params = new URLSearchParams(location.search);
   restore();

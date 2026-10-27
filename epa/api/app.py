@@ -253,6 +253,24 @@ def evidence_certs(body: CertUpload):
     return {"certificates": out}
 
 
+class WitnessIn(BaseModel):
+    doc: dict
+    witness: dict
+    deployments: str | None = None
+
+
+@app.post("/api/evidence/witness")
+def evidence_witness(body: WitnessIn):
+    """A witness entered by hand: shaped as a recogniser would shape it, then classified."""
+    m = _model(body.doc)
+    try:
+        w = log_import.manual_witness(body.witness, m, body.deployments)
+    except log_import.WitnessError as e:
+        raise HTTPException(422, detail={"problems": e.problems})
+    w["state"], w["reason"] = log_import.classify_witness(w, m)
+    return {"witness": w}
+
+
 class EvidenceReq(BaseModel):
     doc: dict
     evidence: dict = {}
@@ -431,6 +449,16 @@ def report_cra(aid: str):
 
 
 # ---------------------------------------------------------------------------- the UI
+@app.middleware("http")
+async def revalidate_ui(request, call_next):
+    """The browser asks again for every UI file (a 304 when it is unchanged), so a new version of the
+    workbench is never shown half old, half new from the cache."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/web/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 if os.path.isdir(WEB):
     app.mount("/web", StaticFiles(directory=WEB), name="web")
 

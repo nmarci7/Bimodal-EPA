@@ -2,27 +2,33 @@
 //
 // Definition (Component) gives every component a normal flow and a mapping table of rows: a when
 // part (a pattern on one or more input ports, all of which must match) and a then part (failures
-// emitted on output ports: const k, keep, +k, max). The table shows every row the analysis uses:
-//   * the analyst's rows (editable here),
-//   * pass-through: every failure a message brings goes on where the component forwards it
-//     (assumption A6, pessimistic), except what the analyst declares absorbed, with a reason,
-//   * for an LLM component, the worst-case defaults (Definition: LLM default table),
+// emitted on output ports: const k, keep, +k, max). The table shows every row the analysis uses,
+// each as one sentence:
+//   * the analyst's rows: added and edited in the row dialog (rowdialog.js), never in place,
+//   * the rows the engine adds, folded away until asked for:
+//       pass-through - every failure a message brings goes on where the component forwards it
+//         (assumption A6, pessimistic), except what the analyst declares absorbed, with a reason,
+//       for an LLM component, the worst-case defaults (Definition: LLM default table), which a row
+//         can refine and a reason can drop,
+//       the declared absorptions, each with its reason (a claim an auditor can dispute),
 //   * for a guardrail, its fixed catching behaviour, one leak row per target and, if learned, its
-//     false-positive row (Definition: Guardrail),
-//   * the declared absorptions, each with its reason (a claim an auditor can dispute).
+//     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
-import { S, on, emit, comp, edge, modeFields, topModes, changed, targetText } from './state.js';
-
-const OPS = [['const', 'const'], ['keep', 'keep'], ['plus', '+k'], ['max', 'max']];
+import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc } from './state.js';
+import { rowSentence, rowKind, KINDS, llmDefaultStatus } from './rows.js';
+import { openRowDialog, deleteRow } from './rowdialog.js';
+import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
+import { button } from './dialog.js';
 
 export class MapTable {
   constructor(host) {
     this.host = host;
     this.open = true;
+    this.showGen = {};          // per component or guard: are the generated rows unfolded
     on('select', () => this.render());
     on('loaded', () => this.render());
     on('check', () => this.render());
-    on('doc', () => { if (!this.editing) this.render(); });
+    on('doc', () => this.render());
     on('maptable:show', () => { this.open = true; emit('maptable:toggled', true); this.render(); });
   }
 
@@ -43,243 +49,164 @@ export class MapTable {
     if (t.g) this.renderGuard(t.g); else this.renderComponent(t.c, t.port);
   }
 
-  shell(title, chip, chipClass, meta, ...buttons) {
-    const head = h('div', { class: 'mt-head' }, h('b', {}, title), chip ? h('span', { class: `kind-chip ${chipClass || ''}` }, chip) : null,
+  head(title, chip, chipClass, meta, ...buttons) {
+    this.host.append(h('div', { class: 'mt-head' }, h('b', {}, title), chip ? h('span', { class: `kind-chip ${chipClass || ''}` }, chip) : null,
       h('span', { class: 'mono small muted' }, meta), h('span', { class: 'spacer' }), ...buttons,
-      h('button', { class: 'x', 'aria-label': 'close the mapping table', title: 'close', onclick: () => { this.open = false; emit('maptable:toggled', false); this.render(); } }, '×'));
-    const table = h('table', { class: 'mt' }, h('thead', {}, h('tr', {}, ['Row', 'When (every port listed must match)', 'Then it emits', 'Activation', 'Kind'].map((x) => h('th', {}, x)))));
+      h('button', { class: 'x', 'aria-label': 'close the mapping table', title: 'close', onclick: () => { this.open = false; emit('maptable:toggled', false); this.render(); } }, '×')));
+  }
+
+  table(cols, cls = '') {
     const body = h('tbody');
-    table.appendChild(body);
-    this.host.append(head);
-    return { body, table };
+    const t = h('table', { class: `mt ${cls}` }, h('thead', {}, h('tr', {}, cols.map((x) => h('th', {}, x)))), body);
+    return { t, body };
   }
 
   // ---------------------------------------------------------------- a component
   renderComponent(c, port) {
-    const d = S.doc;
-    const fields = modeFields(d).map((m) => m.name);
     const llm = c.kind === 'llm';
-    const { body, table } = this.shell(`Mapping table of ${c.id}`, llm ? 'LLM' : c.kind, llm ? 'llm' : '',
-      `In(${c.id}) = {${c.in.join(', ')}} · Out(${c.id}) = {${c.out.join(', ')}}`,
-      h('button', { class: 'btn small', disabled: !c.out.length || undefined, title: c.out.length ? '' : 'the component has no output port yet', onclick: () => this.addRow(c, fields) }, 'Add row'));
+    const tops = topModes(S.doc);
+    const canAdd = c.in.length || c.out.length;
+    this.head(`Rows of ${c.id}`, llm ? 'LLM' : c.kind, llm ? 'llm' : '', `In = {${c.in.join(', ')}} · Out = {${c.out.join(', ')}}`,
+      button('Edit component…', () => openComponentDialog(c.id), { small: true }),
+      button('Add row…', () => openRowDialog(c.id, null), { small: true, primary: true, disabled: !canAdd, title: canAdd ? 'add a row step by step' : 'the component has no port yet: wire it first' }));
     const flow = c.flow || Object.fromEntries(c.in.map((p) => [p, c.out.slice()]));
     this.host.appendChild(h('div', { class: 'mt-flow' }, h('span', { class: 'section-title' }, 'Normal flow'),
       c.in.length ? c.in.map((p) => h('span', { class: 'mono small' }, `${p} → ${(flow[p] || []).join(', ') || 'nothing'}`)) : h('span', { class: 'small muted' }, 'no input port yet'),
-      h('span', { class: 'small muted' }, llm ? 'An LLM passes nothing through: what it sends carries only the failures its rows emit, and the merged provenance of what arrived.'
-        : 'A message goes on with every failure it brought (pass-through) unless the component absorbs it; a row adds a failure, a sink row may absorb one.')));
-    const hl = (r) => port && (port.side === 'in' ? (r.when || {})[port.name] !== undefined || (r.when || {})['*'] !== undefined : (r.then || {})[port.name] !== undefined);
-    // analyst rows
-    for (const r of c.rows || []) body.appendChild(this.rowLine(c, r, fields, hl(r)));
-    if (!(c.rows || []).length) body.appendChild(h('tr', { class: 'note' }, h('td', { colspan: 5 }, llm ? 'No rows of your own: the worst-case defaults below stand for this LLM until you refine them.' : 'No rows of your own yet. A row says which failure arriving where makes the component emit which failure where, or which failure it starts on its own.')));
-    // pass-through
-    if (!llm && c.in.length && c.out.length) body.appendChild(this.passLine(c, port));
-    // LLM defaults
-    if (llm) for (const q of c.out) for (const m of topModes(d)) body.appendChild(this.defaultLine(c, q, m, port));
-    // declared absorptions
-    for (const a of c.absorbs || []) body.appendChild(this.absorbedLine(c, a));
-    this.host.appendChild(h('div', { class: 'mt-scroll' }, table));
+      h('button', { class: 'linkish small', onclick: () => openComponentDialog(c.id, { startAt: 'flow' }) }, 'edit'),
+      h('span', { class: 'small muted grow' }, llm ? 'An LLM passes nothing through: what it sends carries only the failures its rows emit.'
+        : 'A message goes on with every failure it brought, unless the component absorbs it.')));
+    const touches = (r) => port && (port.side === 'in' ? (r.when || {})[port.name] !== undefined || (r.when || {})['*'] !== undefined : (r.then || {})[port.name] !== undefined);
+
+    // the analyst's rows
+    const mine = this.table(['Row', 'What it does', 'Activation', '']);
+    for (const r of c.rows || []) {
+      const kind = rowKind(r);
+      const tr = h('tr', { class: `analyst${touches(r) ? ' hl' : ''}`, ondblclick: () => openRowDialog(c.id, r.id), title: 'double-click to edit' },
+        h('td', { class: 'rowid' }, h('div', { class: 'mono b' }, r.id), r.label ? h('div', { class: 'small muted' }, r.label) : null),
+        h('td', {}, kind !== 'failure' ? [h('span', { class: 'tag plain' }, KINDS[kind].title.toLowerCase()), ' '] : null, h('span', { class: 'sent' }, rowSentence(r, c))),
+        h('td', { class: 'small' }, actShort(r, c)),
+        h('td', { class: 'acts' },
+          h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, r.id) }, 'Edit'),
+          h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, null, { from: r }) }, 'Copy'),
+          h('button', { class: 'linkish small danger', onclick: () => deleteRow(c.id, r.id) }, 'Delete')));
+      mine.body.appendChild(tr);
+    }
+    if (!(c.rows || []).length) {
+      mine.body.appendChild(h('tr', { class: 'note' }, h('td', { colspan: 4 }, llm
+        ? 'No rows of your own: the worst-case defaults (below) stand for this LLM until you refine them. Add a row to say more precisely what it does.'
+        : 'No rows of your own yet. A row says which failure arriving where makes the component send which failure where, which failure it starts on its own, or where it forwards a message.',
+      ' ', canAdd ? h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, null) }, 'Add the first row…') : null)));
+    }
+    this.host.appendChild(h('div', { class: 'mt-scroll' }, mine.t, this.generated(c, port, tops)));
   }
 
-  rowLine(c, r, fields, highlight) {
-    r.when = r.when || {}; r.then = r.then || {};
+  generated(c, port, tops) {
     const llm = c.kind === 'llm';
-    const tr = h('tr', { class: `analyst${highlight ? ' hl' : ''}` });
-    tr.appendChild(h('td', { class: 'rowid' },
-      h('input', { value: r.id, class: 'mono', 'aria-label': 'row id', onchange: (e) => { if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(e.target.value)) { toast('Row ids are identifiers.'); return; } r.id = e.target.value; this.commit(); } }),
-      h('input', { value: r.label || '', placeholder: 'what this failure is', 'aria-label': 'row description', onchange: (e) => { r.label = e.target.value; this.commit(); } })));
-    // when
-    const when = h('td', { class: 'when' });
-    for (const [p, pat] of Object.entries(r.when)) {
-      const isAny = pat === 'any' || pat === true || pat === null;
-      const [m0, th0] = isAny ? [fields[0], 1] : Object.entries(pat)[0] || [fields[0], 1];
-      when.appendChild(h('div', { class: 'cond' },
-        h('select', { 'aria-label': 'input port', onchange: (e) => { const v = r.when[p]; delete r.when[p]; r.when[e.target.value] = e.target.value === '*' ? 'any' : v; this.commit(true); } },
-          ['*', ...c.in].map((x) => h('option', { value: x, selected: x === p ? true : undefined }, x === '*' ? 'any input' : x))),
-        h('span', { class: 'sep' }, ':'),
-        h('select', { 'aria-label': 'pattern', onchange: (e) => { r.when[p] = e.target.value === 'any' ? 'any' : { [m0]: th0 }; this.commit(true); } },
-          [['any', 'any message'], ['mode', 'failure ≥']].filter(([v]) => !(p === '*' && v === 'mode')).map(([v, t]) => h('option', { value: v, selected: (isAny ? 'any' : 'mode') === v ? true : undefined }, t))),
-        isAny ? null : h('select', { 'aria-label': 'mode', onchange: (e) => { r.when[p] = { [e.target.value]: th0 }; this.commit(); } }, fields.map((f) => h('option', { value: f, selected: f === m0 ? true : undefined }, f))),
-        isAny ? null : h('input', { type: 'number', min: 1, max: 10, value: th0, 'aria-label': 'threshold', onchange: (e) => { r.when[p] = { [m0]: Number(e.target.value) }; this.commit(); } }),
-        h('button', { class: 'x', 'aria-label': 'remove condition', onclick: () => { delete r.when[p]; this.commit(true); } }, '×')));
-    }
-    const freePorts = c.in.filter((x) => !(x in r.when));
-    if (!('*' in r.when) && freePorts.length) when.appendChild(h('button', { class: 'linkish small', onclick: () => { r.when[freePorts[0]] = 'any'; if (r.when['*']) delete r.when['*']; this.commit(true); } }, Object.keys(r.when).length ? '+ and on another port' : '+ condition'));
-    if (!Object.keys(r.when).length) when.appendChild(h('span', { class: 'small muted' }, 'no condition: an internal fault, it fires with no message arriving'));
-    tr.appendChild(when);
-    // then
-    const then = h('td', { class: 'then' });
-    const asIs = (em) => !em || typeof em === 'string' || !Object.keys(em).length;
-    for (const [q, emits] of Object.entries(r.then)) {
-      if (asIs(emits)) {
-        // the message is sent on as it is: it carries what arrived, nothing is added
-        then.appendChild(h('div', { class: 'cond' },
-          h('select', { 'aria-label': 'output port', onchange: (e) => { delete r.then[q]; r.then[e.target.value] = 'as it is'; this.commit(true); } },
-            c.out.map((x) => h('option', { value: x, selected: x === q ? true : undefined }, x))),
-          h('span', { class: 'sep' }, ':'), h('span', { class: 'small' }, 'as it is'),
-          h('button', { class: 'x', 'aria-label': 'remove emission', onclick: () => { delete r.then[q]; this.commit(true); } }, '×')));
-        continue;
-      }
-      for (const [m, op] of Object.entries(emits || {})) {
-        const o = String(op).trim();
-        const kind = o.startsWith('const') || /^\d+$/.test(o) ? 'const' : o.startsWith('+') ? 'plus' : o;
-        const k = kind === 'const' ? Number(o.replace('const', '').trim()) : kind === 'plus' ? Number(o.slice(1)) : 0;
-        const setOp = (nk, nv) => { r.then[q][m] = nk === 'const' ? `const ${nv}` : nk === 'plus' ? `+${nv}` : nk; this.commit(true); };
-        then.appendChild(h('div', { class: 'cond' },
-          h('select', { 'aria-label': 'output port', onchange: (e) => { const v = r.then[q][m]; delete r.then[q][m]; if (!Object.keys(r.then[q]).length) delete r.then[q]; (r.then[e.target.value] = r.then[e.target.value] || {})[m] = v; this.commit(true); } },
-            c.out.map((x) => h('option', { value: x, selected: x === q ? true : undefined }, x))),
-          h('span', { class: 'sep' }, ':'),
-          h('select', { 'aria-label': 'emitted mode', onchange: (e) => { const v = r.then[q][m]; delete r.then[q][m]; r.then[q][e.target.value] = v; this.commit(true); } }, fields.map((f) => h('option', { value: f, selected: f === m ? true : undefined }, f))),
-          h('select', { 'aria-label': 'operator', onchange: (e) => setOp(e.target.value, e.target.value === 'plus' ? 2 : 5) },
-            OPS.map(([v, t]) => h('option', { value: v, selected: v === kind ? true : undefined }, t))),
-          ['const', 'plus'].includes(kind) ? h('input', { type: 'number', min: 0, max: 10, value: k, 'aria-label': 'magnitude', onchange: (e) => setOp(kind, Number(e.target.value)) }) : null,
-          h('button', { class: 'x', 'aria-label': 'remove emission', onclick: () => { delete r.then[q][m]; if (!Object.keys(r.then[q]).length) delete r.then[q]; this.commit(true); } }, '×')));
+    const gen = this.table(['Row', 'What it does', 'Activation', ''], 'gen-table');
+    let n = 0;
+    if (!llm && c.in.length && c.out.length) {
+      const flow = c.flow || Object.fromEntries(c.in.map((p) => [p, c.out.slice()]));
+      for (const p of c.in) {
+        const absorbed = new Set((c.absorbs || []).filter((a) => a.port === p).flatMap((a) => (a.modes === 'all' ? tops : [].concat(a.modes || a.mode || []))));
+        const passing = tops.filter((m) => !absorbed.has(m));
+        const to = (flow[p] || []);
+        n++;
+        gen.body.appendChild(h('tr', { class: `gen${port && port.side === 'in' && port.name === p ? ' hl' : ''}` },
+          h('td', { class: 'mono small' }, `pass.${c.id}.${p}`),
+          h('td', { class: 'small' }, to.length ? `Every failure arriving on ${p} goes on to ${to.join(', ')} unchanged` : `Nothing arriving on ${p} goes on (no normal flow from it)`,
+            to.length && absorbed.size ? `, except ${[...absorbed].join(', ')}, which stop here.` : to.length ? '.' : '', ' ', h('span', { class: 'muted' }, `Passes: ${passing.join(', ') || 'nothing'}.`)),
+          h('td', { class: 'small' }, 'always', h('div', { class: 'muted' }, 'A6: pass-through')),
+          h('td', { class: 'acts' }, h('button', { class: 'linkish small', onclick: () => openAbsorbDialog(c.id, p) }, absorbed.size ? 'Absorbed…' : 'Absorb…'))));
       }
     }
-    if (c.out.length) then.appendChild(h('button', { class: 'linkish small', onclick: () => { const q = c.out.find((x) => !asIs(r.then[x]) || !(x in r.then)) || c.out[0]; if (asIs(r.then[q])) r.then[q] = {}; const f = fields.find((x) => !(x in r.then[q])) || fields[0]; r.then[q][f] = 'const 5'; this.commit(true); } }, '+ emission'));
-    const freeOut = c.out.filter((x) => !(x in r.then));
-    if (freeOut.length) then.appendChild(h('button', { class: 'linkish small', title: 'send the message on this port as it is (a forwarding row when no failure is involved)', onclick: () => { r.then[freeOut[0]] = 'as it is'; this.commit(true); } }, '+ as it is'));
-    if (!Object.keys(r.then).length) then.appendChild(h('span', { class: 'small muted' }, 'no emission: a sink, it absorbs the failures it matches'));
-    const needsMode = Object.values(r.then).some((em) => !asIs(em) && Object.values(em).some((op) => /^(keep|max|\+)/.test(String(op).trim())));
-    const hasMode = Object.values(r.when).some((pat) => pat && typeof pat === 'object');
-    if (needsMode && !hasMode) then.appendChild(h('span', { class: 'small warn' }, 'keep, +k and max need a failure in the when part'));
-    tr.appendChild(then);
-    // activation
-    const acts = [['open', llm ? 'open: S | A' : 'open: N | S | A'], ['always', 'always (fixed)'], ['sometimes', 'sometimes (fixed)'], ...(llm ? [] : [['never', 'never (fixed)']])];
-    tr.appendChild(h('td', { class: 'act-cell' }, h('select', { 'aria-label': 'activation', onchange: (e) => { if (e.target.value === 'open') delete r.activation; else r.activation = e.target.value; this.commit(); } },
-      acts.map(([v, t]) => h('option', { value: v, selected: (r.activation || 'open') === v ? true : undefined }, t))),
-    h('span', { class: 'small muted' }, r.activation ? 'fixed in the model' : llm ? 'LLM rule: never “never”' : 'a candidate choice')));
-    const failIn = Object.values(r.when).some((pat) => pat && typeof pat === 'object');
-    const kindTag = !Object.keys(r.then).length ? 'sink' : !Object.keys(r.when).length ? 'internal fault'
-      : (!failIn && Object.values(r.then).every(asIs)) ? 'forwarding' : 'analyst';
-    tr.appendChild(h('td', {}, h('span', { class: 'tag plain' }, kindTag),
-      h('button', { class: 'x', 'aria-label': `delete row ${r.id}`, title: 'delete the row', onclick: () => { c.rows = c.rows.filter((x) => x !== r); this.commit(true); } }, '×')));
-    return tr;
-  }
-
-  passLine(c, port) {
-    // one line per input port: a mode passes unless it is declared absorbed there
-    const d = S.doc;
-    const tops = topModes(d);
-    const lines = [];
-    for (const p of c.in) {
-      const absorbed = new Set((c.absorbs || []).filter((a) => a.port === p).flatMap((a) => (a.modes === 'all' ? tops : [].concat(a.modes || a.mode || []))));
-      const toggle = (m) => {
-        c.absorbs = c.absorbs || [];
-        if (absorbed.has(m)) {
-          for (const a of c.absorbs.filter((x) => x.port === p)) {
-            const ms = a.modes === 'all' ? tops.slice() : [].concat(a.modes || a.mode || []);
-            a.modes = ms.filter((x) => x !== m); delete a.mode;
-          }
-          c.absorbs = c.absorbs.filter((a) => a.modes.length);
-        } else {
-          const a = c.absorbs.find((x) => x.port === p);
-          if (a) { a.modes = (a.modes === 'all' ? tops.slice() : [].concat(a.modes || a.mode || [])).concat([m]); delete a.mode; }
-          else c.absorbs.push({ port: p, modes: [m], reason: '' });
+    if (llm) {
+      for (const q of c.out) {
+        for (const m of tops) {
+          const st = llmDefaultStatus(c, q, m);
+          n++;
+          const hl = port && ((port.side === 'out' && port.name === q) || port.side === 'in') ? ' hl' : '';
+          gen.body.appendChild(h('tr', { class: `gen ${st.status}${hl}` },
+            h('td', { class: 'mono small' }, `default.${c.id}.${q}.${m}`),
+            h('td', { class: 'small' }, h('span', { class: 'tag llm' }, 'worst case'), ' ', `On any message, ${c.id} sends ${m} at 10 on ${q}.`,
+              st.status === 'active' && st.beside.length ? h('div', { class: 'muted' }, `${st.beside.join(', ')} emit on ${q} beside it.`) : null,
+              st.status === 'dropped' ? h('div', { class: 'muted' }, `Dropped: ${st.drop.reason || 'no reason given yet'}`) : null),
+            h('td', { class: 'small' }, st.status === 'refined' ? h('span', { class: 'muted' }, `replaced by ${st.refinedBy.join(', ')}`) : st.status === 'dropped' ? h('span', { class: 'muted' }, 'dropped') : 'open: S | A'),
+            h('td', { class: 'acts' },
+              st.status === 'active' ? [h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, null, { preset: refinePreset(c.id, q, m), startAt: 'effect' }) }, 'Refine…'),
+                h('button', { class: 'linkish small', onclick: () => openDropDefaultDialog(c.id, q, m) }, 'Drop…')] : null,
+              st.status === 'dropped' ? h('button', { class: 'linkish small', onclick: () => restoreDefault(c.id, q, m) }, 'Restore') : null,
+              st.status === 'refined' ? h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, st.refinedBy[0]) }, 'Edit row') : null)));
         }
-        this.commit(true);
-      };
-      const chips = h('div', { class: 'chips' }, tops.map((m) => h('button', { class: `mchip${absorbed.has(m) ? '' : ' on'}`, 'aria-pressed': String(!absorbed.has(m)),
-        title: absorbed.has(m) ? `${m} is absorbed at ${p} (click to let it pass)` : `${m} passes from ${p} (click to absorb it, with a reason)`, onclick: () => toggle(m) }, m)));
-      const hl = port && port.side === 'in' && port.name === p ? ' hl' : '';
-      lines.push(h('tr', { class: `gen${hl}` },
-        h('td', { class: 'mono small' }, `pass.${c.id}.${p}`),
-        h('td', {}, h('span', { class: 'small' }, `${p}: m ≥ 1, for each mode m that passes:`), chips),
-        h('td', { class: 'small' }, `every output ${p} is forwarded to: m keep`),
-        h('td', { class: 'small' }, 'always', h('br'), h('span', { class: 'muted' }, 'A6: pass-through by default')),
-        h('td', {}, h('span', { class: 'tag plain' }, 'pass-through'))));
+      }
     }
-    const frag = document.createDocumentFragment();
-    lines.forEach((l) => frag.appendChild(l));
-    return frag;
-  }
-
-  defaultLine(c, q, m, port) {
-    c.drop_defaults = c.drop_defaults || [];
-    // a row replaces the default only with the same trigger - any input, any message - and the same mode
-    // on the same port; any other row that emits it there goes beside the default
-    const anyMsg = (r) => { const w = r.when || {}; const ks = Object.keys(w); return ks.length === 1 && (ks[0] === '*' || (c.in.length === 1 && ks[0] === c.in[0])) && w[ks[0]] === 'any'; };
-    const refinedBy = (c.rows || []).filter((r) => r.then && r.then[q] && typeof r.then[q] === 'object' && m in r.then[q] && anyMsg(r)).map((r) => r.id);
-    const beside = (c.rows || []).filter((r) => r.then && r.then[q] && typeof r.then[q] === 'object' && !anyMsg(r) && Object.keys(r.then[q]).length).map((r) => r.id);
-    const drop = c.drop_defaults.find((x) => x.port === q && x.mode === m);
-    const status = refinedBy.length ? 'refined' : drop ? 'dropped' : 'active';
-    const hl = port && port.side === 'out' && port.name === q ? ' hl' : (port && port.side === 'in' ? ' hl' : '');
-    const kindCell = h('td', {}, h('span', { class: 'tag llm' }, 'worst-case default'));
-    if (status === 'active') {
-      kindCell.append(h('button', { class: 'linkish small', onclick: () => {
-        const ids = new Set((c.rows || []).map((r) => r.id)); let id = `${c.id}_${q}_${m}`; let i = 2; while (ids.has(id)) id = `${c.id}_${q}_${m}${i++}`;
-        c.rows.push({ id, label: '', when: { [c.in.length === 1 ? c.in[0] : '*']: 'any' }, then: { [q]: { [m]: 'const 10' } } });
-        this.commit(true);
-      } }, 'refine'), h('button', { class: 'linkish small', onclick: () => { c.drop_defaults.push({ port: q, mode: m, reason: '' }); this.commit(true); } }, 'drop…'));
-    } else if (status === 'dropped') {
-      kindCell.append(h('button', { class: 'linkish small', onclick: () => { c.drop_defaults = c.drop_defaults.filter((x) => x !== drop); this.commit(true); } }, 'restore'),
-        h('input', { value: drop.reason || '', placeholder: 'the structural reason (required)', class: 'reason', onchange: (e) => { drop.reason = e.target.value; this.commit(); } }));
+    for (const a of c.absorbs || []) {
+      const ms = a.modes === 'all' ? ['every mode'] : [].concat(a.modes || a.mode || []);
+      n++;
+      gen.body.appendChild(h('tr', { class: 'gen absorbed' },
+        h('td', { class: 'mono small' }, `absorbs.${c.id}.${a.port}`),
+        h('td', { class: 'small' }, `${ms.join(', ')} arriving on ${a.port} ${ms.length > 1 ? 'stop' : 'stops'} here. `, h('span', { class: a.reason ? 'muted' : 'warn' }, a.reason ? `Reason: ${a.reason}` : 'No reason given yet (required).')),
+        h('td', { class: 'small' }, 'always', h('div', { class: 'muted' }, 'declared')),
+        h('td', { class: 'acts' }, h('button', { class: 'linkish small', onclick: () => openAbsorbDialog(c.id, a.port) }, 'Edit…'))));
     }
-    return h('tr', { class: `gen ${status}${hl}` },
-      h('td', { class: 'mono small' }, `default.${c.id}.${q}.${m}`),
-      h('td', { class: 'small' }, 'any input: any message'),
-      h('td', { class: 'small' }, h('span', { class: 'mono' }, `${q}: ${m} const 10`)),
-      h('td', { class: 'small' }, status === 'refined' ? h('span', { class: 'muted' }, `replaced by ${refinedBy.join(', ')}`) : status === 'dropped' ? h('span', { class: 'muted' }, 'dropped, with a reason')
-        : h('span', {}, 'open: S | A', h('br'), h('span', { class: 'muted' }, beside.length ? `LLM rule; ${beside.join(', ')} beside it` : 'LLM rule'))),
-      kindCell);
-  }
-
-  absorbedLine(c, a) {
-    const ms = a.modes === 'all' ? ['every mode'] : [].concat(a.modes || a.mode || []);
-    return h('tr', { class: 'gen absorbed' },
-      h('td', { class: 'small' }, '—'),
-      h('td', { class: 'small' }, h('span', { class: 'mono' }, `${a.port}: ${ms.join(', ')} ≥ 1`)),
-      h('td', { class: 'small' }, 'nothing: absorbed here'),
-      h('td', { class: 'small' }, h('input', { value: a.reason || '', placeholder: 'why it stops here (required)', class: 'reason',
-        onchange: (e) => { a.reason = e.target.value; this.commit(); } })),
-      h('td', {}, h('span', { class: 'tag absorbed' }, 'absorbed'),
-        h('button', { class: 'linkish small', onclick: () => { c.absorbs = (c.absorbs || []).filter((x) => x !== a); this.commit(true); } }, 'pass it through')));
-  }
-
-  addRow(c, fields) {
-    const ids = new Set(S.doc.components.flatMap((x) => (x.rows || []).map((r) => r.id)));
-    let i = 1; while (ids.has(`${c.id}_r${i}`)) i++;
-    c.rows.push({ id: `${c.id}_r${i}`, when: { [c.in[0] || '*']: 'any' }, then: c.out[0] ? { [c.out[0]]: { [fields[0]]: 'const 5' } } : {} });
-    this.commit(true);
-  }
-
-  commit(rerender) {
-    this.editing = !rerender;
-    changed();
-    this.editing = false;
-    if (rerender) this.render();
+    if (!n) return null;
+    const key = c.id;
+    const open = this.showGen[key] !== undefined ? this.showGen[key] : false;
+    const det = h('details', { class: 'gen-fold', open: open || undefined },
+      h('summary', {}, h('span', { class: 'section-title' }, `Rows the engine adds (${n})`), ' ',
+        h('span', { class: 'small muted' }, llm ? 'the worst-case defaults of an LLM: refine or drop them here' : 'pass-through for every input, and what you declared absorbed')),
+      gen.t);
+    det.addEventListener('toggle', () => { this.showGen[key] = det.open; });
+    return det;
   }
 
   // ---------------------------------------------------------------- a guardrail
   renderGuard(g) {
     const d = S.doc;
     const e = edge(d, g.edge);
-    const { body, table } = this.shell(`Mapping table of ${g.label || 'unnamed guard'} (${g.id})`, g.learned ? 'learned guardrail' : 'guardrail', 'guard',
-      `In(${g.id}) = {in} · Out(${g.id}) = {out} · cuts ${g.edge}${e ? `: ${e.from} → ${e.to}` : ''}`);
+    this.head(`Rows of ${g.label || 'unnamed guard'} (${g.id})`, g.learned ? 'learned guardrail' : 'guardrail', 'guard',
+      `cuts ${g.edge}${e ? `: ${e.from} → ${e.to}` : ''}`, button('Edit guard…', () => openGuardDialog(g.id), { small: true, primary: true }));
     this.host.appendChild(h('div', { class: 'mt-flow' }, h('span', { class: 'section-title' }, 'Normal flow'), h('span', { class: 'mono small' }, 'in → out'),
-      h('span', { class: 'small muted' }, 'Everything about a guardrail is fixed by its definition except one leak row per target, whose activation is the guard\'s quality.')));
+      h('span', { class: 'small muted grow' }, 'Everything about a guardrail is fixed by its definition except one leak row per target, whose activation is the guard\'s quality.')));
+    const { t, body } = this.table(['Row', 'What it does', 'Activation', '']);
     const ts = g.targets || [];
-    if (!ts.length) body.appendChild(h('tr', { class: 'note' }, h('td', { colspan: 5 }, 'No target yet: the guard passes everything and changes no verdict. Add what it checks for in the inspector.')));
-    for (const t of ts) {
-      const key = 'mode' in t ? t.mode : 'taint' in t ? 'taint' : 'conf' in t ? 'conf' : 'auth';
-      const cond = 'mode' in t ? `in: ${t.mode} ≥ ${t.threshold || 1}` : 'taint' in t ? 'in: tainted' : 'conf' in t ? `in: confidentiality above ${t.conf}` : `in: authority below ${t.auth}`;
-      const onCycle = !!(S.check && S.check.ok && S.check.summary.components[g.id] && S.check.summary.components[g.id].on_cycle);
-      const caught = 'mode' in t ? `out: ${t.mode} capped at ${(t.threshold || 1) - 1}; ${onCycle ? 'on a cycle, so nothing is dropped' : 'a message only a failure row created is dropped'}`
-        : 'taint' in t ? 'out: clean' : 'conf' in t ? `out: confidentiality ${t.conf} (redacted)` : `out: authority ${t.auth} (approved)`;
-      const decidable = !g.learned && t.decidable;
+    if (!ts.length) body.appendChild(h('tr', { class: 'note' }, h('td', { colspan: 4 }, 'No target yet: the guard passes everything and changes no verdict. ', h('button', { class: 'linkish small', onclick: () => openGuardDialog(g.id, { startAt: 'targets' }) }, 'Add what it catches…'))));
+    const onCycle = !!(S.check && S.check.ok && S.check.summary.components[g.id] && S.check.summary.components[g.id].on_cycle);
+    for (const tg of ts) {
+      const key = 'mode' in tg ? tg.mode : 'taint' in tg ? 'taint' : 'conf' in tg ? 'conf' : 'auth';
+      const decidable = !g.learned && tg.decidable;
       body.append(
-        h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `catch.${g.id}.${key}`), h('td', { class: 'small' }, `${cond}, and the leak row does not fire`),
-          h('td', { class: 'small' }, caught), h('td', { class: 'small' }, 'always', h('br'), h('span', { class: 'muted' }, 'definition')), h('td', {}, h('span', { class: 'tag guard' }, 'catch'))),
-        h('tr', { class: 'gen leak' }, h('td', { class: 'mono small' }, `leak.${g.id}.${key}`), h('td', { class: 'small' }, cond),
-          h('td', { class: 'small' }, `out: the ${targetText(t)} failure gets through unchanged`),
-          h('td', { class: 'small' }, decidable ? 'open: N | S | A' : 'open: S | A', h('br'), h('span', { class: 'muted' }, decidable ? 'decidable: may be certified never' : g.learned ? 'learned guard' : 'not decidable from the edge')),
-          h('td', {}, h('span', { class: 'tag guard' }, 'leak row'))));
+        h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `catch.${g.id}.${key}`),
+          h('td', { class: 'small' }, catchSentence(tg).replace('unless the guard lies on a cycle', onCycle ? 'but this guard lies on a cycle, so nothing is dropped' : 'unless the guard lies on a cycle')),
+          h('td', { class: 'small' }, 'always', h('div', { class: 'muted' }, 'definition')), h('td', {})),
+        h('tr', { class: 'gen leak' }, h('td', { class: 'mono small' }, `leak.${g.id}.${key}`),
+          h('td', { class: 'small' }, h('span', { class: 'tag guard' }, 'leak'), ' ', `A message with ${targetText(tg)} gets through unchanged.`),
+          h('td', { class: 'small' }, decidable ? 'open: N | S | A' : 'open: S | A', h('div', { class: 'muted' }, decidable ? 'decidable: may be certified never' : g.learned ? 'learned guard' : 'not decidable from the edge')),
+          h('td', {})));
     }
     if (g.learned) {
-      body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `fp.${g.id}`), h('td', { class: 'small' }, 'in: any message'),
-        h('td', { class: 'small' }, `out: omission const ${g.fp_omission ?? 10} (it refuses a harmless message)`), h('td', { class: 'small' }, 'open: S | A', h('br'), h('span', { class: 'muted' }, 'learned guard')), h('td', {}, h('span', { class: 'tag guard' }, 'false positive'))));
+      body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `fp.${g.id}`),
+        h('td', { class: 'small' }, h('span', { class: 'tag guard' }, 'false positive'), ' ', `It refuses a harmless message: omission at ${g.fp_omission ?? 10}.`),
+        h('td', { class: 'small' }, 'open: S | A', h('div', { class: 'muted' }, 'learned guard')), h('td', {})));
     }
-    body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `pass.${g.id}`), h('td', { class: 'small' }, 'in: every failure it does not target'),
-      h('td', { class: 'small' }, 'out: unchanged; provenance unchanged (it neither taints nor lowers authority)'), h('td', { class: 'small' }, 'always', h('br'), h('span', { class: 'muted' }, 'definition')), h('td', {}, h('span', { class: 'tag plain' }, 'pass-through'))));
-    this.host.appendChild(h('div', { class: 'mt-scroll' }, table));
+    body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `pass.${g.id}`),
+      h('td', { class: 'small' }, 'Every failure it does not target goes on unchanged; it neither taints nor lowers authority.'),
+      h('td', { class: 'small' }, 'always', h('div', { class: 'muted' }, 'definition')), h('td', {})));
+    this.host.appendChild(h('div', { class: 'mt-scroll' }, t));
   }
+}
+
+function actShort(r, c) {
+  const kind = rowKind(r);
+  const act = r.activation || (kind === 'forwarding' ? 'always' : 'open');
+  if (act === 'open') return h('span', {}, c.kind === 'llm' && kind !== 'forwarding' && kind !== 'sink' ? 'open: S | A' : 'open: N | S | A', h('div', { class: 'muted' }, 'the evidence decides'));
+  return h('span', {}, act, h('div', { class: 'muted' }, r.activation ? 'fixed in the model' : 'forwarding default'));
+}
+
+function restoreDefault(cid, q, m) {
+  const doc = cloneDoc();
+  const c = comp(doc, cid);
+  c.drop_defaults = (c.drop_defaults || []).filter((x) => !(x.port === q && x.mode === m));
+  if (!c.drop_defaults.length) delete c.drop_defaults;
+  commitDoc(doc, { type: 'component', id: cid });
+  toast(`Default ${m} on ${q} restored.`);
 }

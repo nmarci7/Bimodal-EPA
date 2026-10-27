@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "The workbench is served as plain ES modules; this file only tells node (web/tests) that they are modules."
+}
