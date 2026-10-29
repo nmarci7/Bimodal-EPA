@@ -15,7 +15,7 @@
 //   * for a guardrail, its fixed catching behaviour, one leak row per target and, if learned, its
 //     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
-import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc } from './state.js';
+import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc, edgeName } from './state.js';
 import { rowSentence, rowKind, KINDS, defaultStatus, hasDefaults } from './rows.js';
 import { openRowDialog, deleteRow } from './rowdialog.js';
 import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
@@ -167,7 +167,7 @@ export class MapTable {
     const d = S.doc;
     const e = edge(d, g.edge);
     this.head(`Rows of ${g.label || 'unnamed guard'} (${g.id})`, g.learned ? 'learned guardrail' : 'guardrail', 'guard',
-      `cuts ${g.edge}${e ? `: ${e.from} → ${e.to}` : ''}`, button('Edit guard…', () => openGuardDialog(g.id), { small: true, primary: true }));
+      `cuts ${e ? edgeName(e) : g.edge}`, button('Edit guard…', () => openGuardDialog(g.id), { small: true, primary: true }));
     this.host.appendChild(h('div', { class: 'mt-flow' }, h('span', { class: 'section-title' }, 'Normal flow'), h('span', { class: 'mono small' }, 'in → out'),
       h('span', { class: 'small muted grow' }, 'Everything about a guardrail is fixed by its definition except one leak row per target, whose activation is the guard\'s quality.')));
     const { t, body } = this.table(['Row', 'What it does', 'Activation', '']);

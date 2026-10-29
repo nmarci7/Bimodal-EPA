@@ -288,11 +288,11 @@ async function main() {
     { label: 'Send this model to the assistant…', hint: 'the assistant works on it next; replaces its model', onClick: saveWorkspace },
   ], { title: 'work on a model together with an assistant (MCP)' });
   const helpMenu = dropdown('Help', () => [
-    { label: 'Start the tutorial', hint: 'build a first model in seven steps, one button each', onClick: () => tutorial.start() },
+    { label: 'Start the tour', hint: 'build a small system yourself and use every part of the reasoner', onClick: () => tutorial.start() },
     { label: 'How the reasoner works', hint: 'the four steps and the shortcuts', onClick: helpDialog },
     'sep',
     { label: 'Show all details', hint: 'levels, authority, ids, files, engine internals', checked: details(), onClick: () => setDetails(!details()) },
-  ], { title: 'the tutorial, how the reasoner works, and how much it shows' });
+  ], { title: 'the tour, how the reasoner works, and how much it shows' });
   if (store('epa.details')) document.body.classList.add('details');
   on('details', () => { emit('doc'); emit('evidence'); });
   $('actions').prepend(fileMenu, assistantMenu, helpMenu);

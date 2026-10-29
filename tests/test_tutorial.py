@@ -1,49 +1,52 @@
-"""The tutorial (web/tutorial-steps.js) says what verdict each step leads to; this replays its steps under
-node and checks every one with the engine: the models are well-formed and the verdict of the followed
-cell is the promised one (unchecked, exposed, guarantee, unchecked, hope, unchecked, guarantee)."""
-import json
-import os
-import shutil
-import subprocess
-
+"""The tour (web/tutorial.js) promises a verdict for the followed cell (a wrong value at the log point)
+after each of its runs. This builds the same model the tour's "Do it for me" builds, a new model with
+the five standard failure modes, and checks every promised verdict with the engine."""
 import pytest
 
 from epa.engine.coordinator import Engine
+from epa.model import edit as E
 from epa.model.load import load_model, validate
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NODE = shutil.which("node")
-
-REPLAY = """
-import('./tutorial-steps.js').then((m) => {
-  let cur = { doc: null, ev: null };
-  const steps = [];
-  for (const st of m.STEPS) { const n = st.apply(JSON.parse(JSON.stringify(cur))); cur = { doc: n.doc, ev: n.ev }; steps.push(cur); }
-  console.log(JSON.stringify({ cell: m.CELL, expected: m.EXPECTED, steps }));
-});
-"""
 
 
 @pytest.fixture(scope="module")
-def replay():
-    if not NODE:
-        pytest.skip("node is not installed")
-    out = subprocess.run([NODE, "--input-type=module", "-e", REPLAY], cwd=os.path.join(ROOT, "web"),
-                         capture_output=True, text=True, check=True).stdout
-    return json.loads(out)
+def work(tmp_path_factory):
+    return str(tmp_path_factory.mktemp("work"))
 
 
-def test_every_step_gives_the_verdict_the_tutorial_promises(replay, tmp_path):
-    assert len(replay["steps"]) == len(replay["expected"]) == 7
-    for i, (step, (verdict, statuses)) in enumerate(zip(replay["steps"], replay["expected"]), start=1):
-        assert validate(step["doc"]) == [], f"step {i}"
-        rep = Engine(load_model(step["doc"]), str(tmp_path)).analyse(step["ev"], rank=False)
-        cell = next(c for c in rep["cells"] if c["cell"] == replay["cell"])
-        assert (cell["verdict"], ",".join(cell["statuses"])) == (verdict, statuses), f"step {i}"
+def verdict(doc, ev, work):
+    assert validate(doc) == []
+    rep = Engine(load_model(doc), work).analyse(ev, rank=False)
+    cells = {c["cell"]: (c["verdict"], ",".join(c["statuses"])) for c in rep["cells"]}
+    return cells["value@o_order"], {v for k, v in cells.items() if k != "value@o_order"}
 
 
-def test_the_fixed_parser_makes_the_test_report_stale(replay, tmp_path):
-    step = replay["steps"][2]
-    rep = Engine(load_model(step["doc"]), str(tmp_path)).analyse(step["ev"], rank=False)
-    states = {c["id"]: c["state"] for c in rep["register"]["certificates"]}
-    assert states == {"c_test": "stale", "c_fix": "in force"}
+def test_the_tour_story(work):
+    d = E.blank("my-first-model")
+    E.put_component(d, {"id": "parser", "kind": "deterministic", "label": "turns the request into an order"})
+    E.connect(d, "sys.request", "parser.request")
+    E.connect(d, "parser.order", "sys.order")
+    E.put_observation_point(d, {"edge": "e_parser_order", "label": "order log"})
+    ev = {"certificates": [], "witnesses": [], "decisions": []}
+    value_row = "default.parser.order.value"
+
+    # chapter 1: nothing is known
+    assert verdict(d, ev, work) == (("unchecked", "N,S,A"), {("unchecked", "N,S,A")})
+    # chapter 2: a test report says always; withdrawn; the fix certified never
+    ev["certificates"].append({"id": "c_test", "component": "parser", "rows": {value_row: "always"}})
+    assert verdict(d, ev, work)[0] == ("exposed", "A")
+    ev["decisions"].append({"kind": "withdraw-cert", "certificate": "c_test", "by": "test team", "reason": "the bug is fixed"})
+    ev["certificates"].append({"id": "c_fix", "component": "parser", "rows": {value_row: "never"}})
+    assert verdict(d, ev, work)[0] == ("guarantee", "N")
+    # chapter 3: an LLM in front; a clean log line
+    E.remove_edge(d, "e_request_parser")
+    E.put_component(d, {"id": "writer", "kind": "llm", "label": "writes the order draft"})
+    E.connect(d, "sys.request", "writer.request")
+    E.connect(d, "writer.draft", "parser.request")
+    assert verdict(d, ev, work) == (("unchecked", "S,A"), {("unchecked", "S,A")})
+    ev["witnesses"].append({"id": "w_clean", "use_case": "uc1", "at": {"o_order": {"used": True, "modes": {"value": [0, 0]}}}})
+    assert verdict(d, ev, work)[0] == ("hope", "S")
+    # chapter 5: a guard, certified
+    E.put_guard(d, {"id": "schema", "edge": "e_writer_parser", "label": "schema check",
+                    "targets": [{"mode": "value", "threshold": 1, "decidable": True}]})
+    ev["certificates"].append({"id": "c_schema", "component": "schema", "targets": {"value": "never"}})
+    assert verdict(d, ev, work)[0] == ("guarantee", "N")

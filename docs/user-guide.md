@@ -47,23 +47,26 @@ fail.
 The reasoner keeps your model and evidence in the browser (local storage), so a reload brings back
 where you were. To keep a model, export it (**File → Export the model as YAML**).
 
-### 1.1 Your first model: the tutorial
+### 1.1 The tour
 
-**Help → Start the tutorial** builds a small model in seven steps, one button each. After every step it
-runs the analysis and says, in one sentence, what the verdict means. It follows one failure (a wrong
-value in the order log) through every answer the reasoner can give:
+**Help → Start the tour** builds a small system with you and uses every part of the reasoner. You do
+each step yourself: the control to use is outlined, and the card notices when the step is done. If you
+are stuck, **Do it for me** does it the same way.
 
-| step | what you do | the verdict |
-|---|---|---|
-| 1 | build request → parser → order log | **unchecked**: nothing is known (never, sometimes or always) |
-| 2 | a test report: the parser always gets it wrong | **exposed**: always (A) |
-| 3 | the parser is fixed (v2) and certified "never" | **guarantee**: never (N); the old report is stale |
-| 4 | an LLM writes the draft first | **unchecked**: sometimes or always (an LLM is never "never") |
-| 5 | a log line shows a clean order | **hope**: sometimes (S) |
-| 6 | a schema check between them | **unchecked**: never or sometimes (nobody vouched for it yet) |
-| 7 | the check is certified | **guarantee**: never (N) |
+| chapter | what you do |
+|---|---|
+| 1 The model | drag a component, a system input and output, wire them, drop a log point, run the analysis |
+| 2 Evidence | write a certificate (a test report: "always"), run; withdraw it; certify the fix ("never"), run |
+| 3 An LLM joins | drag an LLM into the path, run; write a witness (a clean log line), run |
+| 4 Reading the verdicts | open the verdict, its candidates and a reaching run; what to certify next |
+| 5 A guard | drop a guard on the LLM's edge, certify it, run |
+| 6 And more | the Analysis page, the Assistant, File and the demo cases, simple or detailed |
 
-![The tutorial at step 5: the card says what the verdict means; the verdict bar shows it too](images/tutorial.jpg)
+The tour follows one failure, a wrong value at the log point, through every verdict: **unchecked**
+(nothing is known), **exposed** (always), **guarantee** (never), **unchecked** again (an LLM is never
+"never"), **hope** (sometimes) and **guarantee** again.
+
+![The tour in chapter 5: the guard in the palette is outlined, and the card says what to do](images/tutorial.jpg)
 
 ### 1.2 Simple or detailed
 

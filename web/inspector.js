@@ -5,7 +5,7 @@
 // rows, a port, an edge, a guardrail with its targets, an observation point with its toleration, a
 // system port with the use cases it starts.
 import { h, clear, add } from './lib.js';
-import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection } from './state.js';
+import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection, details, edgeName } from './state.js';
 import { button, confirmDialog } from './dialog.js';
 import { rowSentence } from './rows.js';
 import { openRowDialog } from './rowdialog.js';
@@ -218,7 +218,7 @@ export class Inspector {
     const guards = d.guards.filter((g) => g.edge === e.id);
     const o = d.observation_points.find((x) => x.edge === e.id);
     add(this.host, 
-      this.head(e.id, 'edge', '', () => openEdgeDialog(e.id)),
+      this.head(details() ? e.id : edgeName(e), 'edge', '', () => openEdgeDialog(e.id)),
       this.kv([['From', h('span', { class: 'mono' }, e.from)], ['To', h('span', { class: 'mono' }, e.to)], e.label ? ['Label', e.label] : null]),
       h('div', { class: 'block' }, this.section(`Guards on it (${guards.length})`, button('Add guard…', () => openGuardDialog(null, { edge: e.id }), { small: true })),
         guards.length ? h('p', { class: 'hint' }, `In the order they cut it: ${[e.from, ...guards.map((g) => g.label || g.id), e.to].join(' → ')}.`) : h('p', { class: 'hint' }, 'None. A guard cuts the edge in two and catches its targets unless its leak row fires.'),
@@ -236,8 +236,8 @@ export class Inspector {
     const ts = g.targets || [];
     add(this.host, 
       this.head(g.label || 'unnamed guard', g.learned ? 'learned guardrail' : 'guardrail', 'guard', () => openGuardDialog(g.id)),
-      this.kv([['Id', h('span', { class: 'mono' }, g.id)], g.version ? ['Version', h('span', { class: 'mono' }, g.version)] : null,
-        ['Cuts', e ? h('button', { class: 'linkish small', onclick: () => this.select({ type: 'edge', id: e.id }) }, `${e.id}: ${e.from} → ${e.to}`) : 'an edge that no longer exists'],
+      this.kv([details() ? ['Id', h('span', { class: 'mono' }, g.id)] : null, g.version ? ['Version', h('span', { class: 'mono' }, g.version)] : null,
+        ['Cuts', e ? h('button', { class: 'linkish small', onclick: () => this.select({ type: 'edge', id: e.id }) }, edgeName(e)) : 'an edge that no longer exists'],
         g.closed_output ? ['Output', 'a closed set: may wash taint'] : null]),
       h('div', { class: 'block' }, this.section(`What it catches (${ts.length})`, button('Edit…', () => openGuardDialog(g.id, { startAt: 'targets' }), { small: true })),
         ts.length ? ts.map((t) => h('div', { class: 'item static' }, h('b', { class: 'mono small' }, targetText(t)),
@@ -256,8 +256,8 @@ export class Inspector {
     const tol = Object.entries(o.tolerate || {});
     add(this.host, 
       this.head(o.label || o.id, 'observation point', '', () => openObsDialog(o.id)),
-      this.kv([['Id', h('span', { class: 'mono' }, o.id)],
-        ['Observes', e ? `what ${e.to} receives on ${e.id}${guards.length ? `, after ${guards.join(', ')}` : ''}` : 'an edge that no longer exists'],
+      this.kv([details() ? ['Id', h('span', { class: 'mono' }, o.id)] : null,
+        ['Observes', e ? `what ${e.to} receives${details() ? ` on ${e.id}` : ''}${guards.length ? `, after ${guards.join(', ')}` : ''}` : 'an edge that no longer exists'],
         o.log ? ['Log', o.log] : null,
         ['Judges', tol.length ? h('div', { class: 'chips' }, tol.map(([m, th]) => h('span', { class: 'tag plain' }, `${m} ≥ ${th}`))) : 'no failure mode'],
         ['Provenance', [o.taint === 'reject' ? 'flags taint' : null, o.clearance ? `confidentiality above ${o.clearance === 'receiver' && recv ? `${recv.id}'s clearance` : o.clearance}` : null,

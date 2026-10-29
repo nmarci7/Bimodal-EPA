@@ -110,18 +110,20 @@ verdict counts, on every page; dimmed with "out of date" when `analysisCurrent()
 | `VerdictBar` | renders the bar; a point is a button that emits `focus-cell` with its worst cell (the Verdicts page opens it) |
 | `VerdictBar.update()` | redraws it on `report`, `doc`, `evidence`, `loaded` and `analysis`; hidden while there is no report |
 
-#### `web/tutorial-steps.js` and `web/tutorial.js`
-The tutorial (Help → Start the tutorial): seven steps that build a first model and follow one cell,
-`value@o_order`, through every verdict: unchecked, exposed (A), guarantee (N), unchecked {S,A}, hope (S),
-unchecked {N,S}, guarantee (N). The steps are pure data and functions, so `tests/test_tutorial.py` replays
-them under node and checks every verdict with the engine.
+#### `web/tutorial.js`
+The guided tour (Help → Start the tour): six chapters on a new model (the model, evidence, an LLM joins,
+reading the verdicts, a guard, and more) in which the user does every step in the real interface. Each
+step outlines the control to use (`tour-target`), says what to do, and notices when it is done by
+watching the model, the evidence, the view and the analysis; "Do it for me" makes the same change
+through the functions the canvas and the windows use (`connectPorts`, `addObs`, `commitDoc`, the
+evidence lists). One cell, a wrong value at the log point, goes unchecked → exposed (A) → guarantee (N)
+→ unchecked {S,A} → hope (S) → guarantee (N); `tests/test_tutorial.py` checks that story with the engine.
 
 | definition | what it does |
 |---|---|
-| `CELL`, `EXPECTED` | the followed cell; the verdict and statuses each step leads to |
-| `tutorialModel()` | the first model: request → parser (deterministic, v1) → order, the order log on the last edge, one mode (value), `worst_case_defaults: all`, canvas positions |
-| `STEPS` | per step: title, one sentence, the button's label, `apply({doc, ev})` (the next model, evidence and selection), and what the verdict means |
-| `Tutorial` | the card in the corner. `start()` asks before replacing a model of yours, `step()` applies the step (the first loads the model through app.js's `setDoc`; the others `commitDoc` and update the evidence), checks the model, runs the analysis without leaving the page (`emit('run', {quiet: true})`) and waits for `report`; `render()` shows the step, or its verdict with the explanation and Next; `finish()` the closing words; `stop()` closes it |
+| `context(d)` | the parts the tour talks about, found in whatever the user built: the first non-LLM component, the first LLM, the system input and output, the edges between them, the log point on the edge into the output, the guard on the LLM's edge, the component's value default row |
+| `CHAPTERS`, `STEPS` | the chapters; per step: chapter, title, text, `target()` (the controls to outline), `view` (shown when the step starts), and for an action `done()` and `doIt()`; `after` (what it showed); `run: true` for the analysis steps, which also show the followed cell's verdict |
+| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and notices a step done; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window; `isDone()`; `render()`; `stop()` |
 
 #### `web/state.js`
 The state `S`, the event bus, the model helpers, every direct edit, and the check-then-save step of
