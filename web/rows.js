@@ -318,15 +318,21 @@ export function allRowIds(doc) {
   return new Set((doc.components || []).flatMap((c) => (c.rows || []).map((r) => r.id)));
 }
 
-// ---------------------------------------------------------------- LLM worst-case defaults
+// ---------------------------------------------------------------- worst-case defaults
+
+/** Whether a component gets the worst-case defaults: every LLM does; with `worst_case_defaults: all`
+ * (a new model's setting, FPTC style) every component does (epa/model/defaults.py, has_defaults). */
+export function hasDefaults(doc, c) {
+  return c.kind === 'llm' || (!!doc && doc.worst_case_defaults === 'all');
+}
 
 /**
- * The state of one worst-case default of an LLM component (docs/model-format.md): on output port q,
+ * The state of one worst-case default of a component (docs/model-format.md): on output port q,
  * mode m at 10 for any message. Only a row with the same trigger (any input or the only input,
  * any message) that emits m on q replaces it; other rows emitting on q go beside it.
  * -> {status: active | refined | dropped, refinedBy: [row ids], beside: [row ids], drop}
  */
-export function llmDefaultStatus(c, q, m) {
+export function defaultStatus(c, q, m) {
   const anyMsg = (r) => {
     const w = r.when || {};
     const ks = Object.keys(w);

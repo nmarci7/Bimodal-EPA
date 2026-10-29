@@ -114,12 +114,16 @@ export class Canvas {
   }
   applyT() { this.vp.setAttribute('transform', `translate(${this.t.x},${this.t.y}) scale(${this.t.k})`); }
 
+  /** Fits the model into view. A canvas that has no size yet (its view is hidden, e.g. a link that
+   * opens the analysis) is fitted the next time the model view is shown (needsFit). */
   fit() {
     const ns = this.nodes();
     if (!ns.length) { this.t = { x: 40, y: 40, k: 1 }; this.applyT(); return; }
+    const r = this.svg.getBoundingClientRect();
+    if (!r.width || !r.height) { this.needsFit = true; return; }
+    this.needsFit = false;
     const x0 = Math.min(...ns.map((n) => n.x)) - 60, y0 = Math.min(...ns.map((n) => n.y)) - 50;
     const x1 = Math.max(...ns.map((n) => n.x + n.w)) + 80, y1 = Math.max(...ns.map((n) => n.y + n.h)) + 60;
-    const r = this.svg.getBoundingClientRect();
     const k = Math.min(1.2, Math.max(0.3, Math.min(r.width / (x1 - x0), r.height / (y1 - y0))));
     this.t = { k, x: (r.width - (x1 - x0) * k) / 2 - x0 * k, y: (r.height - (y1 - y0) * k) / 2 - y0 * k };
     this.applyT();

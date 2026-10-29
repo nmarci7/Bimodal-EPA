@@ -1,11 +1,17 @@
-"""Generated rows: the LLM worst-case table and the rows every guard carries."""
+"""Generated rows: the worst-case table (of every LLM component, or of every component when the model
+says `worst_case_defaults: all`) and the rows every guard carries."""
+
+# What `worst_case_defaults` may say: `llm` (the default) gives the worst-case table to LLM components
+# only; `all` gives it to every component, FPTC style, so an unmodelled component is never a guarantee.
+WORST_CASE = ("llm", "all")
 
 
 def replaces_default(comp, r, port, mode):
     """An analyst row refines the default (port, mode) in place only if it keeps the default's trigger -
     any input, any message - and emits that same top-level mode there. Any narrower row (a failure
-    pattern, a fork-join, one port of several) would say that the LLM does not start the failure on
-    its own, which only a recorded structural reason may say; such a row goes beside the default."""
+    pattern, a fork-join, one port of several) would say that the component does not start the
+    failure on its own, which only a recorded structural reason may say; such a row goes beside the
+    default."""
     if r.kind != "row" or mode not in r.then.get(port, {}):
         return False
     w = r.when
@@ -14,14 +20,23 @@ def replaces_default(comp, r, port, mode):
     return len(comp.ins) == 1 and w == {comp.ins[0]: {"any": True}}
 
 
-def add_llm_defaults(m):
-    """Every LLM component starts with a worst-case table: for each output port and each top-level
-    mode, `any message => mode const 10`. An analyst row with the same trigger that emits the same
-    mode on the same port replaces it (a magnitude below 10 is recorded as a calibration); every other
-    analyst row is added beside it; a default may be dropped only with a recorded reason."""
+def has_defaults(doc, cdoc):
+    """Whether a component of the document gets the worst-case table: every LLM component does; with
+    `worst_case_defaults: all` every component does."""
+    return cdoc.get("kind") == "llm" or doc.get("worst_case_defaults", "llm") == "all"
+
+
+def add_worst_case_defaults(m):
+    """A component with defaults (`has_defaults`) starts with a worst-case table: for each output port
+    and each top-level mode, `any message => mode const 10`, open. An analyst row with the same trigger
+    that emits the same mode on the same port replaces it (a magnitude below 10 is recorded as a
+    calibration); every other analyst row is added beside it; a default may be dropped only with a
+    recorded reason. An LLM component's default falls under the LLM rule (never "never"); any other
+    component's default may be certified never, which is how evidence earns a guarantee for a
+    component nobody modelled."""
     from .load import Row
     for cdoc in m.doc["components"]:
-        if cdoc["kind"] != "llm":
+        if not has_defaults(m.doc, cdoc):
             continue
         cid = cdoc["id"]
         comp = m.components[cid]
@@ -47,7 +62,7 @@ def add_llm_defaults(m):
                     continue
                 rid = f"default.{cid}.{port}.{mode}"
                 m.rows[rid] = Row(id=rid, comp=cid, kind="default", when={"*": {"any": True}},
-                                  then={port: {mode: ("const", 10)}}, open=True, llm=True,
+                                  then={port: {mode: ("const", 10)}}, open=True, llm=comp.llm,
                                   label=f"worst-case default: {mode} on {port}")
 
 

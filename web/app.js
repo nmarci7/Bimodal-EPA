@@ -6,6 +6,7 @@ import { ModelView } from './modelview.js';
 import { EvidenceView } from './evidence.js';
 import { AnalysisView } from './analysis.js';
 import { VerdictsView } from './verdicts.js';
+import { FlowBar } from './flow.js';
 import { dropdown, button, infoDialog, confirmDialog } from './dialog.js';
 
 const $ = (id) => document.getElementById(id);
@@ -148,8 +149,11 @@ function bootstrapDialog() {
     h('div', { class: 'inline' }, h('label', { class: 'inline small' }, 'MCP server component', server), h('span', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: go }, 'Build')), out));
 }
 
-// ---------------------------------------------------------------- the shared workspace (epa/workspace.py)
+// ---------------------------------------------------------------- the assistant's model (epa/workspace.py)
+// An MCP client works on one model of its own, the shared workspace (.epa-work/workspace.json); the
+// Assistant menu opens it here, sends this model there, and says how to connect an assistant.
 const when = (t) => (t ? new Date(t * 1000).toLocaleString() : 'never');
+const byWhom = (by) => (by === 'mcp' ? 'the assistant' : 'this browser');
 
 async function openWorkspace() {
   let ws;
@@ -159,14 +163,14 @@ async function openWorkspace() {
   drawStagebar();
   show('model');
   store('epa.wsSeen', ws.updated);
-  toast(`Opened the shared workspace: ${ws.doc.name || 'model'}, written by ${ws.by === 'mcp' ? 'the assistant' : 'the browser'} on ${when(ws.updated)}.`, 6000);
+  toast(`Opened the assistant's model: ${ws.doc.name || 'model'}, saved by ${byWhom(ws.by)} on ${when(ws.updated)}.`, 6000);
 }
 
 async function saveWorkspace() {
   const meta = await api('/api/workspace/meta');
   if (meta.exists) {
-    const ok = await confirmDialog(`This replaces the model in the shared workspace (${meta.name || 'a model'}, written by ${meta.by === 'mcp' ? 'the assistant' : 'the browser'} on ${when(meta.updated)}) with ${S.doc.name || 'this model'} and its evidence.`,
-      { title: 'Save to the shared workspace', okText: 'Replace it' });
+    const ok = await confirmDialog(`The assistant's model (${meta.name || 'a model'}, saved by ${byWhom(meta.by)} on ${when(meta.updated)}) is replaced by ${S.doc.name || 'this model'} and its evidence. The assistant works on it from its next request.`,
+      { title: 'Send this model to the assistant', okText: 'Send it' });
     if (!ok) return;
   }
   // a demo case keeps its recognisers, manifest and lookup files in its bundle: hand them over too
@@ -175,18 +179,51 @@ async function saveWorkspace() {
     deployments: S.evidence.deployments || b.deployments || null, lookups: { ...(b.lookups || {}), ...(S.evidence.lookups || {}) } };
   const r = await api('/api/workspace', { doc: S.doc, evidence, case: S.caseId, stage: S.stage }, 'PUT');
   store('epa.wsSeen', r.updated);
-  toast(`Saved to the shared workspace (${r.path}). An MCP client sees it now.`, 6000);
+  toast(`Sent: the assistant works on ${S.doc.name || 'this model'} from its next request.`, 6000);
 }
 
-/** When the window comes back, say if an assistant changed the shared workspace in the meantime. */
+/** When the window comes back, say if the assistant changed its model in the meantime. */
 async function watchWorkspace() {
   try {
     const meta = await api('/api/workspace/meta');
     if (meta.exists && meta.by === 'mcp' && meta.updated > (store('epa.wsSeen') || 0)) {
       store('epa.wsSeen', meta.updated);
-      toast(`The assistant changed the shared workspace (${meta.name || 'a model'}, ${when(meta.updated)}). File → Open the shared workspace shows it.`, 9000);
+      toast(`The assistant changed its model (${meta.name || 'a model'}, ${when(meta.updated)}). Assistant → Open the assistant's model shows it.`, 9000);
     }
   } catch (e) { /* an older server without the workspace: nothing to say */ }
+}
+
+/** How to use the reasoner from an assistant: register the MCP server once (the assistant starts it),
+ * ask, and take turns on the assistant's model. The command names this repository's mcp.sh. */
+async function connectDialog() {
+  let meta = {};
+  try { meta = await api('/api/workspace/meta'); } catch (e) { /* an older server: show the generic command */ }
+  const name = (meta.mcp && meta.mcp.name) || 'bimodal-reasoner';
+  const cmd = (meta.mcp && meta.mcp.command) || '/path/to/epa-v2/mcp.sh';
+  const copy = (text) => button('Copy', async () => {
+    try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch (e) { toast('Select the text and copy it.'); }
+  }, { small: true });
+  const code = (text) => h('div', { class: 'copyrow' }, h('pre', { class: 'code' }, text), copy(text));
+  const claudeCode = `claude mcp add --scope user ${name} -- "${cmd}"`;
+  const desktop = JSON.stringify({ mcpServers: { [name]: { command: cmd } } }, null, 2);
+  const ask = `Use the ${name} tools: open the wallet case at stage S2, run the analysis, and explain why oom at o_statement is a hope.`;
+  const status = meta.exists ? `${meta.name || 'a model'}, saved by ${byWhom(meta.by)} on ${when(meta.updated)}.` : 'empty: nothing saved yet.';
+  const d = infoDialog('Use the reasoner from an assistant', h('div', { class: 'block help' },
+    h('p', {}, 'An assistant such as Claude Code or Claude Desktop can do what you do here, through the reasoner\'s MCP server: open a demo case, build or change a model, add certificates and witnesses, run the analysis and explain the verdicts. Every change it makes is checked, as in the windows here.'),
+    h('span', { class: 'section-title' }, '1 · Register the server, once'),
+    h('p', { class: 'hint' }, 'You never start the server yourself: the assistant starts it when it needs it and stops it when it is done. It runs mcp.sh from this repository, with the repository\'s Python environment.'),
+    h('b', {}, 'Claude Code'), code(claudeCode),
+    h('p', { class: 'hint' }, 'Inside this repository Claude Code finds it by itself (.mcp.json). claude mcp list says whether it connects.'),
+    h('b', {}, 'Claude Desktop'),
+    h('p', { class: 'hint' }, 'Settings → Developer → Edit Config, add this to claude_desktop_config.json, and restart Claude Desktop:'), code(desktop),
+    h('span', { class: 'section-title' }, '2 · Ask it'), code(ask),
+    h('span', { class: 'section-title' }, '3 · Take turns on one model'),
+    h('p', { class: 'hint' }, 'The assistant works on a model of its own, saved after every change. Open it here to see what the assistant did; send yours to hand it over. When the assistant changes it, the reasoner tells you the next time you come back to this window.'),
+    h('p', {}, h('b', {}, 'The assistant\'s model: '), status)),
+  { size: 'lg', actions: [
+    button('Open the assistant\'s model', () => { d.close(); openWorkspace(); }, { disabled: !meta.exists }),
+    button('Send this model to the assistant…', () => { d.close(); saveWorkspace(); }),
+    h('span', { class: 'spacer' })] });
 }
 
 // ---------------------------------------------------------------- help
@@ -198,6 +235,7 @@ function helpDialog() {
       step('2', 'Evidence', 'Drop logs (a recogniser turns their lines into witnesses) and certificates, or write either by hand with New witness… and New certificate…. The register says which are in force, rejected or stale, and why.'),
       step('3', 'Analysis', 'Run analysis: every firing choice of the rows that matter goes through TLA+/TLC, then clingo keeps the candidates the evidence allows.'),
       step('4', 'Verdicts', 'Each observation point and failure gets guarantee, hope, exposed, unchecked, not exercised or conflict, with the reasons, a reaching run, and which guard to certify next.')),
+    h('p', {}, 'The strip under the top bar shows the four steps and where each stands; 3 Analysis is how the verdicts are computed, 4 Verdicts is the answer. Assistant → Connect an assistant… lets Claude Code or Claude Desktop work on a model with you.'),
     h('span', { class: 'section-title' }, 'Shortcuts'),
     h('dl', { class: 'kv' },
       h('dt', {}, 'Double-click'), h('dd', {}, 'edit what you clicked'),
@@ -216,7 +254,7 @@ async function main() {
     analysis: new AnalysisView($('view-analysis')),
     verdicts: new VerdictsView($('view-verdicts')),
   };
-  document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+  new FlowBar($('flow'));
   on('show', (v) => show(v));
   on('run', () => views.analysis.run());
   on('report', () => {
@@ -233,11 +271,14 @@ async function main() {
     { label: 'Export the model as YAML', onClick: exportYaml },
     'sep',
     { label: 'Bootstrap from traces…', hint: 'spans and an MCP tools list', onClick: bootstrapDialog },
+  ], { title: 'new, import, export, bootstrap' });
+  const assistantMenu = dropdown('Assistant', [
+    { label: 'Connect an assistant…', hint: 'use the reasoner from Claude Code or Claude Desktop (MCP)', onClick: connectDialog },
     'sep',
-    { label: 'Open the shared workspace', hint: 'what an assistant built through the MCP server', onClick: openWorkspace },
-    { label: 'Save to the shared workspace…', hint: 'hand this model to an assistant', onClick: saveWorkspace },
-  ], { title: 'new, import, export, bootstrap, shared workspace' });
-  $('actions').prepend(fileMenu, button('Help', helpDialog, { title: 'how the reasoner works, and its shortcuts' }));
+    { label: 'Open the assistant\'s model', hint: 'see what the assistant did; replaces the model here', onClick: openWorkspace },
+    { label: 'Send this model to the assistant…', hint: 'the assistant works on it next; replaces its model', onClick: saveWorkspace },
+  ], { title: 'work on a model together with an assistant (MCP)' });
+  $('actions').prepend(fileMenu, assistantMenu, button('Help', helpDialog, { title: 'how the reasoner works, and its shortcuts' }));
   const cases = await loadCases();
   const params = new URLSearchParams(location.search);
   restore();

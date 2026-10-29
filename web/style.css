@@ -25,14 +25,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .spacer { flex: 1 1 0; }
 
 /* top bar */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+.topbar { display: grid; grid-template-columns: auto auto 1fr auto; grid-template-areas: "brand case . actions" "flow flow flow flow"; align-items: center; column-gap: 14px; row-gap: 8px; padding: 10px 18px 8px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+.topbar > .brand { grid-area: brand; }
+.topbar > .case-select { grid-area: case; }
+.topbar > .actions { grid-area: actions; }
+/* the workflow strip (flow.js): four steps with where each stands, arrows between them */
+.flow { grid-area: flow; display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; align-items: center; gap: 6px; }
+.step { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 5px 12px 5px 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); text-align: left; cursor: pointer; }
+.step:hover { border-color: var(--line2); background: var(--panel); }
+.step.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.step-n { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 12px; font-weight: 600; border: 1.5px solid var(--line2); background: var(--panel); color: var(--ink); }
+.step.active .step-n { border-color: #fff; }
+.step-t { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.step-name { font-weight: 600; font-size: 13px; }
+.step-s { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step-s.ok { color: var(--g-ink); }
+.step-s.warn { color: var(--e-ink); }
+.step-s.busy { color: var(--h-ink); }
+.step.active .step-s { color: rgba(255, 255, 255, .8); }
+.step-arrow { color: var(--muted); font-size: 15px; }
+.step .dot { flex: none; margin-left: auto; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand-name { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
 .brand-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .case-select select { height: 36px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg); }
-.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.tab { padding: 8px 14px; border-radius: 8px; border: 0; background: transparent; font-weight: 500; cursor: pointer; }
-.tab.active { background: var(--ink); color: #fff; }
 .tab .dot { display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-left: 6px; background: var(--h-ink); vertical-align: middle; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn { height: 36px; padding: 0 12px; background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; cursor: pointer; white-space: nowrap; }
@@ -247,6 +263,12 @@ pre.code { margin: 0; padding: 12px; background: #17191D; color: #E4E6EA; border
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 60; max-width: 90vw; }
 @media (max-width: 1640px) { .brand-sub { display: none; } }
 @media (max-width: 1240px) { .brand-name { max-width: 9em; font-size: 14px; line-height: 1.15; } }
+@media (max-width: 1000px) { .step-s { display: none; } }
+@media (max-width: 760px) {
+  .topbar { grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "case case" "flow flow"; }
+  .flow { grid-template-columns: repeat(4, 1fr); }
+  .step-arrow { display: none; }
+}
 @media (max-width: 900px) {
   body { height: auto; overflow: auto; }
   main, .view.active { overflow: visible; }
@@ -404,7 +426,7 @@ input.num { width: 76px; }
 .menu-btn { display: inline-flex; align-items: center; gap: 6px; }
 .btn.small.menu-btn, .canvas-bar .menu-btn { height: 30px; font-size: 13px; padding: 0 10px; }
 .caret { font-size: 10px; color: var(--muted); }
-.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 250px; background: #fff; border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.14); padding: 6px; z-index: 40; display: flex; flex-direction: column; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 300px; background: #fff; border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.14); padding: 6px; z-index: 40; display: flex; flex-direction: column; }
 .menu button { display: grid; grid-template-columns: 18px 1fr; gap: 2px 6px; align-items: baseline; text-align: left; padding: 7px 10px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .menu button:hover, .menu button:focus { background: var(--soft); outline: none; }
 .menu-check { color: var(--g-ink); font-weight: 700; }
@@ -477,3 +499,7 @@ table.mt .sent { line-height: 1.5; }
 .rowchip:hover { border-color: var(--ext); color: var(--ext-ink); }
 table.mt { min-width: 0; table-layout: auto; }
 table.mt th:nth-child(1) { width: 20%; } table.mt th:nth-child(2) { width: auto; } table.mt th:nth-child(3) { width: 130px; } table.mt th:nth-child(4) { width: 140px; }
+
+/* the Connect an assistant window: commands to copy */
+.copyrow { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 8px; }
+.copyrow pre.code { flex: 1 1 auto; min-width: 0; margin: 0; white-space: pre-wrap; word-break: break-all; }

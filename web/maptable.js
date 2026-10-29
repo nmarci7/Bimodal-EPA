@@ -8,14 +8,15 @@
 //   * the rows the engine adds, folded away until asked for:
 //       pass-through - every failure a message brings goes on where the component forwards it
 //         (assumption A6, pessimistic), except what the analyst declares absorbed, with a reason,
-//       for an LLM component, the worst-case defaults (Definition: LLM default table), which a row
-//         can refine and a reason can drop,
+//       for an LLM component (for every component when the model says worst_case_defaults: all),
+//         the worst-case defaults (Definition: LLM default table), which a row can refine and a
+//         reason can drop,
 //       the declared absorptions, each with its reason (a claim an auditor can dispute),
 //   * for a guardrail, its fixed catching behaviour, one leak row per target and, if learned, its
 //     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
 import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc } from './state.js';
-import { rowSentence, rowKind, KINDS, llmDefaultStatus } from './rows.js';
+import { rowSentence, rowKind, KINDS, defaultStatus, hasDefaults } from './rows.js';
 import { openRowDialog, deleteRow } from './rowdialog.js';
 import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
 import { button } from './dialog.js';
@@ -119,10 +120,10 @@ export class MapTable {
           h('td', { class: 'acts' }, h('button', { class: 'linkish small', onclick: () => openAbsorbDialog(c.id, p) }, absorbed.size ? 'Absorbed…' : 'Absorb…'))));
       }
     }
-    if (llm) {
+    if (hasDefaults(S.doc, c)) {
       for (const q of c.out) {
         for (const m of tops) {
-          const st = llmDefaultStatus(c, q, m);
+          const st = defaultStatus(c, q, m);
           n++;
           const hl = port && ((port.side === 'out' && port.name === q) || port.side === 'in') ? ' hl' : '';
           gen.body.appendChild(h('tr', { class: `gen ${st.status}${hl}` },
@@ -130,7 +131,7 @@ export class MapTable {
             h('td', { class: 'small' }, h('span', { class: 'tag llm' }, 'worst case'), ' ', `On any message, ${c.id} sends ${m} at 10 on ${q}.`,
               st.status === 'active' && st.beside.length ? h('div', { class: 'muted' }, `${st.beside.join(', ')} emit on ${q} beside it.`) : null,
               st.status === 'dropped' ? h('div', { class: 'muted' }, `Dropped: ${st.drop.reason || 'no reason given yet'}`) : null),
-            h('td', { class: 'small' }, st.status === 'refined' ? h('span', { class: 'muted' }, `replaced by ${st.refinedBy.join(', ')}`) : st.status === 'dropped' ? h('span', { class: 'muted' }, 'dropped') : 'open: S | A'),
+            h('td', { class: 'small' }, st.status === 'refined' ? h('span', { class: 'muted' }, `replaced by ${st.refinedBy.join(', ')}`) : st.status === 'dropped' ? h('span', { class: 'muted' }, 'dropped') : llm ? 'open: S | A' : 'open: N | S | A'),
             h('td', { class: 'acts' },
               st.status === 'active' ? [h('button', { class: 'linkish small', onclick: () => openRowDialog(c.id, null, { preset: refinePreset(c.id, q, m), startAt: 'effect' }) }, 'Refine…'),
                 h('button', { class: 'linkish small', onclick: () => openDropDefaultDialog(c.id, q, m) }, 'Drop…')] : null,
@@ -153,7 +154,9 @@ export class MapTable {
     const open = this.showGen[key] !== undefined ? this.showGen[key] : false;
     const det = h('details', { class: 'gen-fold', open: open || undefined },
       h('summary', {}, h('span', { class: 'section-title' }, `Rows the engine adds (${n})`), ' ',
-        h('span', { class: 'small muted' }, llm ? 'the worst-case defaults of an LLM: refine or drop them here' : 'pass-through for every input, and what you declared absorbed')),
+        h('span', { class: 'small muted' }, llm ? 'the worst-case defaults of an LLM: refine or drop them here'
+          : hasDefaults(S.doc, c) ? 'pass-through for every input, what you declared absorbed, and the worst-case defaults: refine or drop them here'
+            : 'pass-through for every input, and what you declared absorbed')),
       gen.t);
     det.addEventListener('toggle', () => { this.showGen[key] = det.open; });
     return det;

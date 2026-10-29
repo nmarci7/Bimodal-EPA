@@ -31,7 +31,7 @@ function certRows(cid) {
 function rowWords(r, c) {
   if (r.kind === 'leak') return `the guard lets ${r.id.split('.').slice(2).join('.')} through (its leak row)`;
   if (r.kind === 'fp') return 'the guard refuses a harmless message (false positive)';
-  if (r.kind === 'default') { const [, , q, m] = r.id.split('.'); return `on any message the LLM sends ${m} at 10 on ${q} (worst-case default)`; }
+  if (r.kind === 'default') { const [, cid, q, m] = r.id.split('.'); return `on any message ${cid} sends ${m} at 10 on ${q} (worst-case default)`; }
   const own = c && (c.rows || []).find((x) => x.id === r.id);
   return own ? rowSentence(own, c) : r.id;
 }

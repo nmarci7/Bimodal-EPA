@@ -51,8 +51,18 @@ where you were. To keep a model, export it (**File → Export the model as YAML*
 
 ![The model view: outline or palette on the left, the canvas with the selected component's rows below it, the inspector on the right](images/model-view.jpg)
 
-* **Top bar**: the demo case picker, the four steps (**1 Model**, **2 Evidence**, **3 Analysis**,
-  **4 Verdicts**), the **File** menu (new, import, export, bootstrap), **Help**, and **Run analysis**.
+* **Top bar**: the demo case picker, the **File** menu (new, import, export, bootstrap), the
+  **Assistant** menu (section 8), **Help**, and **Run analysis**.
+* **Flow strip** under it: the four steps of the work, each with where it stands. Click a step to go
+  there; hover over it to read what it is for.
+
+  | step | what it is for | what its line says |
+  |---|---|---|
+  | **1 Model** | draw the system | how many components, *well-formed* or how many problems |
+  | **2 Evidence** | what you know: certificates, witnesses, decisions | how many certificates and witnesses |
+  | **3 Analysis** | *how* the verdicts are computed: watch the engine run | *not run yet*, *running…*, *done in 0.5 s*, or *out of date: run again* after you change the model or the evidence |
+  | **4 Verdicts** | *the answer*: per log point and failure, what is possible, why, what to do | the verdict counts, marked *old* when out of date |
+
   A dot on *4 Verdicts* means there are new verdicts you have not looked at.
 * **Scenario bar** (only for a demo case): the stages of the case's story. Clicking a stage loads
   the model and the evidence as they were at that point; *Run this stage* runs the analysis.
@@ -81,7 +91,9 @@ where you were. To keep a model, export it (**File → Export the model as YAML*
 
 * **Open a demo case** from the case picker: a smart-home hub, a delegated wallet agent and an MCP
   coding agent, each with its architecture figure (**Case figure**), mock logs and certificates.
-* **File → New model…** starts a blank canvas (export the current model first if you want it).
+* **File → New model…** starts a blank canvas (export the current model first if you want it). A new
+  model starts with the standard failure modes and with worst-case defaults for every component
+  (3.5), so a component you have not modelled yet is never a guarantee.
 * **File → Import a model…** reads a YAML or JSON model (the format of `cases/*/model.yaml`).
 * **File → Bootstrap from traces…** drafts a model from OpenTelemetry-style spans and an MCP
   `tools/list`; an answers file fills in what traces cannot know (which checks are guards, what each
@@ -113,7 +125,7 @@ system input) to an input (or a system output).
 * **What it absorbs** (not for an LLM): tick a failure at an input to say it stops there, and give
   the reason. Every failure passes through unless you say otherwise; an absorption is a claim, and
   its reason is printed wherever a verdict rests on it.
-* **LLM defaults** (only for an LLM): see 3.5.
+* **Worst-case defaults** (for an LLM, and for every component when the model has them on): see 3.5.
 
 ### 3.3 Rows: what a component does with failures
 
@@ -164,13 +176,44 @@ For a guard the table shows its fixed behaviour (what catching does), one **leak
 ("the target gets through", whose activation is the guard's quality) and, for a learned guard, a
 **false-positive row**.
 
-### 3.5 LLM defaults
+### 3.5 Worst-case defaults and the standard failure modes
 
-An LLM component starts with the worst case: on any message it may send any failure at magnitude
-10 on every output. You refine this with rows (3.3): a row with the same trigger (any input, any
-message) that sends the same failure on the same port replaces the default; any other row is added
-beside it. In **Edit… → LLM defaults** you see every default with its state (standing, replaced by
-your row, dropped) and can drop one with a reason.
+A component starts with the worst case: on any message it may send any failure at magnitude 10 on
+every output. These *worst-case defaults* are rows the engine adds, left open, so the evidence decides
+how often they fire. Every LLM component has them. In a new model every other component has them
+too (the model setting **Worst-case defaults for every component**, in **Edit…** with nothing
+selected), in the style of FPTC: an analyst who models nothing earns no guarantee. Models made
+before this setting, like the demo cases, keep them on LLM components only.
+
+What earns a guarantee for a component:
+
+* **a certificate** that a default never fires (`rows: {"<port>.<mode>": never}`), for example from a
+  test suite or a review. This is not possible for an LLM: the LLM rule says an LLM row is never
+  "never";
+* **a row of yours** with the same trigger (any input, any message) that sends the same failure on
+  the same port at a lower magnitude: it replaces the default, and the change is recorded as a
+  calibration. Any other row is added beside the default;
+* **dropping the default** with a structural reason, printed wherever a verdict rests on it.
+
+**Edit… → Worst-case defaults** on a component lists every default with its state (standing, replaced
+by your row, dropped). The rows table shows them under *Rows the engine adds*, with **Refine…** and
+**Drop…**.
+
+A new model starts with the failure classes of FPTC (Wallace, 2005), taken from the HAZOP/SHARD
+guide words. They match the service, timing and value error families of the AADL error library
+(SAE AS5506):
+
+| mode | the failure | family |
+|---|---|---|
+| **omission** | an expected message is not delivered | service |
+| **commission** | a message is delivered that should not have been | service |
+| **early** | a message arrives before it should | timing |
+| **late** | a message arrives after it should | timing |
+| **value** | a message arrives with the wrong content; sub-kinds **coarse** (detectable from the data, e.g. out of range or malformed) and **subtle** (plausible but wrong), after Bondavalli and Simoncini | value |
+
+A guard that catches *value* catches both sub-kinds. A schema check usually catches *value.coarse*
+decidably, while *value.subtle* needs a learned check. Add your own modes, or sub-kinds such as
+`oom` (an off-mandate payment), in **Edit… → Failure modes**.
 
 ### 3.6 Guards
 
@@ -334,7 +377,10 @@ it happens:
 * **Output**: the verdicts and the ranking of what to certify next.
 
 The **coordinator log** lists every step. Under *Cones and TLC runs*, **Generated TLA+** shows the
-module TLC checked and **ASP for …** the clingo program of a cell.
+module TLC checked and **ASP for …** the clingo program of a cell. When the run is done, **See the
+verdicts →** takes you to the answer. If you change the model or the evidence afterwards, the flow
+strip, this page and the verdicts say *out of date* until you run it again. Moving things on the canvas
+does not count.
 
 ## 6. Reading the verdicts
 
@@ -389,10 +435,24 @@ and witnesses, run the analysis and explain the verdicts. You can ask it, for ex
   verdicts change.*
 * *Which certificate should the team sign next, and what would it change?*
 
-### 8.1 Connecting an assistant
+Everything for this is in the **Assistant** menu of the top bar:
 
-Run `./run.sh` once first: it makes the `.venv` the server runs in. The server itself is `mcp.sh` in
-the repository; the client starts it, you never start it by hand.
+| menu item | what it does |
+|---|---|
+| **Connect an assistant…** | shows how to register the reasoner with Claude Code or Claude Desktop, with the exact command for this computer and a Copy button, and the state of the assistant's model |
+| **Open the assistant's model** | loads the model the assistant last saved, with its evidence, so you see what it built or changed. It replaces the model on your screen (export yours first if you want to keep it) |
+| **Send this model to the assistant…** | hands the model on your screen, with its evidence, to the assistant; it works on it from its next request. It replaces the assistant's model, and asks first |
+
+### 8.1 How do I start the MCP server?
+
+You don't. An MCP server is not something you leave running: the assistant starts it when it needs it
+(it runs `mcp.sh` in the repository) and stops it when it is done. You only **register** it once, and
+**Assistant → Connect an assistant…** shows the command, already filled in with this repository's
+path:
+
+![The Connect an assistant window: the command for Claude Code, the configuration for Claude Desktop, an example request, and the assistant's model](images/connect-assistant.jpg)
+
+Run `./run.sh` once first: it makes the `.venv` the server runs in.
 
 * **Claude Code, in this repository.** `.mcp.json` already registers the server as `bimodal-reasoner`.
   Start `claude` in the repository folder and approve the server when asked; `/mcp` shows it and its
@@ -419,19 +479,19 @@ the repository; the client starts it, you never start it by hand.
 * **Any other client**: a stdio server whose command is the absolute path of `mcp.sh`
   (`./mcp.sh --workspace FILE --work DIR` chooses other files than the defaults).
 
-### 8.2 Taking turns: the shared workspace
+### 8.2 Taking turns: the assistant's model
 
-The assistant works on the **shared workspace**, one model with its evidence in
-`.epa-work/workspace.json`, saved after every change. The reasoner in the browser can open it and
-write to it, so you and the assistant can take turns on one model:
+The assistant works on one model of its own, with its evidence, saved after every change (in
+`.epa-work/workspace.json`, the *shared workspace*). The reasoner can open it and write to it, so you
+and the assistant can take turns on one model:
 
 | you want to | do |
 |---|---|
-| see what the assistant built or changed | **File → Open the shared workspace** |
-| hand your model to the assistant | **File → Save to the shared workspace…** (it asks before replacing what is there) |
+| see what the assistant built or changed | **Assistant → Open the assistant's model** |
+| hand your model to the assistant | **Assistant → Send this model to the assistant…** (it asks before replacing what is there) |
 | know when the assistant changed it | the reasoner tells you when you come back to its window |
 
-![A model the assistant built, opened in the reasoner from the shared workspace](images/shared-workspace.jpg)
+![A model the assistant built, opened in the reasoner](images/shared-workspace.jpg)
 
 Both sides must use the same work folder: start the reasoner (`./run.sh`) from the same repository
 the client runs `mcp.sh` from, or point both at one file (`EPA_WORKSPACE` for the reasoner,
@@ -442,7 +502,7 @@ the client runs `mcp.sh` from, or point both at one file (`EPA_WORKSPACE` for th
 | group | what it does |
 |---|---|
 | workspace and models | see what is open; list and open the demo cases at a stage; start, import or export a model; read it as a summary, YAML or JSON; run the model check; list the rows, including the ones the engine adds |
-| model edits | add, change or remove components, edges, rows, absorptions, LLM defaults, guards, observation points, use cases, claims and the model's settings |
+| model edits | add, change or remove components, edges, rows, absorptions, worst-case defaults, guards, observation points, use cases, claims and the model's settings (including the failure modes and whether every component gets worst-case defaults) |
 | evidence | list the register; add a certificate, a witness written by hand, or a log read with the recognisers; add a recogniser; set the deployment manifest; withdraw a certificate; reject a witness (with a second reviewer) |
 | analysis | run it; read one cell's verdict in full; explain a cell with a run that reaches it and the candidates; export the Markdown report or the CRA JSON |
 
@@ -478,7 +538,7 @@ needs Node) shows every tool and lets you call them by hand.
 | a window will not save | the step names on the left show what is missing; the list above the buttons says what |
 | the badge shows problems | select nothing to see the list in the inspector; the outline marks empty guards |
 | the assistant does not list the `bimodal-reasoner` tools | run `./run.sh` once (the server needs `.venv`); `claude mcp list` says why it does not start; Claude Desktop needs the absolute path of `mcp.sh` and a restart |
-| the reasoner does not show what the assistant did | **File → Open the shared workspace**; if it is empty, the reasoner and the server use different work folders (section 8.2) |
+| the reasoner does not show what the assistant did | **Assistant → Open the assistant's model**; if it says the assistant has no model, the reasoner and the server use different work folders (section 8.2) |
 
 ## 10. Words
 

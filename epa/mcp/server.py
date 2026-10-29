@@ -544,7 +544,7 @@ def build_server(bench=None):
     from mcp.types import ToolAnnotations
 
     b = bench or Workbench()
-    srv = MCPServer(name="bimodal-reasoner", title="Bimodal Agentic System Reasoner", version="2.0", instructions=INSTRUCTIONS)
+    srv = MCPServer(name=W.SERVER_NAME, title=W.TITLE, version="2.0", instructions=INSTRUCTIONS)
     read = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     write = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
     gone = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
@@ -602,7 +602,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=read)
     def list_rows(component: str | None = None) -> dict[str, Any]:
-        """The rows the analyst wrote (as in the document), by component, and the rows the engine adds (pass-through, LLM defaults, guard leak and false-positive rows)."""
+        """The rows the analyst wrote (as in the document), by component, and the rows the engine adds (pass-through, worst-case defaults, guard leak and false-positive rows)."""
         return wrap(lambda: b.list_rows(component))
 
     # ---- edits: each is checked; one that would add problems is not saved unless force=true
@@ -648,12 +648,12 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def drop_default(component: str, port: str, mode: str, reason: str, force: bool = False) -> dict[str, Any]:
-        """Drop a worst-case default of an LLM component (on any message, mode at 10 on port), with the structural reason."""
+        """Drop a worst-case default of a component (on any message, mode at 10 on port), with the structural reason. LLM components always have them; every component does when worst_case_defaults is all (a new model)."""
         return wrap(lambda: b.drop_default(component, port, mode, reason, force))
 
     @srv.tool(annotations=write)
     def restore_default(component: str, port: str, mode: str, force: bool = False) -> dict[str, Any]:
-        """Bring back a dropped worst-case default of an LLM component."""
+        """Bring back a dropped worst-case default of a component."""
         return wrap(lambda: b.restore_default(component, port, mode, force))
 
     @srv.tool(annotations=write)
@@ -704,10 +704,12 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def set_model_settings(name: str | None = None, description: str | None = None, modes: list[Any] | None = None,
-                           confidentiality: list[str] | None = None, authority: list[str] | None = None, force: bool = False) -> dict[str, Any]:
-        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}) or the confidentiality and authority levels (low to high)."""
+                           confidentiality: list[str] | None = None, authority: list[str] | None = None,
+                           worst_case_defaults: str | None = None, force: bool = False) -> dict[str, Any]:
+        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}), the confidentiality and authority levels (low to high), or worst_case_defaults: "all" (every component starts with an open worst-case row per output and failure mode, FPTC style; a new model's setting) or "llm" (only LLM components)."""
         return wrap(lambda: b.set_model_settings(force=force, name=name, description=description, modes=modes,
-                                                 confidentiality=confidentiality, authority=authority))
+                                                 confidentiality=confidentiality, authority=authority,
+                                                 worst_case_defaults=worst_case_defaults))
 
     # ---- evidence
     @srv.tool(annotations=read)

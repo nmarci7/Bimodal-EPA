@@ -13,7 +13,7 @@ import {
   openComponentDialog, openGuardDialog, openObsDialog, openEdgeDialog, openSysDialog, openUseCaseDialog, deleteUseCase,
   openClaimDialog, deleteClaim, openModelDialog, openAbsorbDialog, catchSentence,
 } from './modeldialogs.js';
-import { llmDefaultStatus } from './rows.js';
+import { defaultStatus, hasDefaults } from './rows.js';
 
 export class Inspector {
   constructor(host) {
@@ -73,7 +73,8 @@ export class Inspector {
     add(this.host, 
       this.head(d.name || 'model', 'model', '', () => openModelDialog(), false),
       d.description ? h('p', { class: 'desc' }, d.description) : null,
-      this.kv([['Failure modes', modesText], ['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')]]),
+      this.kv([['Failure modes', modesText], ['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')],
+        ['Worst-case defaults', d.worst_case_defaults === 'all' ? 'every component (FPTC)' : 'LLM components only']]),
       this.useCases(), this.claims(),
       h('p', { class: 'hint' }, 'Select something on the canvas to see it here; double-click it to edit it. The outline on the left lists everything in the model.'));
   }
@@ -126,11 +127,14 @@ export class Inspector {
     // rows
     const rows = c.rows || [];
     const tops = topModes(d);
-    const gen = llm ? c.out.length * tops.length : (c.in.length && c.out.length ? c.in.length : 0) + (c.absorbs || []).length;
+    const hasDef = hasDefaults(d, c);
+    const gen = (hasDef ? c.out.length * tops.length : 0) + (llm ? 0 : (c.in.length && c.out.length ? c.in.length : 0) + (c.absorbs || []).length);
     const rbox = h('div', { class: 'block' }, this.section(`Rows (${rows.length} yours, ${gen} the engine adds)`,
       button('Add row…', () => openRowDialog(c.id, null), { small: true, disabled: !(c.in.length || c.out.length) }),
       button('Table', () => emit('maptable:show'), { small: true, title: 'show the mapping table under the canvas' })));
-    if (!rows.length) rbox.appendChild(h('p', { class: 'hint' }, llm ? 'No rows of your own: the LLM\'s worst-case defaults stand until you refine them.' : 'No rows of your own: failures pass through, nothing is started here.'));
+    if (!rows.length) rbox.appendChild(h('p', { class: 'hint' }, llm ? 'No rows of your own: the LLM\'s worst-case defaults stand until you refine them.'
+      : hasDef ? 'No rows of your own: failures pass through, and the worst-case defaults stand until evidence or a row of yours says otherwise.'
+        : 'No rows of your own: failures pass through, nothing is started here.'));
     else rbox.appendChild(h('div', { class: 'chips' }, rows.map((r) => h('button', { class: 'rowchip', title: rowSentence(r, c), onclick: () => openRowDialog(c.id, r.id) }, r.id))));
     if (rows.length) rbox.appendChild(h('p', { class: 'hint' }, 'Click a row to edit it. The table under the canvas says what each one does.'));
     add(this.host, rbox);
@@ -150,7 +154,7 @@ export class Inspector {
     if (!c.in.length && !c.out.length) pbox.appendChild(h('p', { class: 'hint' }, 'No ports yet: drag from the + handle to wire the component.'));
     add(this.host, pbox);
 
-    // what it absorbs, or the LLM defaults
+    // what it absorbs, and the worst-case defaults
     if (!llm) {
       const ab = c.absorbs || [];
       const abox = h('div', { class: 'block' }, this.section('What it absorbs', button('Edit…', () => openComponentDialog(c.id, { startAt: 'absorbs' }), { small: true })));
@@ -161,11 +165,12 @@ export class Inspector {
           h('span', { class: `small ${a.reason ? 'muted' : 'warn'}` }, a.reason || 'no reason given yet')));
       }
       add(this.host, abox);
-    } else {
-      const st = c.out.flatMap((q) => tops.map((m) => llmDefaultStatus(c, q, m)));
+    }
+    if (hasDef) {
+      const st = c.out.flatMap((q) => tops.map((m) => defaultStatus(c, q, m)));
       const n = (s) => st.filter((x) => x.status === s).length;
       add(this.host, h('div', { class: 'block' }, this.section('Worst-case defaults', button('Review…', () => openComponentDialog(c.id, { startAt: 'defaults' }), { small: true })),
-        h('p', { class: 'hint' }, `${n('active')} standing, ${n('refined')} refined by your rows, ${n('dropped')} dropped with a reason. Each output starts with one per failure mode: any message in, that failure at 10 out.`)));
+        h('p', { class: 'hint' }, `${n('active')} standing, ${n('refined')} refined by your rows, ${n('dropped')} dropped with a reason. Each output starts with one per failure mode: any message in, that failure at 10 out.${llm ? '' : ' A certificate may say one never fires.'}`)));
     }
   }
 

@@ -265,6 +265,9 @@ def validate(doc) -> list:
         return p
     top, parent = _mode_list(doc)
     fields = set(top) | set(parent)
+    if doc.get("worst_case_defaults", "llm") not in defaults.WORST_CASE:
+        p.append(f"worst_case_defaults must be one of {', '.join(defaults.WORST_CASE)}, "
+                 f"not {doc.get('worst_case_defaults')!r}")
     lat = doc.get("lattices", {})
     conf = lat.get("confidentiality", DEFAULT_CONF)
     auth = lat.get("authority", DEFAULT_AUTH)
@@ -610,7 +613,7 @@ def normalise(doc) -> Model:
         for a in c.absorbs:
             m.decisions.append({"kind": "absorb", "component": c.id, "port": a["port"], "modes": a["modes"],
                                 "reason": a["reason"]})
-    defaults.add_llm_defaults(m)
+    defaults.add_worst_case_defaults(m)
     defaults.add_guard_rows(m)
     _mark_cycles(m)
     return m

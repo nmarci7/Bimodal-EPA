@@ -12,12 +12,7 @@
 <header class="topbar">
   <div class="brand"><span class="brand-name">Bimodal Agentic System Reasoner</span><span class="brand-sub">engine v2 · TLA+ runs · ASP candidates</span></div>
   <label class="case-select"><span class="sr">Demo case</span><select id="case-select"><option value="">Open a demo case…</option></select></label>
-  <nav class="tabs" aria-label="Workflow">
-    <button data-view="model" class="tab active">1 Model</button>
-    <button data-view="evidence" class="tab">2 Evidence</button>
-    <button data-view="analysis" class="tab">3 Analysis</button>
-    <button data-view="verdicts" class="tab">4 Verdicts</button>
-  </nav>
+  <nav class="flow" id="flow" aria-label="Workflow: model, evidence, analysis, verdicts"></nav>
   <div class="spacer"></div>
   <div class="actions" id="actions">
     <button id="btn-run" class="btn primary">Run analysis</button>

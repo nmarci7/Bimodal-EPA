@@ -1,6 +1,7 @@
 // View 3: the run. The coordinator's events arrive as they happen: cones, TLC calls, ASP decisions.
 import { h, clear, api, modal, toast } from './lib.js';
-import { S, on, emit, persist } from './state.js';
+import { S, on, emit, persist, analysisBasis } from './state.js';
+import { analysisCurrent } from './flow.js';
 
 const STAGES = [
   { id: 'input', k: 'Input', title: 'Model and evidence', cls: '', steps: ['model', 'evidence'] },
@@ -24,7 +25,9 @@ export class AnalysisView {
     if (!S.doc) return;
     if (S.check && !S.check.ok) { toast('The model is not well-formed yet; see the problems in the inspector.'); emit('show', 'model'); return; }
     this.events = []; this.status = 'running'; this.error = null;
+    const basis = analysisBasis();
     S.analysis = { id: null, status: 'running', report: null };
+    emit('analysis');
     emit('show', 'analysis');
     this.render();
     let id;
@@ -38,7 +41,7 @@ export class AnalysisView {
       es.close();
       const end = JSON.parse(m.data);
       const full = await api(`/api/analyses/${id}`);
-      S.analysis = { id, status: full.status, report: full.report, error: full.error };
+      S.analysis = { id, status: full.status, report: full.report, error: full.error, basis };
       this.status = full.status; this.error = full.error;
       persist();
       this.render();
@@ -103,11 +106,15 @@ export class AnalysisView {
     const rep = S.analysis && S.analysis.report;
     if (!this.events.length && rep) this.events = rep.log || [];
     if (!this.status && S.analysis) this.status = S.analysis.status;
+    const done = rep && this.status !== 'running';
     p.appendChild(h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Analysis'),
+      h('div', { class: 'panel-head' }, h('h2', {}, 'Analysis: how the verdicts are computed'),
         h('span', { class: 'muted' }, this.status === 'running' ? 'running…' : rep ? `last run: ${rep.seconds} s, ${rep.tlc_calls.length} TLC call(s), ${rep.cells.length} cells` : 'not run yet')),
-      h('p', { class: 'hint' }, 'For every observation point and failure the engine takes the rows that can matter (the cone), lets TLC run every firing choice of those rows for every use case, and hands the runs to clingo. Candidates are assignments of never, sometimes or always to the open rows; certificates and witnesses strike the ones they contradict; the statuses the remaining candidates give the failure are the verdict.'),
-      h('div', {}, h('button', { class: 'btn primary', disabled: this.status === 'running' ? true : undefined, onclick: () => this.run() }, this.status === 'running' ? 'Running…' : rep ? 'Run again' : 'Run analysis'))));
+      h('p', { class: 'hint' }, 'This page shows the engine at work; the answer itself is on 4 Verdicts. For every observation point and failure the engine takes the rows that can matter (the cone), lets TLC run every firing choice of those rows for every use case, and hands the runs to clingo. Candidates are assignments of never, sometimes or always to the open rows; certificates and witnesses strike the ones they contradict; the statuses the remaining candidates give the failure are the verdict.'),
+      done && !analysisCurrent() ? h('div', { class: 'problems' }, 'The model or the evidence changed after this run: the verdicts are out of date until you run it again.') : null,
+      h('div', { class: 'inline' },
+        h('button', { class: `btn${done && analysisCurrent() ? '' : ' primary'}`, disabled: this.status === 'running' ? true : undefined, onclick: () => this.run() }, this.status === 'running' ? 'Running…' : rep ? 'Run again' : 'Run analysis'),
+        done ? h('button', { class: `btn${analysisCurrent() ? ' primary' : ''}`, onclick: () => emit('show', 'verdicts') }, 'See the verdicts →') : null)));
     this.pipe = h('div', { class: 'pipeline' });
     p.appendChild(this.pipe);
     this.drawPipeline();

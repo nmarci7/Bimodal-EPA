@@ -320,15 +320,18 @@ def do_bootstrap(body: Boot):
 # save its own model there for an assistant to work on (epa/workspace.py).
 @app.get("/api/workspace/meta")
 def workspace_meta():
-    return {**WS.meta(WORKSPACE), "path": WORKSPACE}
+    """When and by whom the workspace was last written, where it is, and how an MCP client starts the
+    server (the reasoner's "Connect an assistant" window shows the command)."""
+    return {**WS.meta(WORKSPACE), "path": WORKSPACE,
+            "mcp": {"name": WS.SERVER_NAME, "command": os.path.join(ROOT, "mcp.sh")}}
 
 
 @app.get("/api/workspace")
 def workspace_get():
     ws = WS.load(WORKSPACE)
     if not ws["doc"]:
-        raise HTTPException(404, "the shared workspace is empty: an MCP client fills it (python -m epa mcp), "
-                                 "or save a model there from the reasoner")
+        raise HTTPException(404, "the assistant has no model yet: ask it to open a case or build one, or send "
+                                 "yours with Assistant → Send this model to the assistant")
     return {k: ws[k] for k in ("doc", "evidence", "case", "stage", "updated", "by")}
 
 

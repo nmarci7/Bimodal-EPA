@@ -6,7 +6,7 @@ import { h, toast } from './lib.js';
 import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText } from './state.js';
 import { wizard, field, textInput, numberInput, selectInput, checkInput, button, confirmDialog, openDialog } from './dialog.js';
 import { openRowDialog } from './rowdialog.js';
-import { llmDefaultStatus } from './rows.js';
+import { defaultStatus, hasDefaults } from './rows.js';
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const KINDS = [['llm', 'LLM (discretionary)'], ['deterministic', 'deterministic'], ['tool', 'tool / API'], ['store', 'store / memory'], ['external', 'external system'], ['user', 'user']];
@@ -34,7 +34,7 @@ export function openComponentDialog(cid, { startAt } = {}) {
 
   const props = (ctx) => h('div', { class: 'fields2' },
     field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Edges, certificates and verdicts name the component by it.'),
-    field('Kind', selectInput(KINDS, c.kind, (v) => { c.kind = v; ctx.rerender(); }), c.kind === 'llm' ? 'An LLM passes nothing through and gets worst-case default rows.' : 'Every failure passes through unless you declare it absorbed.'),
+    field('Kind', selectInput(KINDS, c.kind, (v) => { c.kind = v; ctx.rerender(); }), c.kind === 'llm' ? 'An LLM passes nothing through and gets worst-case default rows.' : hasDefaults(doc, c) ? 'Every failure passes through unless you declare it absorbed, and the component starts with worst-case default rows (a model setting).' : 'Every failure passes through unless you declare it absorbed.'),
     field('Label', textInput(c.label, (v) => { c.label = v; ctx.update(); }), null, { wide: true }),
     field('Version', textInput(c.version, (v) => { c.version = v.trim() || undefined; ctx.update(); }, { class: 'mono', placeholder: 'e.g. wallet-3.2' }), 'A change makes the certificates and witnesses that name the old one stale.'),
     field('Own authority', selectInput(levelOpts(auth), c.authority || auth.at(-1), (v) => { c.authority = v; ctx.update(); })),
@@ -107,12 +107,12 @@ export function openComponentDialog(cid, { startAt } = {}) {
 
   const defaults = (ctx) => {
     c.drop_defaults = c.drop_defaults || [];
-    const box = h('div', { class: 'block' }, h('p', { class: 'hint' }, 'Each output of an LLM starts with one worst-case row per failure mode: any message in, that failure at 10 out. A row of yours with the same trigger replaces it; dropping one needs a structural reason, printed wherever a verdict rests on it.'));
+    const box = h('div', { class: 'block' }, h('p', { class: 'hint' }, `Each output starts with one worst-case row per failure mode: any message in, that failure at 10 out. A row of yours with the same trigger replaces it; dropping one needs a structural reason, printed wherever a verdict rests on it.${isLlm() ? '' : ' A certificate may also say one never fires (not so for an LLM).'}`));
     if (!c.out.length) box.appendChild(h('p', { class: 'hint' }, 'No output port yet.'));
     for (const q of c.out) {
       box.appendChild(h('b', { class: 'mono' }, q));
       for (const m of tops) {
-        const st = llmDefaultStatus(c, q, m);
+        const st = defaultStatus(c, q, m);
         box.appendChild(h('div', { class: 'edit-line' },
           h('span', { class: 'mono small w8' }, `${m} at 10`),
           st.status === 'refined' ? h('span', { class: 'small muted grow' }, `replaced by your row ${st.refinedBy.join(', ')}`)
@@ -126,7 +126,7 @@ export function openComponentDialog(cid, { startAt } = {}) {
   const problems = {
     props: () => [idProblem(data.newId, taken)].filter(Boolean),
     absorbs: () => (isLlm() ? [] : (c.absorbs || []).filter((a) => !(a.reason || '').trim()).map((a) => `Say why ${a.port} absorbs ${[].concat(a.modes).join(', ')}.`)),
-    defaults: () => (!isLlm() ? [] : (c.drop_defaults || []).filter((d) => !(d.reason || '').trim()).map((d) => `Give the reason for dropping ${d.mode} on ${d.port}.`)),
+    defaults: () => (!hasDefaults(doc, c) ? [] : (c.drop_defaults || []).filter((d) => !(d.reason || '').trim()).map((d) => `Give the reason for dropping ${d.mode} on ${d.port}.`)),
   };
 
   wizard({
@@ -136,10 +136,11 @@ export function openComponentDialog(cid, { startAt } = {}) {
       { id: 'ports', title: 'Ports', hint: 'Inputs receive, outputs send. Renaming a port renames it in its edges and rows.', render: ports },
       { id: 'flow', title: 'Normal flow', render: flow },
       { id: 'absorbs', title: 'What it absorbs', render: absorbs, problems: problems.absorbs, skip: isLlm },
-      { id: 'defaults', title: 'LLM defaults', render: defaults, problems: problems.defaults, skip: () => !isLlm() },
+      { id: 'defaults', title: 'Worst-case defaults', render: defaults, problems: problems.defaults, skip: () => !hasDefaults(doc, c) },
     ],
     onSave: async (ctx, { force } = {}) => {
-      if (isLlm()) delete c.absorbs; else delete c.drop_defaults;
+      if (isLlm()) delete c.absorbs;
+      if (!hasDefaults(doc, c)) delete c.drop_defaults;
       if (c.absorbs && !c.absorbs.length) delete c.absorbs;
       if (c.drop_defaults && !c.drop_defaults.length) delete c.drop_defaults;
       if (data.newId !== cid && !ops.renameComponent(doc, cid, data.newId)) return { problems: [`Cannot rename to ${data.newId}.`] };
@@ -175,11 +176,11 @@ export function openAbsorbDialog(cid, port) {
   });
 }
 
-// ---------------------------------------------------------------- dropping an LLM default
+// ---------------------------------------------------------------- dropping a worst-case default
 export function openDropDefaultDialog(cid, port, mode) {
   const data = { reason: '' };
   const d = openDialog({ title: `Drop the default ${mode} on ${cid}.${port}?`, size: 'md',
-    subtitle: 'The worst case says the LLM may send this failure on any message. Dropping it needs a structural reason, printed wherever a verdict rests on it.' });
+    subtitle: `The worst case says ${cid} may send this failure on any message. Dropping it needs a structural reason, printed wherever a verdict rests on it.` });
   const reason = textInput('', (v) => { data.reason = v; drop.disabled = !v.trim(); }, { placeholder: 'e.g. lateness is modelled at the bank' });
   const drop = button('Drop it', async () => {
     const doc = cloneDoc();
@@ -190,12 +191,13 @@ export function openDropDefaultDialog(cid, port, mode) {
     toast(`Default ${mode} on ${port} dropped.`);
   }, { primary: true, disabled: true });
   d.setBody(h('div', { class: 'block' }, field('The structural reason', reason, null, { wide: true }),
-    h('p', { class: 'hint' }, 'To lower the magnitude instead, refine the default with a row of your own.')));
+    h('p', { class: 'hint' }, comp(S.doc, cid).kind === 'llm' ? 'To lower the magnitude instead, refine the default with a row of your own.'
+      : 'To lower the magnitude instead, refine the default with a row of your own. If a test or a review shows it never happens, a certificate that says so keeps the record with the evidence.')));
   d.setActions([button('Cancel', () => d.close()), h('span', { class: 'spacer' }),
     button('Refine with a row instead', () => { d.close(); openRowDialog(cid, null, { preset: refinePreset(cid, port, mode), startAt: 'effect' }); }), drop]);
 }
 
-/** The draft that refines an LLM default: same trigger (any message), same failure on the same port. */
+/** The draft that refines a worst-case default: same trigger (any message), same failure on the same port. */
 export function refinePreset(cid, port, mode) {
   const c = comp(S.doc, cid);
   const taken = new Set(S.doc.components.flatMap((x) => (x.rows || []).map((r) => r.id)));
@@ -529,7 +531,9 @@ export function openModelDialog({ startAt } = {}) {
     steps: [
       { id: 'general', title: 'General', render: (ctx) => h('div', { class: 'fields2' },
         field('Name', textInput(doc.name, (v) => { doc.name = v; ctx.update(); }), null, { wide: true }),
-        field('Description', textInput(doc.description, (v) => { doc.description = v; ctx.update(); }, { multiline: true, rows: 5 }), null, { wide: true })) },
+        field('Description', textInput(doc.description, (v) => { doc.description = v; ctx.update(); }, { multiline: true, rows: 5 }), null, { wide: true }),
+        field('Worst-case defaults', checkInput('for every component (FPTC style)', doc.worst_case_defaults === 'all', (v) => { if (v) doc.worst_case_defaults = 'all'; else delete doc.worst_case_defaults; ctx.update(); }),
+          'On: every component starts with one open row per output and failure mode (any message in, that failure at 10 out), so a component nobody modelled is never a guarantee; a certificate, a row of yours or a dropped default with a reason earns one. Off: only LLM components get them.', { wide: true })) },
       { id: 'modes', title: 'Failure modes', problems: modeProblems,
         hint: 'The behavioural failure modes. A mode may have sub-kinds (a failure of the parent mode): a guard that catches the parent catches them too. Renaming or removing a mode does not rename it in rows, guards or points: the check lists what then needs fixing.',
         render: (ctx) => h('div', { class: 'block' },

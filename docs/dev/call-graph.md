@@ -216,7 +216,7 @@ flowchart LR
 | `model.cone.normal_edges` | `model.cone.forwarding` |
 | `model.cone.possible` | `model.cone._trigger_possible`, `model.cone.forwarding` |
 | `model.defaults.add_guard_rows` | `model.load.Row` |
-| `model.defaults.add_llm_defaults` | `model.defaults.replaces_default`, `model.load.Row` |
+| `model.defaults.add_worst_case_defaults` | `model.defaults.has_defaults`, `model.defaults.replaces_default`, `model.load.Row` |
 | `model.edit._edge` | `model.edit.EditError` |
 | `model.edit._split` | `model.edit.EditError` |
 | `model.edit.component` | `model.edit.EditError` |
@@ -240,7 +240,7 @@ flowchart LR
 | `model.edit.set_absorbs` | `model.edit.EditError`, `model.edit.component` |
 | `model.load.Model.family` | `model.load.Model.children` |
 | `model.load.load_model` | `model.load.ModelError`, `model.load.normalise`, `model.load.read_document`, `model.load.validate`, `model.wellformed.check` |
-| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_llm_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._token` |
+| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_worst_case_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._token` |
 | `model.load.validate` | `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref` |
 | `report.explain.trace_story` | `report.explain._tok` |
 | `report.markdown.cra_export` | `report.explain.reason_line` |
@@ -259,11 +259,13 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+  analysis --> flow
   analysis --> lib
   analysis --> state
   app --> analysis
   app --> dialog
   app --> evidence
+  app --> flow
   app --> lib
   app --> modelview
   app --> state
@@ -281,6 +283,8 @@ flowchart LR
   evidencedialogs --> lib
   evidencedialogs --> rows
   evidencedialogs --> state
+  flow --> lib
+  flow --> state
   inspector --> dialog
   inspector --> lib
   inspector --> modeldialogs
@@ -317,6 +321,7 @@ flowchart LR
   rowdialog --> state
   state --> lib
   verdicts --> evidence
+  verdicts --> flow
   verdicts --> lib
   verdicts --> state
 ```

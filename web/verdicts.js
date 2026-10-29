@@ -2,6 +2,7 @@
 // the certify-next ranking, the claims and the exports.
 import { h, clear, api, modal, toast, download, verdictClass } from './lib.js';
 import { S, on, emit } from './state.js';
+import { analysisCurrent } from './flow.js';
 import { fmtAt } from './evidence.js';
 
 const ORDER = ['exposed', 'conflict', 'unchecked', 'hope', 'not exercised', 'guarantee'];
@@ -42,6 +43,9 @@ export class VerdictsView {
     rep.cells.forEach((c) => { counts[c.verdict] = (counts[c.verdict] || 0) + 1; });
     p.appendChild(h('div', { class: 'panel' },
       h('div', { class: 'panel-head' }, h('h2', {}, `Verdicts for ${rep.model.name}`), h('span', { class: 'muted' }, `${rep.label || ''} · ${rep.seconds} s · clingo ${rep.engine.clingo}${rep.engine.tlc ? ` · TLC ${rep.engine.tlc}` : ''}`)),
+      h('p', { class: 'hint' }, 'For each log point and failure: what the evidence leaves possible, why, and what to do next. How it was computed is on 3 Analysis.'),
+      analysisCurrent() ? null : h('div', { class: 'problems inline' }, h('span', { class: 'grow' }, 'The model or the evidence changed after this run: these verdicts are out of date.'),
+        h('button', { class: 'btn primary', onclick: () => emit('run') }, 'Run again')),
       h('div', { class: 'summary' }, ORDER.filter((v) => counts[v]).map((v) => h('span', { class: `v ${verdictClass(v)}` }, `${counts[v]} ${v}`)),
         h('span', { class: 'spacer' }),
         h('button', { class: 'btn small', onclick: () => this.export('report.md', 'text/markdown') }, 'Report (Markdown)'),
