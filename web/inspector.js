@@ -62,7 +62,7 @@ export class Inspector {
   }
 
   section(title, ...rest) { return h('div', { class: 'block-head' }, h('span', { class: 'section-title' }, title), h('span', { class: 'spacer' }), ...rest); }
-  kv(pairs) { return h('dl', { class: 'kv' }, pairs.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])); }
+  kv(pairs, cls) { return h('dl', { class: `kv${cls ? ` ${cls}` : ''}` }, pairs.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])); }
   select(sel) { S.selection = sel; emit('select'); emit('doc'); }
 
   // ---------------------------------------------------------------- the model
@@ -73,8 +73,8 @@ export class Inspector {
     add(this.host, 
       this.head(d.name || 'model', 'model', '', () => openModelDialog(), false),
       d.description ? h('p', { class: 'desc' }, d.description) : null,
-      this.kv([['Failure modes', modesText], ['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')],
-        ['Worst-case defaults', d.worst_case_defaults === 'all' ? 'every component (FPTC)' : 'LLM components only']]),
+      this.kv([['Failure modes', modesText], ['Worst-case defaults', d.worst_case_defaults === 'all' ? 'every component (FPTC)' : 'LLM components only']]),
+      this.kv([['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')]], 'detail'),
       this.useCases(), this.claims(),
       h('p', { class: 'hint' }, 'Select something on the canvas to see it here; double-click it to edit it. The outline on the left lists everything in the model.'));
   }
@@ -119,10 +119,10 @@ export class Inspector {
     add(this.host, 
       this.head(c.id, llm ? 'LLM component' : `${c.kind} component`, llm ? 'llm' : '', () => openComponentDialog(c.id)),
       c.label ? h('p', { class: 'desc' }, c.label) : null,
-      this.kv([c.version ? ['Version', h('span', { class: 'mono' }, c.version)] : null,
-        ['Authority', `${c.authority || auth.at(-1)}${c.raises ? ', acts on its own authority' : ''}`],
+      c.version ? this.kv([['Version', h('span', { class: 'mono' }, c.version)]]) : null,
+      this.kv([['Authority', `${c.authority || auth.at(-1)}${c.raises ? ', acts on its own authority' : ''}`],
         ['Clearance', c.clearance || conf.at(-1)], ['Requires', c.requires || auth[0]],
-        ['Trusted', trusted ? 'yes' : 'no: it taints what it touches']]));
+        ['Trusted', trusted ? 'yes' : 'no: it taints what it touches']], 'detail'));
 
     // rows
     const rows = c.rows || [];
@@ -157,7 +157,7 @@ export class Inspector {
     // what it absorbs, and the worst-case defaults
     if (!llm) {
       const ab = c.absorbs || [];
-      const abox = h('div', { class: 'block' }, this.section('What it absorbs', button('Edit…', () => openComponentDialog(c.id, { startAt: 'absorbs' }), { small: true })));
+      const abox = h('div', { class: 'block detail' }, this.section('What it absorbs', button('Edit…', () => openComponentDialog(c.id, { startAt: 'absorbs' }), { small: true })));
       if (!ab.length) abox.appendChild(h('p', { class: 'hint' }, 'Nothing: every failure passes through (assumption A6).'));
       for (const a of ab) {
         abox.appendChild(h('div', { class: 'item', role: 'button', tabindex: 0, onclick: () => openAbsorbDialog(c.id, a.port) },

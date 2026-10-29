@@ -3,7 +3,7 @@
 // claim, and the model's own settings. Each edits a copy of the model and commits it on Save, after
 // the server's model check (state.saveChecked); Cancel leaves the model untouched.
 import { h, toast } from './lib.js';
-import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText } from './state.js';
+import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText, details, edgeName } from './state.js';
 import { wizard, field, textInput, numberInput, selectInput, checkInput, button, confirmDialog, openDialog } from './dialog.js';
 import { openRowDialog } from './rowdialog.js';
 import { defaultStatus, hasDefaults } from './rows.js';
@@ -37,10 +37,10 @@ export function openComponentDialog(cid, { startAt } = {}) {
     field('Kind', selectInput(KINDS, c.kind, (v) => { c.kind = v; ctx.rerender(); }), c.kind === 'llm' ? 'An LLM passes nothing through and gets worst-case default rows.' : hasDefaults(doc, c) ? 'Every failure passes through unless you declare it absorbed, and the component starts with worst-case default rows (a model setting).' : 'Every failure passes through unless you declare it absorbed.'),
     field('Label', textInput(c.label, (v) => { c.label = v; ctx.update(); }), null, { wide: true }),
     field('Version', textInput(c.version, (v) => { c.version = v.trim() || undefined; ctx.update(); }, { class: 'mono', placeholder: 'e.g. wallet-3.2' }), 'A change makes the certificates and witnesses that name the old one stale.'),
-    field('Own authority', selectInput(levelOpts(auth), c.authority || auth.at(-1), (v) => { c.authority = v; ctx.update(); })),
-    field('Clearance', selectInput(levelOpts(conf), c.clearance || conf.at(-1), (v) => { c.clearance = v; ctx.update(); }), 'The most confidential data it may receive.'),
-    field('Requires', selectInput(levelOpts(auth), c.requires || auth[0], (v) => { c.requires = v; ctx.update(); }), 'The authority a message needs before it acts.'),
-    h('div', { class: 'f wide' },
+    field('Own authority', selectInput(levelOpts(auth), c.authority || auth.at(-1), (v) => { c.authority = v; ctx.update(); }), null, { detail: true }),
+    field('Clearance', selectInput(levelOpts(conf), c.clearance || conf.at(-1), (v) => { c.clearance = v; ctx.update(); }), 'The most confidential data it may receive.', { detail: true }),
+    field('Requires', selectInput(levelOpts(auth), c.requires || auth[0], (v) => { c.requires = v; ctx.update(); }), 'The authority a message needs before it acts.', { detail: true }),
+    h('div', { class: 'f wide detail' },
       checkInput('Trusted', c.trusted !== undefined ? c.trusted : !['external', 'user'].includes(c.kind), (v) => { c.trusted = v; ctx.update(); }, 'An untrusted component taints what it touches.'),
       checkInput('Raises authority', c.raises, (v) => { c.raises = v; ctx.update(); }, 'It acts on its own authority (signs, approves).')));
 
@@ -134,8 +134,8 @@ export function openComponentDialog(cid, { startAt } = {}) {
     steps: [
       { id: 'props', title: 'Properties', render: props, problems: problems.props },
       { id: 'ports', title: 'Ports', hint: 'Inputs receive, outputs send. Renaming a port renames it in its edges and rows.', render: ports },
-      { id: 'flow', title: 'Normal flow', render: flow },
-      { id: 'absorbs', title: 'What it absorbs', render: absorbs, problems: problems.absorbs, skip: isLlm },
+      { id: 'flow', title: 'Normal flow', render: flow, skip: () => !details() },
+      { id: 'absorbs', title: 'What it absorbs', render: absorbs, problems: problems.absorbs, skip: () => isLlm() || !details() },
       { id: 'defaults', title: 'Worst-case defaults', render: defaults, problems: problems.defaults, skip: () => !hasDefaults(doc, c) },
     ],
     onSave: async (ctx, { force } = {}) => {
@@ -226,12 +226,12 @@ export function openGuardDialog(gid, { edge: edgeId, startAt } = {}) {
     const swap = (o) => { const i = doc.guards.indexOf(g), j = doc.guards.indexOf(o); doc.guards[i] = o; doc.guards[j] = g; ctx.rerender(); };
     return h('div', { class: 'block' }, h('div', { class: 'fields2' },
       field('Name', textInput(g.label, (v) => { g.label = v; ctx.update(); }, { placeholder: 'e.g. mandate check, schema validator, LLM judge' }), 'What the guard is, in words.', { wide: true }),
-      field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Certificates name the guard by its id.'),
+      field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Certificates name the guard by its id.', { detail: true }),
       field('Version', textInput(g.version, (v) => { g.version = v.trim() || undefined; ctx.update(); }, { class: 'mono', placeholder: 'e.g. mandate-v2' }), 'Certificates name the version they cover.'),
-      field('Cuts the edge', selectInput(doc.edges.map((x) => [x.id, `${x.id}: ${x.from} → ${x.to}`]), g.edge, (v) => { g.edge = v; ctx.rerender(); }), null, { wide: true }),
+      field('Cuts the edge', selectInput(doc.edges.map((x) => [x.id, edgeName(x)]), g.edge, (v) => { g.edge = v; ctx.rerender(); }), null, { wide: true }),
       h('div', { class: 'f wide' },
         checkInput('Learned (a classifier or an LLM judge)', g.learned, (v) => { g.learned = v || undefined; if (v) g.targets.forEach((t) => { t.decidable = false; }); ctx.rerender(); }, 'No certificate can say a learned guard never leaks; it gets a false-positive row too.'),
-        checkInput('Closed output', g.closed_output, (v) => { g.closed_output = v || undefined; ctx.rerender(); }, 'It emits only from a closed set (enumerations), so it may wash taint.')),
+        details() ? checkInput('Closed output', g.closed_output, (v) => { g.closed_output = v || undefined; ctx.rerender(); }, 'It emits only from a closed set (enumerations), so it may wash taint.') : null),
       g.learned ? field('A false positive emits omission at', numberInput(g.fp_omission ?? 10, (v) => { g.fp_omission = v; ctx.update(); }, { min: 0, max: 10 })) : null),
     onEdge.length > 1 ? h('div', { class: 'inline' }, h('span', { class: 'small muted' }, `Position ${idx + 1} of ${onEdge.length} on ${g.edge}, in the order the guards cut it.`),
       button('Earlier', () => swap(onEdge[idx - 1]), { small: true, disabled: idx === 0 }), button('Later', () => swap(onEdge[idx + 1]), { small: true, disabled: idx === onEdge.length - 1 })) : null);
@@ -320,8 +320,8 @@ export function openObsDialog(oid, { edge: edgeId, startAt } = {}) {
 
   const point = (ctx) => h('div', { class: 'fields2' },
     field('Name', textInput(o.label, (v) => { o.label = v; ctx.update(); }, { placeholder: 'e.g. bank statement' })),
-    field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Witnesses and verdict cells name the point by its id.'),
-    field('Observes the edge', selectInput(doc.edges.map((x) => [x.id, `${x.id}: ${x.from} → ${x.to}`, doc.observation_points.some((y) => y !== o && y.edge === x.id)]), o.edge, (v) => { o.edge = v; ctx.rerender(); }),
+    field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Witnesses and verdict cells name the point by its id.', { detail: true }),
+    field('Observes the edge', selectInput(doc.edges.map((x) => [x.id, edgeName(x), doc.observation_points.some((y) => y !== o && y.edge === x.id)]), o.edge, (v) => { o.edge = v; ctx.rerender(); }),
       'It judges what the receiver gets, after every guard on the edge. One point per edge.', { wide: true }),
     field('Where the log comes from', textInput(o.log, (v) => { o.log = v || undefined; ctx.update(); }, { placeholder: 'e.g. the bank statement (CSV export)' }), null, { wide: true }));
 
@@ -361,7 +361,7 @@ export function openObsDialog(oid, { edge: edgeId, startAt } = {}) {
       { id: 'judges', title: 'Failures it judges', render: judges,
         problems: () => [judgesNothing() ? 'It judges nothing yet: tick a failure here or a provenance check in the next step.' : null,
           ...Object.entries(o.tolerate).filter(([, v]) => !(v >= 1 && v <= 10)).map(([k]) => `The threshold of ${k} is a magnitude from 1 to 10.`)].filter(Boolean) },
-      { id: 'prov', title: 'Provenance', render: prov },
+      { id: 'prov', title: 'Provenance', render: prov, skip: () => !details() },
     ],
     onSave: async (ctx, { force } = {}) => {
       if (data.newId !== o.id && !ops.renameObs(doc, o.id, data.newId)) return { problems: [`Cannot rename to ${data.newId}.`] };
@@ -453,7 +453,7 @@ export function openUseCaseDialog(ucId, { port } = {}) {
     saveLabel: mode === 'add' ? 'Add use case' : 'Save',
     steps: [
       { id: 'uc', title: 'The use case', render: (ctx) => h('div', { class: 'fields2' },
-        field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono' }), 'Recognisers and certificate scopes name it.'),
+        field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono' }), 'Recognisers and certificate scopes name it.', { detail: true }),
         field('What happens', textInput(u.label, (v) => { u.label = v; ctx.update(); }, { placeholder: 'e.g. pay an incoming invoice under the mandate' }), null, { wide: true })),
       problems: () => [idProblem(data.newId, new Set(doc.use_cases.filter((x) => x !== u).map((x) => x.id)))].filter(Boolean) },
       { id: 'entries', title: 'Where it enters', render: entries,
@@ -542,7 +542,7 @@ export function openModelDialog({ startAt } = {}) {
             field('Sub-kinds (comma separated)', textInput(m.subs, (v) => { m.subs = v; ctx.update(); }, { class: 'mono', placeholder: 'e.g. oom, dup' }), null, { inline: true }),
             h('span', { class: 'spacer' }), button('Remove', () => { data.modes.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true }))),
           h('div', {}, button('+ Add a mode', () => { data.modes.push({ name: '', subs: '' }); ctx.rerender(); }, { small: true }))) },
-      { id: 'lattices', title: 'Levels', problems: latProblems, hint: 'One level per line, from the lowest to the highest.',
+      { id: 'lattices', title: 'Levels', problems: latProblems, skip: () => !details(), hint: 'One level per line, from the lowest to the highest.',
         render: (ctx) => h('div', { class: 'fields2' },
           field('Confidentiality', textInput(data.conf, (v) => { data.conf = v; ctx.update(); }, { multiline: true, rows: 5, class: 'mono' })),
           field('Authority', textInput(data.auth, (v) => { data.auth = v; ctx.update(); }, { multiline: true, rows: 5, class: 'mono' }))) },

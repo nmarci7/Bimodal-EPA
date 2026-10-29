@@ -1,12 +1,14 @@
 // The reasoner: wires the four views, the demo cases and their scenario stages, import/export,
 // and the bootstrap from traces.
 import { h, clear, api, readFile, download, toast, modal, dropZone, store } from './lib.js';
-import { S, on, emit, blankDoc, normaliseDoc, emptyEvidence, runCheck, persist, restore } from './state.js';
+import { S, on, emit, blankDoc, normaliseDoc, emptyEvidence, runCheck, persist, restore, details, setDetails } from './state.js';
 import { ModelView } from './modelview.js';
 import { EvidenceView } from './evidence.js';
 import { AnalysisView } from './analysis.js';
 import { VerdictsView } from './verdicts.js';
 import { FlowBar } from './flow.js';
+import { VerdictBar } from './verdictbar.js';
+import { Tutorial } from './tutorial.js';
 import { dropdown, button, infoDialog, confirmDialog } from './dialog.js';
 
 const $ = (id) => document.getElementById(id);
@@ -255,8 +257,15 @@ async function main() {
     verdicts: new VerdictsView($('view-verdicts')),
   };
   new FlowBar($('flow'));
+  new VerdictBar($('verdictbar'));
+  const tutorial = new Tutorial({ load: (doc, ev) => {
+    S.caseId = null; S.bundle = null; S.stage = null; $('case-select').value = '';
+    setDoc(normaliseDoc(doc), { ...emptyEvidence(), ...ev });
+    drawStagebar();
+    show('model');
+  } });
   on('show', (v) => show(v));
-  on('run', () => views.analysis.run());
+  on('run', (o) => views.analysis.run(o));
   on('report', () => {
     if (S.analysis && S.analysis.report && S.view !== 'verdicts') {
       const t = document.querySelector('.tab[data-view="verdicts"]');
@@ -278,7 +287,15 @@ async function main() {
     { label: 'Open the assistant\'s model', hint: 'see what the assistant did; replaces the model here', onClick: openWorkspace },
     { label: 'Send this model to the assistant…', hint: 'the assistant works on it next; replaces its model', onClick: saveWorkspace },
   ], { title: 'work on a model together with an assistant (MCP)' });
-  $('actions').prepend(fileMenu, assistantMenu, button('Help', helpDialog, { title: 'how the reasoner works, and its shortcuts' }));
+  const helpMenu = dropdown('Help', () => [
+    { label: 'Start the tutorial', hint: 'build a first model in seven steps, one button each', onClick: () => tutorial.start() },
+    { label: 'How the reasoner works', hint: 'the four steps and the shortcuts', onClick: helpDialog },
+    'sep',
+    { label: 'Show all details', hint: 'levels, authority, ids, files, engine internals', checked: details(), onClick: () => setDetails(!details()) },
+  ], { title: 'the tutorial, how the reasoner works, and how much it shows' });
+  if (store('epa.details')) document.body.classList.add('details');
+  on('details', () => { emit('doc'); emit('evidence'); });
+  $('actions').prepend(fileMenu, assistantMenu, helpMenu);
   const cases = await loadCases();
   const params = new URLSearchParams(location.search);
   restore();

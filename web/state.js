@@ -397,6 +397,28 @@ export async function runCheck() {
   catch (e) { S.check = { ok: false, problems: e.problems || [e.message] }; }
   emit('check');
 }
+// ---------------------------------------------------------------- simple mode
+// By default the reasoner shows the essentials only: elements marked `detail` (levels, authority,
+// ids, file lists, engine internals) are hidden until Help → Show all details puts the class
+// `details` on <body>. The choice is kept in localStorage (epa.details).
+
+/** Whether all details are shown. */
+export function details() { return document.body.classList.contains('details'); }
+
+/** Shows or hides the details, remembers it, and tells the views (event `details`). */
+export function setDetails(on) {
+  document.body.classList.toggle('details', !!on);
+  store('epa.details', !!on);
+  emit('details');
+}
+
+/** An edge in words: "writer → parser" (with the ids and ports when all details are shown). */
+export function edgeName(e) {
+  if (details()) return `${e.id}: ${e.from} → ${e.to}`;
+  const end = (ref) => { const [c, p] = parseRef(ref); return c === 'sys' ? p : c; };
+  return `${end(e.from)} → ${end(e.to)}`;
+}
+
 /** What an analysis ran on: the model (without canvas positions) and the evidence it reads. A run
  * records it; when it differs from the current one, the verdicts are out of date (flow.js). */
 export function analysisBasis() {

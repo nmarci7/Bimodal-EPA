@@ -56,7 +56,9 @@ assistant… shows the setup).
 ## The reasoner
 
 The flow strip under the top bar shows the four steps and where each stands (well-formed, how much
-evidence, whether the last run is out of date, the verdict counts).
+evidence, whether the last run is out of date, the verdict counts); after a run, the verdict bar shows
+every log point's verdicts on every page. **Help → Start the tutorial** builds a first model in seven
+steps and shows every verdict. The reasoner starts simple; Help → Show all details shows everything.
 
 1. **Model.** A canvas with a palette: LLM components, deterministic components, tools, stores,
    external systems and users, system inputs and outputs, guards and observation points. Drag a

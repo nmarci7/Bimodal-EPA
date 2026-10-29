@@ -503,3 +503,28 @@ table.mt th:nth-child(1) { width: 20%; } table.mt th:nth-child(2) { width: auto;
 /* the Connect an assistant window: commands to copy */
 .copyrow { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 8px; }
 .copyrow pre.code { flex: 1 1 auto; min-width: 0; margin: 0; white-space: pre-wrap; word-break: break-all; }
+
+/* the verdict bar (verdictbar.js): every log point's verdicts, under the top bar */
+.verdictbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.verdictbar.stale .vb-point { opacity: .55; }
+.vb-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.vb-point { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); cursor: pointer; }
+.vb-point:hover { border-color: var(--line2); background: var(--panel); }
+.vb-label { font-size: 12.5px; font-weight: 600; }
+.vb-point .v { font-size: 11.5px; }
+.vb-stale { font-size: 12px; color: var(--e-ink); }
+/* the tutorial card (tutorial.js) */
+.tutorial { position: fixed; right: 18px; bottom: 18px; width: 380px; max-width: calc(100vw - 36px); z-index: 45; background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; box-shadow: 0 14px 40px rgba(0, 0, 0, .18); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.tutorial h3 { margin: 0; font-size: 16px; }
+.tutorial p { margin: 0; line-height: 1.45; }
+.tut-head { display: flex; align-items: center; justify-content: space-between; }
+.tut-count { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tut-dots { display: flex; gap: 5px; }
+.tut-dots span { width: 22px; height: 4px; border-radius: 2px; background: var(--line); }
+.tut-dots span.cur { background: var(--line2); }
+.tut-dots span.on { background: var(--ink); }
+.tut-result { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line); }
+.tut-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+
+/* simple mode: what is marked detail shows only with Help → Show all details (body.details) */
+body:not(.details) .detail { display: none !important; }

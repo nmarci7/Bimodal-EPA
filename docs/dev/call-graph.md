@@ -269,6 +269,8 @@ flowchart LR
   app --> lib
   app --> modelview
   app --> state
+  app --> tutorial
+  app --> verdictbar
   app --> verdicts
   canvas --> dialog
   canvas --> lib
@@ -320,6 +322,12 @@ flowchart LR
   rowdialog --> lib
   rowdialog --> state
   state --> lib
+  tutorial --> dialog
+  tutorial --> lib
+  tutorial --> state
+  verdictbar --> flow
+  verdictbar --> lib
+  verdictbar --> state
   verdicts --> evidence
   verdicts --> flow
   verdicts --> lib

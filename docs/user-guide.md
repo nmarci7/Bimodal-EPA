@@ -47,6 +47,29 @@ fail.
 The reasoner keeps your model and evidence in the browser (local storage), so a reload brings back
 where you were. To keep a model, export it (**File → Export the model as YAML**).
 
+### 1.1 Your first model: the tutorial
+
+**Help → Start the tutorial** builds a small model in seven steps, one button each. After every step it
+runs the analysis and says, in one sentence, what the verdict means. It follows one failure (a wrong
+value in the order log) through every answer the reasoner can give:
+
+| step | what you do | the verdict |
+|---|---|---|
+| 1 | build request → parser → order log | **unchecked**: nothing is known (never, sometimes or always) |
+| 2 | a test report: the parser always gets it wrong | **exposed**: always (A) |
+| 3 | the parser is fixed (v2) and certified "never" | **guarantee**: never (N); the old report is stale |
+| 4 | an LLM writes the draft first | **unchecked**: sometimes or always (an LLM is never "never") |
+| 5 | a log line shows a clean order | **hope**: sometimes (S) |
+| 6 | a schema check between them | **unchecked**: never or sometimes (nobody vouched for it yet) |
+| 7 | the check is certified | **guarantee**: never (N) |
+
+![The tutorial at step 5: the card says what the verdict means; the verdict bar shows it too](images/tutorial.jpg)
+
+### 1.2 Simple or detailed
+
+The reasoner starts simple: it hides the levels, authority and clearance, ids, file lists and the
+engine's internals. **Help → Show all details** shows everything; the choice is remembered.
+
 ## 2. The screen
 
 ![The model view: outline or palette on the left, the canvas with the selected component's rows below it, the inspector on the right](images/model-view.jpg)
@@ -64,6 +87,8 @@ where you were. To keep a model, export it (**File → Export the model as YAML*
   | **4 Verdicts** | *the answer*: per log point and failure, what is possible, why, what to do | the verdict counts, marked *old* when out of date |
 
   A dot on *4 Verdicts* means there are new verdicts you have not looked at.
+* **Verdict bar** (after an analysis): every log point with its verdicts, on every page. Click a point
+  to open its most severe verdict. It says *out of date* after a change, until you run again.
 * **Scenario bar** (only for a demo case): the stages of the case's story. Clicking a stage loads
   the model and the evidence as they were at that point; *Run this stage* runs the analysis.
 * **Left pane**: **Add** (the palette you drag from) or **Outline** (everything in the model as

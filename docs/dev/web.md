@@ -32,7 +32,8 @@ restored on load (`restore`). Views never call each other: they talk through a t
 | `report` | an analysis finished | canvas (verdict colours), verdicts view, flow strip, app (the dot on the Verdicts step) |
 | `analysis` | an analysis started (`AnalysisView.run`) | flow strip |
 | `show`, `shown:<view>` | a view is asked for / was shown | app / the view itself |
-| `run` | "run the analysis" from anywhere | app → `AnalysisView.run` |
+| `run` | "run the analysis" from anywhere (`{quiet: true}` stays on the current page) | app → `AnalysisView.run` |
+| `details` | Help → Show all details was switched | app (re-renders the views) |
 | `maptable:show`, `maptable:toggled` | the rows table is asked for / was toggled | rows table |
 | `reveal` | the outline asks to bring a selection into view | model view → `Canvas.reveal` |
 | `focus-cell` | a cell should be shown in the verdicts view | verdicts view |
@@ -99,6 +100,29 @@ has its purpose as a tooltip and a status line that says where it stands, so the
 The Analysis page (`analysis.js`) and the Verdicts page (`verdicts.js`) say the same in their headers, and
 both show "out of date" with a Run again button when `analysisCurrent()` is false.
 
+#### `web/verdictbar.js`
+The verdict bar under the top bar (`#verdictbar`): once an analysis has run, every log point with its
+verdict counts, on every page; dimmed with "out of date" when `analysisCurrent()` is false.
+
+| definition | what it does |
+|---|---|
+| `pointsSummary(rep, doc)` | the report's cells grouped by log point, in order: `{obs, label, counts, worst}` (`worst` is the most severe cell) |
+| `VerdictBar` | renders the bar; a point is a button that emits `focus-cell` with its worst cell (the Verdicts page opens it) |
+| `VerdictBar.update()` | redraws it on `report`, `doc`, `evidence`, `loaded` and `analysis`; hidden while there is no report |
+
+#### `web/tutorial-steps.js` and `web/tutorial.js`
+The tutorial (Help → Start the tutorial): seven steps that build a first model and follow one cell,
+`value@o_order`, through every verdict: unchecked, exposed (A), guarantee (N), unchecked {S,A}, hope (S),
+unchecked {N,S}, guarantee (N). The steps are pure data and functions, so `tests/test_tutorial.py` replays
+them under node and checks every verdict with the engine.
+
+| definition | what it does |
+|---|---|
+| `CELL`, `EXPECTED` | the followed cell; the verdict and statuses each step leads to |
+| `tutorialModel()` | the first model: request → parser (deterministic, v1) → order, the order log on the last edge, one mode (value), `worst_case_defaults: all`, canvas positions |
+| `STEPS` | per step: title, one sentence, the button's label, `apply({doc, ev})` (the next model, evidence and selection), and what the verdict means |
+| `Tutorial` | the card in the corner. `start()` asks before replacing a model of yours, `step()` applies the step (the first loads the model through app.js's `setDoc`; the others `commitDoc` and update the evidence), checks the model, runs the analysis without leaving the page (`emit('run', {quiet: true})`) and waits for `report`; `render()` shows the step, or its verdict with the explanation and Next; `finish()` the closing words; `stop()` closes it |
+
 #### `web/state.js`
 The state `S`, the event bus, the model helpers, every direct edit, and the check-then-save step of
 the dialogs.
@@ -107,6 +131,8 @@ the dialogs.
 |---|---|
 | `on(ev, fn)`, `emit(ev, data)` | the event bus |
 | `emptyEvidence()`, `blankDoc()` | an empty evidence register; a new model (the FPTC modes omission, commission, early, late, value with coarse and subtle; `worst_case_defaults: all`; default levels), as `epa/model/edit.py` (`blank`) starts one |
+| `details()`, `setDetails(on)` | simple mode: whether `body.details` is set (Help → Show all details); setting it stores `epa.details` and emits `details`. Elements marked `detail` (and `field(…, {detail: true})`) are hidden by CSS without it; wizards skip their advanced steps (normal flow, absorptions, provenance, levels) |
+| `edgeName(e)` | an edge in words for dropdowns: "writer → parser", or `id: from → to` with all details shown |
 | `analysisBasis()` | what an analysis runs on: the model without canvas positions, and the certificates, witnesses and decisions, as one JSON string; a run records it, `flow.js` compares |
 | `normaliseDoc(doc)` | fills missing lists and levels, turns old `guard.on` into `edge`, converts the old `pass:` key of components into `absorbs`, and lays out anything without a position |
 | `modeFields(doc)`, `topModes(doc)` | the failure modes as `{name, parent}` (sub-kinds have a parent); only the top-level ones |

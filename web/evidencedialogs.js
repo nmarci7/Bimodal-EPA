@@ -8,7 +8,7 @@
 // delivered at observation points: {at: {point: {modes: {f: [lo, hi]}, taint, conf, auth}}}.
 // The server classifies both against the model before they go in.
 import { h, clear, add, api, toast } from './lib.js';
-import { S, emit, persist, modeFields, comp } from './state.js';
+import { S, emit, persist, modeFields, comp, details } from './state.js';
 import { wizard, openDialog, field, textInput, numberInput, selectInput, checkInput, button, confirmDialog } from './dialog.js';
 import { rowSentence } from './rows.js';
 
@@ -92,7 +92,7 @@ export function openCertDialog(certId) {
     for (const [label, list] of groups) {
       if (!list.length) continue;
       sel.appendChild(h('optgroup', { label }, list.map((c) => h('option', { value: c.id, selected: c.id === data.component ? true : undefined },
-        `${c.id}${c.label ? ` — ${c.label}` : ''}${c.version ? ` (${c.version})` : ''}`))));
+        details() ? `${c.id}${c.label ? ` — ${c.label}` : ''}${c.version ? ` (${c.version})` : ''}` : (c.label || c.id)))));
     }
     const c = sumComps[data.component] || {};
     return h('div', { class: 'block' }, field('The guard or component it is about', sel, 'Only what has open rows can be certified: a certificate fixes the activation of some of them.', { wide: true }),
