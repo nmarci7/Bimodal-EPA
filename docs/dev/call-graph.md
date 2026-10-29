@@ -120,19 +120,21 @@ flowchart LR
 | `engine.coordinator.Engine.__init__` | `engine.cache.RunCache` |
 | `engine.coordinator.Engine.analyse` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.decide`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.rank`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator._count_vectors`, `engine.coordinator.judge_claims`, `model.cone.cells`, `model.cone.cones`, `model.wellformed.absorbed` |
 | `engine.coordinator.Engine.applies` | `engine.coordinator.Engine.inert` |
-| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator.Engine.witnesses_on`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.ensure` | `alethic.runs.runs_from_dump`, `alethic.tlc_runner.run`, `engine.coordinator.Engine.emit`, `engine.coordinator._count_vectors`, `translate.to_tla.module_for` |
 | `engine.coordinator.Engine.inert` | `model.cone._trigger_possible`, `model.cone.normal_edges`, `model.cone.possible` |
-| `engine.coordinator.Engine.possibilities` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `epistemic.reason.candidate_space`, `model.cone.cells`, `model.cone.cones` |
+| `engine.coordinator.Engine.possibilities` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.candidate_space`, `model.cone.cells`, `model.cone.cones` |
 | `engine.coordinator.Engine.problem` | `alethic.runs.reaches`, `alethic.runs.severity`, `alethic.runs.used`, `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `epistemic.reason.CellProblem` |
-| `engine.coordinator.Engine.rank` | `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.problem`, `epistemic.verdicts.verdict_of` |
-| `engine.coordinator.Engine.reasons` | `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.problem`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.rank` | `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.reasons` | `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.register` | `intake.cert_import.classify`, `intake.cert_import.reverify`, `intake.log_import.classify_witness` |
-| `engine.coordinator.Engine.suspension` | `alethic.runs.matches`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.witness_cone`, `epistemic.reason.CellProblem` |
+| `engine.coordinator.Engine.suspension` | `alethic.runs.matches`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.witness_cone`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.CellProblem` |
 | `engine.coordinator.Engine.trace_of` | `alethic.runs.trace`, `model.cone.cells`, `model.cone.cones` |
+| `engine.coordinator.Engine.vacuous` | `engine.coordinator.Engine.wcone` |
 | `engine.coordinator.Engine.wcone` | `engine.coordinator.Engine.witness_cone` |
 | `engine.coordinator.Engine.witness_cone` | `model.cone.Cell`, `model.cone.Cone`, `model.cone.cone_of_cell` |
 | `engine.coordinator.Engine.witness_runs` | `alethic.runs.matches`, `engine.coordinator.Engine.ensure` |
+| `engine.coordinator.Engine.witnesses_on` | `engine.coordinator.Engine.vacuous` |
 | `engine.scenario.recognisers` | `intake.log_import.load_recogniser` |
 | `engine.scenario.stage_inputs` | `engine.scenario.apply_versions`, `engine.scenario.load_case`, `engine.scenario.lookup_files`, `engine.scenario.recognisers`, `intake.cert_import.load`, `intake.log_import.load_deployments`, `intake.log_import.recognise_all`, `model.load.load_model`, `model.load.read_document` |
 | `epistemic.reason.CellProblem.__init__` | `epistemic.reason._q` |

@@ -378,3 +378,34 @@ def test_reference_scope_rule():
     assert S.reference(doc, {"certificates": [scoped]})["oom@o"]["statuses"] == ["N", "S", "A"]
     both = {**CERT_M1, "scope": ["pay", "refund"]}
     assert S.reference(doc, {"certificates": [both]})["oom@o"]["verdict"] == "guarantee"
+
+
+# a use case that never reaches the point it is logged at (seed 220 of 400 found it)
+SIDE = {
+    "modes": ["omission", "late"],
+    "components": [
+        {"id": "A", "kind": "deterministic", "in": ["i"], "out": ["o"],
+         "rows": [{"id": "a_late", "when": {"i": "any"}, "then": {"o": {"late": "const 4"}}}]},
+        {"id": "B", "kind": "deterministic", "in": ["i"], "out": ["o"]},
+    ],
+    "edges": [{"id": "e_in", "from": "sys.in", "to": "A.i"}, {"id": "e_out", "from": "A.o", "to": "sys.out"},
+              {"id": "e_side", "from": "sys.side", "to": "B.i"}, {"id": "e_back", "from": "B.o", "to": "sys.back"}],
+    "use_cases": [{"id": "u", "entries": [{"port": "in", "token": {}}]},
+                  {"id": "v", "entries": [{"port": "side", "token": {}}]}],
+    "observation_points": [{"id": "o", "edge": "e_out", "tolerate": {"late": 1}}],
+}
+
+
+def test_a_witness_of_a_use_case_that_never_reaches_the_point(tmp_path):
+    """v never sends a message over e_out. A witness of v that logs o unused and clean is what every
+    run of v shows: it constrains nothing (no conflict). One that logs a message there matches no run:
+    the model lacks a path. The engine agrees with the reference on both."""
+    Engine, load_model = _import_engine()
+    clean = {"id": "w", "use_case": "v", "at": {"o": {"used": False, "modes": {"late": [0, 0]}}}}
+    seen = {"id": "w", "use_case": "v", "at": {"o": {"used": True}}}
+    for w, verdict in ((clean, "unchecked"), (seen, "conflict")):
+        ev = {"witnesses": [w]}
+        ref = S.reference(copy.deepcopy(SIDE), ev)["late@o"]["verdict"]
+        rep = Engine(load_model(copy.deepcopy(SIDE)), str(tmp_path)).analyse(ev, rank=False)
+        eng = {c["cell"]: c["verdict"] for c in rep["cells"]}["late@o"]
+        assert (ref, eng) == (verdict, verdict)
