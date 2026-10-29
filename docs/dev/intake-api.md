@@ -222,7 +222,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 | `report_md(aid)` | Returns `markdown.report(report)` as `text/markdown`; 404 if there is no report. | report.markdown.report |
 | `report_cra(aid)` | Returns `markdown.cra_export(report)` as JSON; 404 if there is no report. | report.markdown.cra_export |
 | `WORKSPACE` | `$EPA_WORKSPACE` or `<WORK>/workspace.json`: the shared workspace file the MCP server also uses (epa/workspace.py). | workspace.default_path |
-| `workspace_meta()` | `GET /api/workspace/meta`: `{exists, updated, by, name, case, stage, path}` of the shared workspace, without the model. | workspace.meta |
+| `workspace_meta()` | `GET /api/workspace/meta`: `{exists, updated, by, name, case, stage, path}` of the shared workspace, without the model, and `mcp: {name, command}`: the server's name (`workspace.SERVER_NAME`) and this repository's `mcp.sh`, which the Connect an assistant window shows. | workspace.meta |
 | `workspace_get()` | `GET /api/workspace`: `{doc, evidence, case, stage, updated, by}`; 404 when the workspace has no model. | workspace.load |
 | `WorkspaceIn` (class) | Body `{doc, evidence = {}, case?, stage?}`. | — |
 | `workspace_put(body)` | `PUT /api/workspace`: saves the model and the evidence (certificates, witnesses, decisions, recognisers, deployments, lookups, files) as written by the browser, and returns the new meta. | workspace.save, workspace.meta |

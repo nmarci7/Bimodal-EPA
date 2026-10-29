@@ -210,7 +210,7 @@ export function wizard({ title, subtitle, size = 'lg', mode = 'add', steps, prev
 
 /** A labelled control: label above, hint below. */
 export function field(label, control, hint, opts = {}) {
-  return h('label', { class: `f${opts.wide ? ' wide' : ''}${opts.inline ? ' inline-f' : ''}` },
+  return h('label', { class: `f${opts.wide ? ' wide' : ''}${opts.inline ? ' inline-f' : ''}${opts.detail ? ' detail' : ''}` },
     h('span', { class: 'f-label' }, label), control, hint ? h('span', { class: 'f-hint' }, hint) : null);
 }
 

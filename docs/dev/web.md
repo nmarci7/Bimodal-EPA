@@ -13,7 +13,7 @@ Everything the reasoner holds lives in one object, `S` in `web/state.js`:
 | `S.doc` | the model document, exactly the YAML/JSON structure of [model-format.md](../model-format.md), plus `layout.sys` (canvas positions of system ports) and `pos` per component |
 | `S.check` | the last answer of `POST /api/model/check`: `{ok, problems, summary, cells, absorbed, decisions}` |
 | `S.evidence` | `{files, witnesses, certificates, decisions, recognisers, deployments, lookups}`: what the analyst loaded or wrote |
-| `S.analysis` | `{id, status, report, error}` of the last analysis |
+| `S.analysis` | `{id, status, report, error, basis}` of the last analysis; `basis` is `analysisBasis()` at the start of the run, so the flow strip can tell when the verdicts are out of date |
 | `S.caseId`, `S.bundle`, `S.stage` | the open demo case, its bundle (`GET /api/cases/{case}/bundle`) and the scenario stage |
 | `S.selection` | what is selected: `{type: component \| port \| sys \| edge \| guard \| obs, id}` (a port's id is `comp\|side\|name`, a system port's `sys:name`) |
 | `S.view` | the visible view: model, evidence, analysis or verdicts |
@@ -28,10 +28,12 @@ restored on load (`restore`). Views never call each other: they talk through a t
 | `select` | the selection changed | canvas, inspector, rows table, outline |
 | `check` | a model check came back (`runCheck`) | model view (badge, footer), inspector, rows table, outline, evidence view |
 | `loaded` | a whole new model was set (`setDoc` in app.js) | every view |
-| `evidence` | the evidence changed | evidence view |
-| `report` | an analysis finished | canvas (verdict colours), verdicts view, app (the dot on the Verdicts tab) |
+| `evidence` | the evidence changed | evidence view, flow strip |
+| `report` | an analysis finished | canvas (verdict colours), verdicts view, flow strip, app (the dot on the Verdicts step) |
+| `analysis` | an analysis started (`AnalysisView.run`) | flow strip |
 | `show`, `shown:<view>` | a view is asked for / was shown | app / the view itself |
-| `run` | "run the analysis" from anywhere | app → `AnalysisView.run` |
+| `run` | "run the analysis" from anywhere (`{quiet: true}` stays on the current page) | app → `AnalysisView.run` |
+| `details` | Help → Show all details was switched | app (re-renders the views) |
 | `maptable:show`, `maptable:toggled` | the rows table is asked for / was toggled | rows table |
 | `reveal` | the outline asks to bring a selection into view | model view → `Canvas.reveal` |
 | `focus-cell` | a cell should be shown in the verdicts view | verdicts view |
@@ -54,16 +56,18 @@ There are two ways a change gets into `S.doc`:
 ### Files
 
 #### `web/index.html`
-The page: the top bar (case picker, the four tabs, the `#actions` slot that app.js fills with the
-File menu and Help, Run analysis), the scenario bar, one `<section>` per view, the legacy `#modal`
+The page: the top bar (brand, case picker, the `#actions` slot that app.js fills with the File menu,
+the Assistant menu and Help, Run analysis; and on its second row the `#flow` strip that `FlowBar`
+fills), the scenario bar, one `<section>` per view, the legacy `#modal`
 container and the toast. It loads `style.css` and the module `app.js`.
 
 #### `web/app.js` (entry point)
-Wires the four views, the demo cases and their stages, the File menu and Help.
+Wires the four views, the flow strip, the demo cases and their stages, the File and Assistant menus
+and Help.
 
 | function | what it does |
 |---|---|
-| `show(view)` | switches the visible view and tab; clears the "new verdicts" dot; emits `shown:<view>` |
+| `show(view)` | switches the visible view and the active step of the flow strip; clears the "new verdicts" dot; emits `shown:<view>` |
 | `loadCases()` | `GET /api/cases`, fills the case picker, opens a case when one is picked |
 | `openCase(id, stage)` | `GET /api/cases/{id}/bundle` into `S.bundle`; opens the first (or given) stage, else the bare model |
 | `openStage(stage)` | `GET /api/cases/{id}/stages/{stage}`: sets the stage's model and evidence (keeping the system-port layout) and redraws the scenario bar |
@@ -73,11 +77,53 @@ Wires the four views, the demo cases and their stages, the File menu and Help.
 | `importFile(file)` | reads a file, `POST /api/model/parse`, sets it as the model, reports how many problems it has |
 | `exportYaml()` | `POST /api/model/yaml` and downloads `<name>.yaml` |
 | `bootstrapDialog()` | the *Bootstrap from traces* window: three drop zones (traces, tools list, answers), `POST /api/bootstrap`, shows the skeleton and the questions, and opens the drafted model |
-| `openWorkspace()` | File → Open the shared workspace: `GET /api/workspace`, sets the model and the evidence an assistant left there (see [mcp.md](mcp.md)) |
-| `saveWorkspace()` | File → Save to the shared workspace…: asks before replacing what is there, then `PUT /api/workspace` with the model, the evidence and the case's recognisers, manifest and lookup files |
+| `openWorkspace()` | Assistant → Open the assistant's model: `GET /api/workspace`, sets the model and the evidence an assistant left in the shared workspace (see [mcp.md](mcp.md)) |
+| `saveWorkspace()` | Assistant → Send this model to the assistant…: asks before replacing what is there, then `PUT /api/workspace` with the model, the evidence and the case's recognisers, manifest and lookup files |
 | `watchWorkspace()` | on load and whenever the window gets the focus: `GET /api/workspace/meta`, and a message if the assistant (`by: mcp`) changed the workspace since it was last seen (`localStorage` key `epa.wsSeen`) |
-| `helpDialog()` | the Help window: the four steps and the shortcuts |
-| `main()` | builds the views, binds the tabs, the File menu, Help and Run; restores the saved state or opens a case (`?case=`, `?stage=`, `?view=`, `?run=` in the URL are honoured) |
+| `connectDialog()` | Assistant → Connect an assistant…: how to use the reasoner from an MCP client. The `claude mcp add` command and the Claude Desktop config with this repository's `mcp.sh` (from `GET /api/workspace/meta`, field `mcp`), each with a Copy button; an example request; and the state of the assistant's model, with Open and Send |
+| `helpDialog()` | the Help window: the four steps, the flow strip, the Assistant menu and the shortcuts |
+| `main()` | builds the views and the flow strip (`FlowBar`), the File and Assistant menus, Help and Run; restores the saved state or opens a case (`?case=`, `?stage=`, `?view=`, `?run=` in the URL are honoured) |
+
+#### `web/flow.js`
+The workflow strip on the second row of the top bar: Model → Evidence → Analysis → Verdicts. Each step
+has its purpose as a tooltip and a status line that says where it stands, so the difference between
+3 Analysis (how the verdicts are computed) and 4 Verdicts (the answer) is visible at a glance.
+
+| definition | what it does |
+|---|---|
+| `STEPS` | the four steps: view, number, name, purpose |
+| `analysisCurrent()` | whether the last finished run was on the model and evidence as they are now (`S.analysis.basis` equals `analysisBasis()`); canvas positions do not count |
+| `stepStatus(view)` | where a step stands, `{text, tone}`: the model's component count and check (well-formed / n problems), the evidence counts, the run (not run yet / running… / done in s / out of date: run again / failed), the verdict counts (marked "old:" when out of date) |
+| `FlowBar` | builds the four step buttons (class `tab step`, so `show` marks the active one) and the arrows into `#flow`; a click emits `show` |
+| `FlowBar.update()` | rewrites every status line and its tone; runs on `check`, `doc`, `evidence`, `loaded`, `report` and `analysis` |
+
+The Analysis page (`analysis.js`) and the Verdicts page (`verdicts.js`) say the same in their headers, and
+both show "out of date" with a Run again button when `analysisCurrent()` is false.
+
+#### `web/verdictbar.js`
+The verdict bar under the top bar (`#verdictbar`): once an analysis has run, every log point with its
+verdict counts, on every page; dimmed with "out of date" when `analysisCurrent()` is false.
+
+| definition | what it does |
+|---|---|
+| `pointsSummary(rep, doc)` | the report's cells grouped by log point, in order: `{obs, label, counts, worst}` (`worst` is the most severe cell) |
+| `VerdictBar` | renders the bar; a point is a button that emits `focus-cell` with its worst cell (the Verdicts page opens it) |
+| `VerdictBar.update()` | redraws it on `report`, `doc`, `evidence`, `loaded` and `analysis`; hidden while there is no report |
+
+#### `web/tutorial.js`
+The guided tour (Help → Start the tour): six chapters on a new model (the model, evidence, an LLM joins,
+reading the verdicts, a guard, and more) in which the user does every step in the real interface. Each
+step outlines the control to use (`tour-target`), says what to do, and notices when it is done by
+watching the model, the evidence, the view and the analysis; "Do it for me" makes the same change
+through the functions the canvas and the windows use (`connectPorts`, `addObs`, `commitDoc`, the
+evidence lists). One cell, a wrong value at the log point, goes unchecked → exposed (A) → guarantee (N)
+→ unchecked {S,A} → hope (S) → guarantee (N); `tests/test_tutorial.py` checks that story with the engine.
+
+| definition | what it does |
+|---|---|
+| `context(d)` | the parts the tour talks about, found in whatever the user built: the first non-LLM component, the first LLM, the system input and output, the edges between them, the log point on the edge into the output, the guard on the LLM's edge, the component's value default row |
+| `CHAPTERS`, `STEPS` | the chapters; per step: chapter, title, text, `target()` (the controls to outline), `view` (shown when the step starts), and for an action `done()` and `doIt()`; `after` (what it showed); `run: true` for the analysis steps, which also show the followed cell's verdict |
+| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and notices a step done; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window; `isDone()`; `render()`; `stop()` |
 
 #### `web/state.js`
 The state `S`, the event bus, the model helpers, every direct edit, and the check-then-save step of
@@ -86,7 +132,10 @@ the dialogs.
 | function | what it does |
 |---|---|
 | `on(ev, fn)`, `emit(ev, data)` | the event bus |
-| `emptyEvidence()`, `blankDoc()` | an empty evidence register; a new model (four modes, default levels) |
+| `emptyEvidence()`, `blankDoc()` | an empty evidence register; a new model (the FPTC modes omission, commission, early, late, value with coarse and subtle; `worst_case_defaults: all`; default levels), as `epa/model/edit.py` (`blank`) starts one |
+| `details()`, `setDetails(on)` | simple mode: whether `body.details` is set (Help → Show all details); setting it stores `epa.details` and emits `details`. Elements marked `detail` (and `field(…, {detail: true})`) are hidden by CSS without it; wizards skip their advanced steps (normal flow, absorptions, provenance, levels) |
+| `edgeName(e)` | an edge in words for dropdowns: "writer → parser", or `id: from → to` with all details shown |
+| `analysisBasis()` | what an analysis runs on: the model without canvas positions, and the certificates, witnesses and decisions, as one JSON string; a run records it, `flow.js` compares |
 | `normaliseDoc(doc)` | fills missing lists and levels, turns old `guard.on` into `edge`, converts the old `pass:` key of components into `absorbs`, and lays out anything without a position |
 | `modeFields(doc)`, `topModes(doc)` | the failure modes as `{name, parent}` (sub-kinds have a parent); only the top-level ones |
 | `parseRef(ref)`, `nodeIdOfRef(ref)` | `"comp.port"` → `[comp, port]`; the canvas node of a port reference (`sys:name` for a system port) |
@@ -154,7 +203,8 @@ Rows as plain data. No DOM, so node can test it against every row of the shipped
 | `rowSentence(row, comp)` (with `condText`, `emitText`, `list`) | what a row does, in one sentence |
 | `rowYaml(row)` | the row in YAML flow style, for the dialog's preview |
 | `freshRowId(cid, taken, base)`, `allRowIds(doc)` | a new row id; every analyst row id of the model |
-| `llmDefaultStatus(c, q, m)` | whether the default "m at 10 on q" of an LLM stands, is refined (and by which rows) or dropped |
+| `hasDefaults(doc, c)` | whether a component gets the worst-case defaults: every LLM, and every component when the model says `worst_case_defaults: all` (as `has_defaults` in `epa/model/defaults.py`) |
+| `defaultStatus(c, q, m)` | whether the default "m at 10 on q" of a component stands, is refined (and by which rows) or dropped |
 
 #### `web/rowdialog.js`
 | function | what it does |
@@ -186,7 +236,7 @@ One editing window per kind of model element. Each edits a copy and saves with `
 | definition | what it does |
 |---|---|
 | `ModelView` | lays out view 1: the left pane (Add / Outline tabs, remembered in `localStorage`), the canvas bar (badge, model name, Case figure, Fit, the View menu), the canvas, the rows table, the YAML pane, the footer, and the inspector. `status()` draws the badge and the footer from `S.check`; `leftTab`, `refreshYaml`, `toggleYaml`, `figure`; `eyeIcon()` draws the palette's eye |
-| `Canvas` | the SVG canvas. `nodes()` and `ports(byId)` compute geometry (`endPoint` finds where an edge meets a system port; `toWorld` turns mouse coordinates into canvas ones; `applyT` applies the pan and zoom) (each port sits on the border facing what it is wired to, pairs ordered so their edges do not cross); `render()` draws edges (`edgeShape`, with their guard pills and eyes), nodes (`nodeShape`) and ports (`portShape`) (coloured by the worst verdict after an analysis, `verdictsByObs`); `bind()` handles pan, zoom, moving nodes, wiring from ports and from the + handle, drops from the palette (a guard or point opens its dialog), double-click and Enter (`edit`), Delete (asks first); `reveal(sel)` scrolls a selection into view; `fit()`; `nearestEdge(w)` (the edge a guard or eye is dropped on); `select()`; `flash(msg)` (a toast); helpers `nodeHeight`, `clip`, `segDist` |
+| `Canvas` | the SVG canvas. `nodes()` and `ports(byId)` compute geometry (`endPoint` finds where an edge meets a system port; `toWorld` turns mouse coordinates into canvas ones; `applyT` applies the pan and zoom) (each port sits on the border facing what it is wired to, pairs ordered so their edges do not cross); `render()` draws edges (`edgeShape`, with their guard pills and eyes), nodes (`nodeShape`) and ports (`portShape`) (coloured by the worst verdict after an analysis, `verdictsByObs`); `bind()` handles pan, zoom, moving nodes, wiring from ports and from the + handle, drops from the palette (a guard or point opens its dialog), double-click and Enter (`edit`), Delete (asks first); `reveal(sel)` scrolls a selection into view; `fit()` (a canvas with no size yet, its view hidden, sets `needsFit` and is fitted when the model view is next shown); `nearestEdge(w)` (the edge a guard or eye is dropped on); `select()`; `flash(msg)` (a toast); helpers `nodeHeight`, `clip`, `segDist` |
 | `MapTable` | the rows table under the canvas for the selected component, port or guard: the normal flow, the analyst's rows as sentences with Edit / Copy / Delete (rows touching a selected port are marked), and folded *Rows the engine adds* (pass-through with Absorb…, LLM defaults with Refine… / Drop… / Restore, absorptions with Edit…); for a guard its catch, leak and false-positive rows. `target()` finds what the selection's table is; `head` and `table` build the header and a table; `generated` the folded rows. Helpers `actShort` (the activation column) and `restoreDefault` |
 | `Inspector` | the right pane: a summary of the selection (`renderModel`, `renderComponent`, `renderPort`, `renderSys`, `renderEdge`, `renderGuard`, `renderObs`) with *Edit…*, the problems of the model and an observation point's cells (`renderGenerated`), and *Delete …* at the bottom (`remove` asks first). Helpers: `head` (title, kind, Edit…), `section`, `kv` (a definition list), `select`, `useCases` and `ucItem` (the use-case list), `claims`. `judgesText(o)` says what a point judges |
 | `Outline`, `allRowsDialog()` | the outline lists (`renderList`; `group` and `item` build them; `match` filters; click selects and reveals, double-click edits) and the All rows window |

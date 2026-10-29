@@ -132,7 +132,7 @@ export class EvidenceView {
   available(list, kind) {
     if (!S.bundle || !list || !list.length) return null;
     const loaded = new Set(S.evidence.files.map((f) => f.name));
-    return h('div', { class: 'block' }, h('span', { class: 'section-title' }, `From the ${S.bundle.meta.title} case`),
+    return h('div', { class: 'block detail' }, h('span', { class: 'section-title' }, `From the ${S.bundle.meta.title} case`),
       h('div', { class: 'avail' }, list.map((path) => {
         const name = path.split('/').pop();
         return h('button', { class: loaded.has(name) ? 'loaded' : '', title: path, onclick: () => this.fromCase(path, kind) }, name);
@@ -201,7 +201,7 @@ export class EvidenceView {
 
   contextPanel(reg) {
     const recs = this.recogniserTexts();
-    const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Recognisers and context'), h('span', { class: 'muted' }, 'how logs are read')),
+    const panel = h('section', { class: 'panel detail' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Recognisers and context'), h('span', { class: 'muted' }, 'how logs are read')),
       h('p', { class: 'hint' }, 'A recogniser maps the lines of one log format to witnesses at an observation point. The deployment manifest says which versions were live on which day, so a witness from before a change goes stale.'),
       h('div', { class: 'block' }, h('span', { class: 'section-title' }, 'Recognisers'),
         Object.keys(recs).length ? h('div', { class: 'avail' }, Object.keys(recs).map((n) => h('button', { onclick: () => modal(h('div', { class: 'block' }, h('h2', { style: 'margin:0' }, n), h('pre', { class: 'code' }, recs[n]))) }, n.split('/').pop())))

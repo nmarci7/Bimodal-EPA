@@ -10,6 +10,7 @@ its edges and the guards and observation points on them.
 """
 from __future__ import annotations
 
+import copy
 import re
 
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -409,7 +410,8 @@ def remove_claim(doc, cell, by=None):
     return f"removed the claim(s) about {cell}"
 
 
-def set_settings(doc, name=None, description=None, modes=None, confidentiality=None, authority=None):
+def set_settings(doc, name=None, description=None, modes=None, confidentiality=None, authority=None,
+                 worst_case_defaults=None):
     notes = []
     if name is not None:
         doc["name"] = name
@@ -426,13 +428,24 @@ def set_settings(doc, name=None, description=None, modes=None, confidentiality=N
     if authority is not None:
         doc.setdefault("lattices", {})["authority"] = list(authority)
         notes.append("authority levels")
+    if worst_case_defaults is not None:
+        doc["worst_case_defaults"] = worst_case_defaults
+        notes.append(f"worst-case defaults for {'every component' if worst_case_defaults == 'all' else 'LLM components'}")
     return "changed " + (", ".join(notes) or "nothing")
 
 
+# The failure modes a new model starts with: the failure classes of FPTC (Wallace 2005), taken from the
+# SHARD/HAZOP guide words - omission and commission (service), early and late (timing), value - with
+# value split into coarse (detectable from the data) and subtle (plausible but wrong), after
+# Bondavalli and Simoncini. web/state.js (blankDoc) starts a model the same way.
+NEW_MODES = ["omission", {"commission": []}, "early", "late", {"value": ["coarse", "subtle"]}]
+
+
 def blank(name="new-system", description=""):
-    """A new, empty model, as File → New model in the reasoner."""
+    """A new, empty model, as File → New model in the reasoner: the FPTC failure modes, and worst-case
+    defaults for every component, so a component nobody modelled is never a guarantee."""
     return {"name": name, "description": description,
-            "modes": ["omission", {"commission": []}, "late", "value"],
+            "modes": copy.deepcopy(NEW_MODES), "worst_case_defaults": "all",
             "lattices": {"confidentiality": ["public", "internal", "confidential"], "authority": ["none", "user", "admin"]},
             "components": [], "guards": [], "edges": [], "use_cases": [], "observation_points": [], "claims": [],
             "layout": {"sys": {}}}

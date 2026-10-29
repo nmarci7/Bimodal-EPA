@@ -120,19 +120,21 @@ flowchart LR
 | `engine.coordinator.Engine.__init__` | `engine.cache.RunCache` |
 | `engine.coordinator.Engine.analyse` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.decide`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.rank`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator._count_vectors`, `engine.coordinator.judge_claims`, `model.cone.cells`, `model.cone.cones`, `model.wellformed.absorbed` |
 | `engine.coordinator.Engine.applies` | `engine.coordinator.Engine.inert` |
-| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator.Engine.witnesses_on`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.ensure` | `alethic.runs.runs_from_dump`, `alethic.tlc_runner.run`, `engine.coordinator.Engine.emit`, `engine.coordinator._count_vectors`, `translate.to_tla.module_for` |
 | `engine.coordinator.Engine.inert` | `model.cone._trigger_possible`, `model.cone.normal_edges`, `model.cone.possible` |
-| `engine.coordinator.Engine.possibilities` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `epistemic.reason.candidate_space`, `model.cone.cells`, `model.cone.cones` |
+| `engine.coordinator.Engine.possibilities` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.candidate_space`, `model.cone.cells`, `model.cone.cones` |
 | `engine.coordinator.Engine.problem` | `alethic.runs.reaches`, `alethic.runs.severity`, `alethic.runs.used`, `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `epistemic.reason.CellProblem` |
-| `engine.coordinator.Engine.rank` | `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.problem`, `epistemic.verdicts.verdict_of` |
-| `engine.coordinator.Engine.reasons` | `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.problem`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.rank` | `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.reasons` | `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.register` | `intake.cert_import.classify`, `intake.cert_import.reverify`, `intake.log_import.classify_witness` |
-| `engine.coordinator.Engine.suspension` | `alethic.runs.matches`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.witness_cone`, `epistemic.reason.CellProblem` |
+| `engine.coordinator.Engine.suspension` | `alethic.runs.matches`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.witness_cone`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.CellProblem` |
 | `engine.coordinator.Engine.trace_of` | `alethic.runs.trace`, `model.cone.cells`, `model.cone.cones` |
+| `engine.coordinator.Engine.vacuous` | `engine.coordinator.Engine.wcone` |
 | `engine.coordinator.Engine.wcone` | `engine.coordinator.Engine.witness_cone` |
 | `engine.coordinator.Engine.witness_cone` | `model.cone.Cell`, `model.cone.Cone`, `model.cone.cone_of_cell` |
 | `engine.coordinator.Engine.witness_runs` | `alethic.runs.matches`, `engine.coordinator.Engine.ensure` |
+| `engine.coordinator.Engine.witnesses_on` | `engine.coordinator.Engine.vacuous` |
 | `engine.scenario.recognisers` | `intake.log_import.load_recogniser` |
 | `engine.scenario.stage_inputs` | `engine.scenario.apply_versions`, `engine.scenario.load_case`, `engine.scenario.lookup_files`, `engine.scenario.recognisers`, `intake.cert_import.load`, `intake.log_import.load_deployments`, `intake.log_import.recognise_all`, `model.load.load_model`, `model.load.read_document` |
 | `epistemic.reason.CellProblem.__init__` | `epistemic.reason._q` |
@@ -214,7 +216,7 @@ flowchart LR
 | `model.cone.normal_edges` | `model.cone.forwarding` |
 | `model.cone.possible` | `model.cone._trigger_possible`, `model.cone.forwarding` |
 | `model.defaults.add_guard_rows` | `model.load.Row` |
-| `model.defaults.add_llm_defaults` | `model.defaults.replaces_default`, `model.load.Row` |
+| `model.defaults.add_worst_case_defaults` | `model.defaults.has_defaults`, `model.defaults.replaces_default`, `model.load.Row` |
 | `model.edit._edge` | `model.edit.EditError` |
 | `model.edit._split` | `model.edit.EditError` |
 | `model.edit.component` | `model.edit.EditError` |
@@ -238,7 +240,7 @@ flowchart LR
 | `model.edit.set_absorbs` | `model.edit.EditError`, `model.edit.component` |
 | `model.load.Model.family` | `model.load.Model.children` |
 | `model.load.load_model` | `model.load.ModelError`, `model.load.normalise`, `model.load.read_document`, `model.load.validate`, `model.wellformed.check` |
-| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_llm_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._token` |
+| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_worst_case_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._token` |
 | `model.load.validate` | `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref` |
 | `report.explain.trace_story` | `report.explain._tok` |
 | `report.markdown.cra_export` | `report.explain.reason_line` |
@@ -257,14 +259,18 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+  analysis --> flow
   analysis --> lib
   analysis --> state
   app --> analysis
   app --> dialog
   app --> evidence
+  app --> flow
   app --> lib
   app --> modelview
   app --> state
+  app --> tutorial
+  app --> verdictbar
   app --> verdicts
   canvas --> dialog
   canvas --> lib
@@ -279,6 +285,8 @@ flowchart LR
   evidencedialogs --> lib
   evidencedialogs --> rows
   evidencedialogs --> state
+  flow --> lib
+  flow --> state
   inspector --> dialog
   inspector --> lib
   inspector --> modeldialogs
@@ -314,7 +322,14 @@ flowchart LR
   rowdialog --> lib
   rowdialog --> state
   state --> lib
+  tutorial --> dialog
+  tutorial --> lib
+  tutorial --> state
+  verdictbar --> flow
+  verdictbar --> lib
+  verdictbar --> state
   verdicts --> evidence
+  verdicts --> flow
   verdicts --> lib
   verdicts --> state
 ```

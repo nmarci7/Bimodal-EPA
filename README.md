@@ -50,9 +50,15 @@ file and function (`docs/dev/`). [docs/model-format.md](docs/model-format.md) is
 build and change the model, add evidence, run the analysis, explain the verdicts. `.mcp.json`
 registers it for Claude Code in this repository; the user guide (section 8) has the setup for other
 clients. The assistant and the browser share one model through `.epa-work/workspace.json`
-(File → Open / Save to the shared workspace).
+(Assistant → Open the assistant's model / Send this model to the assistant; Assistant → Connect an
+assistant… shows the setup).
 
 ## The reasoner
+
+The flow strip under the top bar shows the four steps and where each stands (well-formed, how much
+evidence, whether the last run is out of date, the verdict counts); after a run, the verdict bar shows
+every log point's verdicts on every page. **Help → Start the tour** builds a small system with you,
+step by step in the real interface, and uses every part of the reasoner. The reasoner starts simple; Help → Show all details shows everything.
 
 1. **Model.** A canvas with a palette: LLM components, deterministic components, tools, stores,
    external systems and users, system inputs and outputs, guards and observation points. Drag a
@@ -60,12 +66,14 @@ clients. The assistant and the browser share one model through `.epa-work/worksp
    connect them (ports are named for you), drop a guard or an eye onto an edge. Everything is added
    and changed in windows: a step-by-step window for a row (kind, when, then, name and activation,
    with the row read back as a sentence), and one window each for a component (properties, ports,
-   flow, absorptions, LLM defaults), a guard, an observation point, an edge, a use case, a claim and
+   flow, absorptions, worst-case defaults), a guard, an observation point, an edge, a use case, a claim and
    the model's settings; *Edit…* opens the same window filled in. The inspector and the rows table
    say in words what is selected; the Outline lists everything in the model, and *All rows* shows
    every row at once. The model is checked as you edit (the badge and the footer), and a window
    that would add problems says so before it saves. `Import YAML / JSON` and `Export YAML`
-   round-trip the same document the CLI reads. `Bootstrap from traces` drafts a model from
+   round-trip the same document the CLI reads. A new model starts with the FPTC failure modes
+   (omission, commission, early, late, value) and worst-case defaults for every component, so a
+   component nobody modelled is never a guarantee. `Bootstrap from traces` drafts a model from
    OpenTelemetry-style spans and an MCP tools list.
 2. **Evidence.** Drop log files: a recogniser (YAML) turns their lines into witnesses at
    observation points; a deployment manifest makes witnesses from before a version change stale.

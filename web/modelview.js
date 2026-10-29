@@ -69,7 +69,7 @@ export class ModelView {
     on('check', () => this.status());
     on('doc', () => { this.name.textContent = S.doc ? S.doc.name : ''; if (!this.yaml.hidden) this.refreshYaml(); });
     on('loaded', () => { this.name.textContent = S.doc.name; this.figBtn.hidden = !(S.bundle && S.bundle.meta && S.bundle.meta.figure); this.canvas.render(); requestAnimationFrame(() => this.canvas.fit()); });
-    on('shown:model', () => requestAnimationFrame(() => { this.canvas.render(); if (!this.fitted) { this.canvas.fit(); this.fitted = true; } }));
+    on('shown:model', () => requestAnimationFrame(() => { this.canvas.render(); if (!this.fitted || this.canvas.needsFit) { this.canvas.fit(); this.fitted = true; } }));
     on('reveal', (sel) => this.canvas.reveal(sel));
     this.leftTab(store('epa.leftTab') || 'add');
   }

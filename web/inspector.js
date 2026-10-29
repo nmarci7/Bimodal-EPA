@@ -5,7 +5,7 @@
 // rows, a port, an edge, a guardrail with its targets, an observation point with its toleration, a
 // system port with the use cases it starts.
 import { h, clear, add } from './lib.js';
-import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection } from './state.js';
+import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection, details, edgeName } from './state.js';
 import { button, confirmDialog } from './dialog.js';
 import { rowSentence } from './rows.js';
 import { openRowDialog } from './rowdialog.js';
@@ -13,7 +13,7 @@ import {
   openComponentDialog, openGuardDialog, openObsDialog, openEdgeDialog, openSysDialog, openUseCaseDialog, deleteUseCase,
   openClaimDialog, deleteClaim, openModelDialog, openAbsorbDialog, catchSentence,
 } from './modeldialogs.js';
-import { llmDefaultStatus } from './rows.js';
+import { defaultStatus, hasDefaults } from './rows.js';
 
 export class Inspector {
   constructor(host) {
@@ -62,7 +62,7 @@ export class Inspector {
   }
 
   section(title, ...rest) { return h('div', { class: 'block-head' }, h('span', { class: 'section-title' }, title), h('span', { class: 'spacer' }), ...rest); }
-  kv(pairs) { return h('dl', { class: 'kv' }, pairs.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])); }
+  kv(pairs, cls) { return h('dl', { class: `kv${cls ? ` ${cls}` : ''}` }, pairs.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])); }
   select(sel) { S.selection = sel; emit('select'); emit('doc'); }
 
   // ---------------------------------------------------------------- the model
@@ -73,7 +73,8 @@ export class Inspector {
     add(this.host, 
       this.head(d.name || 'model', 'model', '', () => openModelDialog(), false),
       d.description ? h('p', { class: 'desc' }, d.description) : null,
-      this.kv([['Failure modes', modesText], ['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')]]),
+      this.kv([['Failure modes', modesText], ['Worst-case defaults', d.worst_case_defaults === 'all' ? 'every component (FPTC)' : 'LLM components only']]),
+      this.kv([['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')]], 'detail'),
       this.useCases(), this.claims(),
       h('p', { class: 'hint' }, 'Select something on the canvas to see it here; double-click it to edit it. The outline on the left lists everything in the model.'));
   }
@@ -118,19 +119,22 @@ export class Inspector {
     add(this.host, 
       this.head(c.id, llm ? 'LLM component' : `${c.kind} component`, llm ? 'llm' : '', () => openComponentDialog(c.id)),
       c.label ? h('p', { class: 'desc' }, c.label) : null,
-      this.kv([c.version ? ['Version', h('span', { class: 'mono' }, c.version)] : null,
-        ['Authority', `${c.authority || auth.at(-1)}${c.raises ? ', acts on its own authority' : ''}`],
+      c.version ? this.kv([['Version', h('span', { class: 'mono' }, c.version)]]) : null,
+      this.kv([['Authority', `${c.authority || auth.at(-1)}${c.raises ? ', acts on its own authority' : ''}`],
         ['Clearance', c.clearance || conf.at(-1)], ['Requires', c.requires || auth[0]],
-        ['Trusted', trusted ? 'yes' : 'no: it taints what it touches']]));
+        ['Trusted', trusted ? 'yes' : 'no: it taints what it touches']], 'detail'));
 
     // rows
     const rows = c.rows || [];
     const tops = topModes(d);
-    const gen = llm ? c.out.length * tops.length : (c.in.length && c.out.length ? c.in.length : 0) + (c.absorbs || []).length;
+    const hasDef = hasDefaults(d, c);
+    const gen = (hasDef ? c.out.length * tops.length : 0) + (llm ? 0 : (c.in.length && c.out.length ? c.in.length : 0) + (c.absorbs || []).length);
     const rbox = h('div', { class: 'block' }, this.section(`Rows (${rows.length} yours, ${gen} the engine adds)`,
       button('Add row…', () => openRowDialog(c.id, null), { small: true, disabled: !(c.in.length || c.out.length) }),
       button('Table', () => emit('maptable:show'), { small: true, title: 'show the mapping table under the canvas' })));
-    if (!rows.length) rbox.appendChild(h('p', { class: 'hint' }, llm ? 'No rows of your own: the LLM\'s worst-case defaults stand until you refine them.' : 'No rows of your own: failures pass through, nothing is started here.'));
+    if (!rows.length) rbox.appendChild(h('p', { class: 'hint' }, llm ? 'No rows of your own: the LLM\'s worst-case defaults stand until you refine them.'
+      : hasDef ? 'No rows of your own: failures pass through, and the worst-case defaults stand until evidence or a row of yours says otherwise.'
+        : 'No rows of your own: failures pass through, nothing is started here.'));
     else rbox.appendChild(h('div', { class: 'chips' }, rows.map((r) => h('button', { class: 'rowchip', title: rowSentence(r, c), onclick: () => openRowDialog(c.id, r.id) }, r.id))));
     if (rows.length) rbox.appendChild(h('p', { class: 'hint' }, 'Click a row to edit it. The table under the canvas says what each one does.'));
     add(this.host, rbox);
@@ -150,10 +154,10 @@ export class Inspector {
     if (!c.in.length && !c.out.length) pbox.appendChild(h('p', { class: 'hint' }, 'No ports yet: drag from the + handle to wire the component.'));
     add(this.host, pbox);
 
-    // what it absorbs, or the LLM defaults
+    // what it absorbs, and the worst-case defaults
     if (!llm) {
       const ab = c.absorbs || [];
-      const abox = h('div', { class: 'block' }, this.section('What it absorbs', button('Edit…', () => openComponentDialog(c.id, { startAt: 'absorbs' }), { small: true })));
+      const abox = h('div', { class: 'block detail' }, this.section('What it absorbs', button('Edit…', () => openComponentDialog(c.id, { startAt: 'absorbs' }), { small: true })));
       if (!ab.length) abox.appendChild(h('p', { class: 'hint' }, 'Nothing: every failure passes through (assumption A6).'));
       for (const a of ab) {
         abox.appendChild(h('div', { class: 'item', role: 'button', tabindex: 0, onclick: () => openAbsorbDialog(c.id, a.port) },
@@ -161,11 +165,12 @@ export class Inspector {
           h('span', { class: `small ${a.reason ? 'muted' : 'warn'}` }, a.reason || 'no reason given yet')));
       }
       add(this.host, abox);
-    } else {
-      const st = c.out.flatMap((q) => tops.map((m) => llmDefaultStatus(c, q, m)));
+    }
+    if (hasDef) {
+      const st = c.out.flatMap((q) => tops.map((m) => defaultStatus(c, q, m)));
       const n = (s) => st.filter((x) => x.status === s).length;
       add(this.host, h('div', { class: 'block' }, this.section('Worst-case defaults', button('Review…', () => openComponentDialog(c.id, { startAt: 'defaults' }), { small: true })),
-        h('p', { class: 'hint' }, `${n('active')} standing, ${n('refined')} refined by your rows, ${n('dropped')} dropped with a reason. Each output starts with one per failure mode: any message in, that failure at 10 out.`)));
+        h('p', { class: 'hint' }, `${n('active')} standing, ${n('refined')} refined by your rows, ${n('dropped')} dropped with a reason. Each output starts with one per failure mode: any message in, that failure at 10 out.${llm ? '' : ' A certificate may say one never fires.'}`)));
     }
   }
 
@@ -213,7 +218,7 @@ export class Inspector {
     const guards = d.guards.filter((g) => g.edge === e.id);
     const o = d.observation_points.find((x) => x.edge === e.id);
     add(this.host, 
-      this.head(e.id, 'edge', '', () => openEdgeDialog(e.id)),
+      this.head(details() ? e.id : edgeName(e), 'edge', '', () => openEdgeDialog(e.id)),
       this.kv([['From', h('span', { class: 'mono' }, e.from)], ['To', h('span', { class: 'mono' }, e.to)], e.label ? ['Label', e.label] : null]),
       h('div', { class: 'block' }, this.section(`Guards on it (${guards.length})`, button('Add guard…', () => openGuardDialog(null, { edge: e.id }), { small: true })),
         guards.length ? h('p', { class: 'hint' }, `In the order they cut it: ${[e.from, ...guards.map((g) => g.label || g.id), e.to].join(' → ')}.`) : h('p', { class: 'hint' }, 'None. A guard cuts the edge in two and catches its targets unless its leak row fires.'),
@@ -231,8 +236,8 @@ export class Inspector {
     const ts = g.targets || [];
     add(this.host, 
       this.head(g.label || 'unnamed guard', g.learned ? 'learned guardrail' : 'guardrail', 'guard', () => openGuardDialog(g.id)),
-      this.kv([['Id', h('span', { class: 'mono' }, g.id)], g.version ? ['Version', h('span', { class: 'mono' }, g.version)] : null,
-        ['Cuts', e ? h('button', { class: 'linkish small', onclick: () => this.select({ type: 'edge', id: e.id }) }, `${e.id}: ${e.from} → ${e.to}`) : 'an edge that no longer exists'],
+      this.kv([details() ? ['Id', h('span', { class: 'mono' }, g.id)] : null, g.version ? ['Version', h('span', { class: 'mono' }, g.version)] : null,
+        ['Cuts', e ? h('button', { class: 'linkish small', onclick: () => this.select({ type: 'edge', id: e.id }) }, edgeName(e)) : 'an edge that no longer exists'],
         g.closed_output ? ['Output', 'a closed set: may wash taint'] : null]),
       h('div', { class: 'block' }, this.section(`What it catches (${ts.length})`, button('Edit…', () => openGuardDialog(g.id, { startAt: 'targets' }), { small: true })),
         ts.length ? ts.map((t) => h('div', { class: 'item static' }, h('b', { class: 'mono small' }, targetText(t)),
@@ -251,8 +256,8 @@ export class Inspector {
     const tol = Object.entries(o.tolerate || {});
     add(this.host, 
       this.head(o.label || o.id, 'observation point', '', () => openObsDialog(o.id)),
-      this.kv([['Id', h('span', { class: 'mono' }, o.id)],
-        ['Observes', e ? `what ${e.to} receives on ${e.id}${guards.length ? `, after ${guards.join(', ')}` : ''}` : 'an edge that no longer exists'],
+      this.kv([details() ? ['Id', h('span', { class: 'mono' }, o.id)] : null,
+        ['Observes', e ? `what ${e.to} receives${details() ? ` on ${e.id}` : ''}${guards.length ? `, after ${guards.join(', ')}` : ''}` : 'an edge that no longer exists'],
         o.log ? ['Log', o.log] : null,
         ['Judges', tol.length ? h('div', { class: 'chips' }, tol.map(([m, th]) => h('span', { class: 'tag plain' }, `${m} ≥ ${th}`))) : 'no failure mode'],
         ['Provenance', [o.taint === 'reject' ? 'flags taint' : null, o.clearance ? `confidentiality above ${o.clearance === 'receiver' && recv ? `${recv.id}'s clearance` : o.clearance}` : null,

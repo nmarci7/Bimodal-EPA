@@ -15,6 +15,8 @@ modes:                       # the behavioural failure modes; a mapping adds sub
 lattices:                    # low → high
   confidentiality: [public, pseudonymous, personal]
   authority: [none, agent, principal]
+worst_case_defaults: all     # optional: every component starts with worst-case rows (FPTC style);
+                             # llm (the default when absent): only LLM components do
 components: [...]
 guards: [...]
 edges: [...]
@@ -27,6 +29,19 @@ layout: {sys: {...}}         # optional: canvas positions of the system ports
 Every failure is a magnitude from 0 (none) to 10. A sub-kind is a failure of its parent mode: a
 guard that catches `commission` catches `dup` too, and an observation point that tolerates
 `commission` judges each sub-kind it lists.
+
+A new model (File → New model, or `new_model` over MCP) starts with the failure classes of FPTC
+(Wallace 2005), from the HAZOP/SHARD guide words, which match the service, timing and value error
+families of the AADL error library (SAE AS5506), and with `worst_case_defaults: all`:
+
+```yaml
+modes: [omission, {commission: []}, early, late, {value: [coarse, subtle]}]
+worst_case_defaults: all
+```
+
+`omission` and `commission` are service failures (a message missing, a message that should not be),
+`early` and `late` timing failures, `value` a wrong content: `coarse` detectable from the data (out of
+range, malformed), `subtle` plausible but wrong (Bondavalli and Simoncini).
 
 ## Components
 
@@ -45,7 +60,7 @@ guard that catches `commission` catches `dup` too, and an observation point that
   raises: true               # acts on its own authority (signs, approves)
   clearance: personal        # the most confidential data it may receive
   rows: [...]
-  drop_defaults: [...]       # LLM components only
+  drop_defaults: [...]       # components with worst-case defaults: LLMs, or all with worst_case_defaults: all
   pos: {x: 70, y: 320}       # canvas position (optional)
 ```
 
@@ -56,7 +71,7 @@ output port (or a system input) to an input port (or a system output). One outpu
 several edges, which then carry the same message; one input port may receive several edges, whose
 tokens are merged. A port may stay unconnected. The reasoner draws inputs as hollow dots and
 outputs as filled dots on the component's border, and lists the component's whole mapping table
-(analyst rows, pass-through, LLM defaults, absorbed failures) under the canvas.
+(analyst rows, pass-through, worst-case defaults, absorbed failures) under the canvas.
 
 ### Pass-through and absorption (assumption A6)
 
@@ -101,16 +116,19 @@ and lets the evidence choose. An LLM component's rows can only be sometimes or a
 rule). `when: {"*": any}` matches a message on any input port; "any input" takes only `any` and
 stands alone, so a failure pattern names its port.
 
-### Worst-case defaults of an LLM component
+### Worst-case defaults
 
-Every output port of an LLM component starts with one generated row per top-level mode: any
-message in, that mode at 10 out. Only an analyst row with the same trigger - `when: {"*": any}`, or
+Every output port of an LLM component - and of every component, when the model says
+`worst_case_defaults: all` - starts with one generated row per top-level mode: any message in, that
+mode at 10 out, open. Only an analyst row with the same trigger - `when: {"*": any}`, or
 the only input port with `any` - that emits the same top-level mode on the same port replaces it; a
 magnitude below 10 is recorded as a calibration. Every other row emitting there (a failure pattern, a
-fork-join, a sub-kind) is added beside the default, because a narrower trigger would say that the LLM
-does not start the failure on its own. A row of an LLM component that emits a failure can never be
-fixed to `never` (the LLM rule). Dropping a default needs a reason, and the reason is printed wherever
-a verdict rests on it:
+fork-join, a sub-kind) is added beside the default, because a narrower trigger would say that the
+component does not start the failure on its own. A row of an LLM component that emits a failure can
+never be fixed to `never` (the LLM rule); the default of any other component can be, by a certificate
+(`rows: {"<port>.<mode>": never}`), which is how evidence earns a guarantee for a component nobody
+modelled. Dropping a default needs a reason, and the reason is printed wherever a verdict rests on
+it:
 
 ```yaml
 drop_defaults:

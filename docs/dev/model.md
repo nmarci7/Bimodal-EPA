@@ -20,8 +20,9 @@ strings. Every later stage reads the `Model`: `translate/to_tla.py`, `engine/coo
 the MCP server and `tests/test_ports.py`.
 
 ### epa/model/defaults.py
-Creates the generated rows of the mapping tables: for LLM components the worst-case default rows
-(`default.<comp>.<port>.<mode>`), for guards one leak row per target (`leak.<guard>.<key>`) and, for a
+Creates the generated rows of the mapping tables: the worst-case default rows
+(`default.<comp>.<port>.<mode>`) of every LLM component, or of every component when the model says
+`worst_case_defaults: all` (FPTC style, the setting of a new model), for guards one leak row per target (`leak.<guard>.<key>`) and, for a
 learned guard, a false-positive row (`fp.<guard>`). It also writes `calibrate-default` and
 `drop-default` records into `m.decisions`. Its only caller is `load.normalise`, after the analyst rows
 exist; it imports `Row` from `.load` inside each function (load already imports defaults).
@@ -81,7 +82,7 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | `_absorbed_modes` | The modes of an `absorbs` entry (`modes`, else `mode`); `"all"` gives every field. | — |
 | `_parse_op` | An emit operator → `(op, k)`: an int is `const` (clamped 0–10); `keep` and `max` have k = 0; `+k` is `plus` (not clamped); `const k` is clamped; anything else raises ValueError. | — |
 | `_parse_when` | `when` → `{port: {"any": True}}` for `any`/None/True, else `{port: {"modes": {mode: threshold}}}`; None gives `{}`. | — |
-| `normalise` | Builds the `Model` from a valid document (4a): fields, lattices, components, edge segments split by guard chains, guard components, observation points, use-case entries, analyst rows, absorb decisions, generated rows, cycle flags. | load._mode_list, load._absorbed_modes, load._parse_ref, load._guard_edge, load._entries, load._token, load._is_asis, load._parse_op, load._parse_when, defaults.add_llm_defaults, defaults.add_guard_rows, load._mark_cycles |
+| `normalise` | Builds the `Model` from a valid document (4a): fields, lattices, components, edge segments split by guard chains, guard components, observation points, use-case entries, analyst rows, absorb decisions, generated rows, cycle flags. | load._mode_list, load._absorbed_modes, load._parse_ref, load._guard_edge, load._entries, load._token, load._is_asis, load._parse_op, load._parse_when, defaults.add_worst_case_defaults, defaults.add_guard_rows, load._mark_cycles |
 | `_token` | A use-case token → `{"b": {field: magnitude}, "c": conf index, "a": auth index, "t": taint}`; fields default to 0, `c` to the bottom, `a` to the top, `t` to false. | — |
 | `_mark_cycles` | Sets `on_cycle` on every component that can reach itself (DFS over the component graph, ignoring `sys`). | — |
 
@@ -90,7 +91,9 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | Definition | What it does | Calls |
 |---|---|---|
 | `replaces_default` | True if analyst row `r` replaces the default for `(port, mode)`: kind `row`, `mode` (a top-level mode exactly) in `r.then[port]`, and `r.when` is `{"*": any}` or, on a single-input component, `{that input: any}`. | — |
-| `add_llm_defaults` | For each LLM component, output port and top mode: a replacing analyst row wins (a `const k < 10` is recorded as a `calibrate-default` decision); else a `drop_defaults` entry is recorded as a `drop-default` decision; else the row `default.<cid>.<port>.<mode>` is added (kind `default`, `{"*": any}` ⇒ mode const 10, open, llm). | load.Model.comp_rows, defaults.replaces_default |
+| `WORST_CASE` | What `worst_case_defaults` may say: `llm` (the default: LLM components only) or `all` (every component). `load.validate` rejects anything else. | — |
+| `has_defaults` | Whether a component of the document gets the worst-case table: every LLM does; with `worst_case_defaults: all` every component does. Mirrored by `hasDefaults` in `web/rows.js`. | — |
+| `add_worst_case_defaults` | For each component with defaults (`has_defaults`), output port and top mode: a replacing analyst row wins (a `const k < 10` is recorded as a `calibrate-default` decision); else a `drop_defaults` entry is recorded as a `drop-default` decision; else the row `default.<cid>.<port>.<mode>` is added (kind `default`, `{"*": any}` ⇒ mode const 10, open). The row is `llm` (under the LLM rule, never "never") only for an LLM component; any other component's default may be certified never (`rows: {"<port>.<mode>": never}`), which is how evidence earns a guarantee for a component nobody modelled. | load.Model.comp_rows, defaults.has_defaults, defaults.replaces_default |
 | `add_guard_rows` | For each guard target adds `leak.<gid>.<key>` (key: the mode name, else the target kind; `when {"in": any}`, empty `then`, open, llm if learned, decidable if the target is decidable and the guard is not learned); a learned guard also gets `fp.<gid>`, which emits omission at `fp_omission` (or 10) on `out`. | load.Component.is_guard |
 
 ### epa/model/wellformed.py
@@ -189,7 +192,7 @@ generated), `obs`, `use_cases`, `claims`, `decisions` (the document's plus gener
       `when` and every output as-is; `row` otherwise. The activation defaults to `always` for `fwd`
       and open otherwise; `fixed` maps always/sometimes/never to A/S/N.
    8. **Model**, with an `absorb` decision per declared absorption.
-   9. **Generated rows**: `add_llm_defaults`, then `add_guard_rows` (c).
+   9. **Generated rows**: `add_worst_case_defaults`, then `add_guard_rows` (c).
    10. **Cycles**: `_mark_cycles` (only guards' flags change behaviour: a guard on a cycle never drops).
 4. `wellformed.check(m)`; problems raise `ModelError`.
 

@@ -146,13 +146,28 @@ class Engine:
                       edges=u("edges"), use_cases=u("use_cases"), rows=u("rows"), always=u("always"),
                       fields=fields, rel=rel)
 
+    def vacuous(self, w):
+        """A witness whose use case reaches none of the points it logs, and which logs them unused and
+        clean: every run of that use case shows exactly that, so it constrains no candidate. (Its cone
+        has no run of that use case, so matching it against the cone would wrongly say the model lacks
+        a path. A witness of such a use case that logs a message or a failure there still lacks one.)"""
+        uc = w.get("use_case")
+        if not uc or uc in self.wcone(w).use_cases:
+            return False
+        return all(not logged.get("used") and not any(lo > 0 for lo, _ in (logged.get("modes") or {}).values())
+                   for logged in w["at"].values())
+
+    def witnesses_on(self, reg):
+        """The witnesses in force that bear on the analysis: every one but the vacuous ones."""
+        return [w for w in reg["witnesses"] if w["state"] == "in force" and not self.vacuous(w)]
+
     def suspension(self, reg):
         """The certificates the evidence refutes, for the whole model: every certificate in a subset-minimal
         set that, with one witness, leaves no candidate (Reiter), and any two certificates that pin one row
         to different activations. Witnesses alone leaving no candidate mean the model lacks a path."""
         m = self.m
         certs = [c for c in reg["certificates"] if c["state"] == "in force"]
-        wits = [w for w in reg["witnesses"] if w["state"] == "in force"]
+        wits = self.witnesses_on(reg)
         susp, conflicts, lacking = set(), [], []
         pinned = {}
         for c in certs:
@@ -260,7 +275,7 @@ class Engine:
     def decide(self, cone, cell, certs_on, wits_on, register):
         m = self.m
         in_force = [c for c in register["certificates"] if c["state"] == "in force"]
-        witnesses = [w for w in register["witnesses"] if w["state"] == "in force"]
+        witnesses = self.witnesses_on(register)
         rows = cone.cell_rows[cell.id]
         prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
         cert_ids = {k for k in prob.cert_ids}
@@ -350,7 +365,7 @@ class Engine:
             if pins is not None:
                 self.ensure(cone, [pins])
                 prob2, _, _ = self.problem(cone, cell, [c for c in register["certificates"] if c["state"] == "in force"],
-                                           [w for w in register["witnesses"] if w["state"] == "in force"])
+                                           self.witnesses_on(register))
                 b2 = prob2.brave(others & set(prob2.cert_ids), won)
                 if V.verdict_of(b2["seen"] if b2 else None) != verdict:
                     out["certificates"].append(k)
@@ -476,7 +491,7 @@ class Engine:
                 certifiable.append(g)
         combos = [(g,) for g in certifiable] + list(itertools.combinations(certifiable, 2))
         self.emit("ranking", f"ranking {len(combos)} action(s) over {len(by_cell)} cells")
-        wit = [w for w in reg["witnesses"] if w["state"] == "in force"]
+        wit = self.witnesses_on(reg)
         inf = [c for c in reg["certificates"] if c["state"] == "in force"]
         hyp_rows = {g.id: {t["row"]: "N" for t in g.targets if t["decidable"]} for g in certifiable}
         # one grounded problem per cell, with every hypothetical certificate switched off until used
@@ -526,7 +541,7 @@ class Engine:
         cone = next(k for k in C.cones(m, C.cells(m)) if cell_id in k.cell_rows)
         self.ensure(cone, [{}])
         inf = [c for c in reg["certificates"] if c["state"] == "in force"]
-        wit = [w for w in reg["witnesses"] if w["state"] == "in force"]
+        wit = self.witnesses_on(reg)
         prob, runs, proj = self.problem(cone, cell, inf, wit)
         rows = [r for r in cone.cell_rows[cell_id] if m.rows[r].open]
         space = candidate_space(m, rows)

@@ -18,6 +18,9 @@ import tempfile
 import time
 
 VERSION = 1
+# The name the MCP server registers under (epa/mcp/server.py) and the reasoner tells users to add.
+SERVER_NAME = "bimodal-reasoner"
+TITLE = "Bimodal Agentic System Reasoner"
 
 
 def default_path(work=None):

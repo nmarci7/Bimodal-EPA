@@ -32,9 +32,11 @@ FULL = {
     "provenance": True,         # taint / conf / auth targets and cells
     "explicit_pass": False,     # write `pass: all` on every non-LLM component (the old format)
     "old_defaults": False,      # keep an LLM default only where no analyst row emits that mode
+    "all_defaults": True,       # worst_case_defaults: all - every component gets the worst-case table
 }
 OLD_ENGINE = {**FULL, "absorbs": False, "forwarding": False, "internal": False, "sinks": False,
-              "scope": False, "implicit_receiver": False, "explicit_pass": True, "old_defaults": True}
+              "scope": False, "implicit_receiver": False, "explicit_pass": True, "old_defaults": True,
+              "all_defaults": False}
 
 MODE_SETS = [
     ["omission", {"commission": ["oom"]}, "late"],
@@ -62,6 +64,8 @@ class _Gen:
     def __init__(self, seed, features):
         self.rng = random.Random(seed)
         self.f = {**FULL, **(features or {})}
+        # drawn apart from self.rng, so a seed without the setting generates the model it always did
+        self.all_defaults = self.f["all_defaults"] and random.Random(f"all-defaults-{seed}").random() < 0.3
         self.budget = MAX_OPEN
         self.n_fixed_s = 0
 
@@ -133,6 +137,8 @@ class _Gen:
         doc = {"name": "random", "modes": self.modes,
                "lattices": {"confidentiality": self.conf, "authority": AUTH},
                "components": comps, "guards": [], "edges": edges}
+        if self.all_defaults:
+            doc["worst_case_defaults"] = "all"
         self.comps, self.edges = comps, edges
         if f["guards"]:
             self.guards(doc)
@@ -148,6 +154,12 @@ class _Gen:
         for c in comps:
             if c["kind"] == "llm":
                 self.defaults(c)
+            elif self.all_defaults:
+                self.defaults(c)
+                if f["absorbs"] and self.chance(0.25):
+                    c["absorbs"] = [{"port": rng.choice(c["in"]),
+                                     "modes": "all" if self.chance(0.3) else [rng.choice(self.top)],
+                                     "reason": "absorbed by construction"}]
             elif f["absorbs"] and self.chance(0.25):
                 c["absorbs"] = [{"port": rng.choice(c["in"]),
                                  "modes": "all" if self.chance(0.3) else [rng.choice(self.top)],
@@ -284,7 +296,7 @@ class _Gen:
                 for e in (r.get("then") or {}).values():
                     if isinstance(e, dict):
                         hot |= set(e)
-            if c["kind"] == "llm":
+            if c["kind"] == "llm" or self.all_defaults:
                 dropped = {(d["port"], d["mode"]) for d in c.get("drop_defaults", [])}
                 hot |= {m for q in c["out"] for m in self.top if (q, m) not in dropped}
         for u in self.ucs:

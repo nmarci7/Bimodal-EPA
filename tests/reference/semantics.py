@@ -171,7 +171,7 @@ class Model:
         self.comps, self.rows = {}, {}
         self._components()
         self._edges_and_guards()
-        self._llm_defaults()
+        self._worst_case_defaults()
         self._use_cases()
         self._observation_points()
         self._graph()
@@ -290,12 +290,17 @@ class Model:
             row.domain = domain or ("N", "S", "A")
         self.rows[rid] = row
 
-    def _llm_defaults(self):
+    def _worst_case_defaults(self):
         """§6: for every LLM output port and top-level mode a worst-case default, replaced only by
-        an analyst row of the same shape ("*" (or the only input): any => exactly that mode, const)."""
+        an analyst row of the same shape ("*" (or the only input): any => exactly that mode, const).
+        With `worst_case_defaults: all` every component gets them; the default of a component that is
+        not an LLM may be never (the LLM rule does not reach it)."""
+        every = self.doc.get("worst_case_defaults", "llm")
+        if every not in ("llm", "all"):
+            raise IllFormed(f"worst_case_defaults {every!r}")
         for c in self.doc.get("components", []):
             comp = self.comps[c["id"]]
-            if not comp.llm:
+            if not comp.llm and every != "all":
                 if c.get("drop_defaults"):
                     raise IllFormed(f"component {comp.id}: drop_defaults on a non-LLM component")
                 continue
@@ -311,7 +316,8 @@ class Model:
                         continue
                     rid = f"default.{comp.id}.{q}.{m}"
                     self.rows[rid] = Row(id=rid, comp=comp.id, kind="default", when={"*": ANY},
-                                         then={q: {m: ("const", TOP)}}, domain=("S", "A"))
+                                         then={q: {m: ("const", TOP)}},
+                                         domain=("S", "A") if comp.llm else ("N", "S", "A"))
 
     @staticmethod
     def _replaces(comp, r, q, m):

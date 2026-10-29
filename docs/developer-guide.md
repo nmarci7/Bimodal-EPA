@@ -135,7 +135,7 @@ flowchart TD
   VA --> V1["_mode_list · _absorbed_modes · _is_asis ·<br/>_parse_op · _parse_ref · _guard_edge · _entries"]
   LM --> NO["load.normalise"]
   NO --> N1["_parse_when · _parse_op · _token ·<br/>Component · Edge · Row · ObsPoint · UseCase · Model"]
-  NO --> D1["defaults.add_llm_defaults<br/>(replaces_default)"]
+  NO --> D1["defaults.add_worst_case_defaults<br/>(has_defaults · replaces_default)"]
   NO --> D2["defaults.add_guard_rows"]
   NO --> MC["load._mark_cycles"]
   LM --> WF["wellformed.check"]
@@ -176,7 +176,9 @@ import graph is in [dev/call-graph.md](dev/call-graph.md).
 
 ```mermaid
 flowchart LR
-  APP["app.js<br/>main · File menu · cases · stages"] --> MV["modelview.js"] & EVV["evidence.js"] & AN["analysis.js"] & VE["verdicts.js"]
+  APP["app.js<br/>main · File and Assistant menus · cases · stages"] --> MV["modelview.js"] & EVV["evidence.js"] & AN["analysis.js"] & VE["verdicts.js"]
+  APP --> FL["flow.js<br/>the workflow strip"]
+  FL & AN & VE --> ST
   MV --> CV["canvas.js"] & INS["inspector.js"] & MT["maptable.js"] & OL["outline.js"]
   CV & INS & MT & OL --> MD["modeldialogs.js"] & RD["rowdialog.js"]
   EVV --> ED["evidencedialogs.js"]

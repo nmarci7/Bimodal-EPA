@@ -97,8 +97,16 @@ test('the sentence says what the row does', () => {
 
 test('an LLM default is refined only by a row with the same trigger', () => {
   const c = { ...agent, in: ['invoice'], rows: [{ id: 'a', when: { invoice: 'any' }, then: { request: { late: 'const 4' } } }, { id: 'b', when: { invoice: { late: 2 } }, then: { request: { oom: 'const 9' } } }], drop_defaults: [{ port: 'request', mode: 'value', reason: 'x' }] };
-  assert.deepEqual(R.llmDefaultStatus(c, 'request', 'late').refinedBy, ['a']);
-  assert.equal(R.llmDefaultStatus(c, 'request', 'oom').status, 'active');
-  assert.deepEqual(R.llmDefaultStatus(c, 'request', 'oom').beside, ['b']);
-  assert.equal(R.llmDefaultStatus(c, 'request', 'value').status, 'dropped');
+  assert.deepEqual(R.defaultStatus(c, 'request', 'late').refinedBy, ['a']);
+  assert.equal(R.defaultStatus(c, 'request', 'oom').status, 'active');
+  assert.deepEqual(R.defaultStatus(c, 'request', 'oom').beside, ['b']);
+  assert.equal(R.defaultStatus(c, 'request', 'value').status, 'dropped');
+});
+
+test('worst-case defaults: every LLM, and every component when the model says all', () => {
+  const det = { id: 'parser', kind: 'deterministic', in: ['req'], out: ['out'] };
+  assert.equal(R.hasDefaults({}, agent), true);
+  assert.equal(R.hasDefaults({}, det), false);
+  assert.equal(R.hasDefaults({ worst_case_defaults: 'llm' }, det), false);
+  assert.equal(R.hasDefaults({ worst_case_defaults: 'all' }, det), true);
 });
