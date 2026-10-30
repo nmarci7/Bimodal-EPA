@@ -533,3 +533,5 @@ body:not(.details) .detail { display: none !important; }
 /* the tour points at a control by outlining it */
 .tour-target { outline: 3px solid #E0A100 !important; outline-offset: 3px; border-radius: 8px; animation: tour-pulse 1.6s ease-in-out infinite; }
 @keyframes tour-pulse { 0%, 100% { outline-color: #E0A100; } 50% { outline-color: rgba(224, 161, 0, .35); } }
+.tut-note { font-size: 12.5px; padding: 6px 10px; border-radius: 8px; background: var(--h-bg); color: var(--h-ink); }
+.tut-note.warn { background: var(--e-bg); color: var(--e-ink); }

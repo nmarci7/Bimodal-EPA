@@ -71,6 +71,7 @@ export class ModelView {
     on('loaded', () => { this.name.textContent = S.doc.name; this.figBtn.hidden = !(S.bundle && S.bundle.meta && S.bundle.meta.figure); this.canvas.render(); requestAnimationFrame(() => this.canvas.fit()); });
     on('shown:model', () => requestAnimationFrame(() => { this.canvas.render(); if (!this.fitted || this.canvas.needsFit) { this.canvas.fit(); this.fitted = true; } }));
     on('reveal', (sel) => this.canvas.reveal(sel));
+    on('fit', () => requestAnimationFrame(() => this.canvas.fit()));
     this.leftTab(store('epa.leftTab') || 'add');
   }
 
