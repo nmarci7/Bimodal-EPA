@@ -182,11 +182,43 @@ export function moveEdgeEnd(eid, end, port) {
   changed({ type: 'edge', id: eid });
 }
 
+// ---------------------------------------------------------------- taint levels
+// Who could have written the content, from good to bad (docs/model-format.md, "Use cases").
+export const TAINT_LEVELS = ['clean', 'internal', 'identified', 'open'];
+const TAINT_MEANS = {
+  clean: 'only trusted components and inputs touched it',
+  internal: 'a component inside the system produced or changed it',
+  identified: 'an outside party the system authenticates could have shaped it',
+  open: 'anyone could have written it',
+};
+/** [[level, words]] for a select. */
+export const taintOptions = (levels = TAINT_LEVELS) => levels.map((l) => [l, `${l}: ${TAINT_MEANS[l]}`]);
+/** A level as its name: a name, 0..3, or the old booleans (true means open). */
+export function taintName(v) {
+  if (v === true) return 'open';
+  return TAINT_LEVELS[v] || (TAINT_LEVELS.includes(v) ? v : 'clean');
+}
+/** What a component adds to what it sends, as epa/model/load.py reads it. */
+export function componentTaint(c) {
+  if (c.taint !== undefined) return taintName(c.taint);
+  if (c.trusted !== undefined) return c.trusted ? 'clean' : 'internal';
+  return ['llm', 'external', 'user'].includes(c.kind) ? 'internal' : 'clean';
+}
+/** The lowest level a guard's taint target catches: `{taint: true}` is any taint. */
+export const targetTaint = (t) => (t.taint === true ? 'internal' : taintName(t.taint));
+/** The highest level a point accepts, or null if it does not judge taint (`taint: reject` is clean). */
+export function toleratedTaint(o) {
+  if (o.tolerate_taint !== undefined) return taintName(o.tolerate_taint);
+  return o.taint === 'reject' ? 'clean' : null;
+}
+
 // ---------------------------------------------------------------- summaries for the canvas
 const fmtLevel = (x) => x;
+/** A failure as a pattern, a target or a toleration: the mode, or its threshold on a refined scale. */
+export const modeAt = (m, k) => (k === undefined || k === null || k === 'present' || Number(k) === 1 ? m : `${m} ≥ ${k}`);
 export function targetText(t) {
-  if ('mode' in t) return `${t.mode} ≥ ${t.threshold || 1}`;
-  if ('taint' in t) return 'taint';
+  if ('mode' in t) return modeAt(t.mode, t.threshold);
+  if ('taint' in t) return `taint ≥ ${targetTaint(t)}`;
   if ('conf' in t) return `conf > ${fmtLevel(t.conf)}`;
   if ('auth' in t) return `auth < ${fmtLevel(t.auth)}`;
   return '?';
@@ -199,11 +231,13 @@ export function guardSummary(d, g) {
   return { empty: false, text, long: `catches ${parts.join(', ')}${g.learned ? ' (learned: none can be certified never)' : ''}` };
 }
 /** Whether a point judges taint: the tolerated level, or the old `taint: reject`. */
-export function judgesTaint(o) { return o.tolerate_taint !== undefined || o.taint === 'reject'; }
+export function judgesTaint(o) { return toleratedTaint(o) !== null; }
+/** What a point judges about taint, in a few words. */
+export const taintJudged = (o) => (toleratedTaint(o) === 'clean' ? 'taint' : `taint > ${toleratedTaint(o)}`);
 
 export function obsSummary(d, o) {
-  const parts = Object.entries(o.tolerate || {}).map(([m, v]) => `${m}≥${v}`);
-  if (judgesTaint(o)) parts.push('taint');
+  const parts = Object.entries(o.tolerate || {}).map(([m, v]) => modeAt(m, v));
+  if (judgesTaint(o)) parts.push(taintJudged(o));
   if (o.clearance) parts.push(o.clearance === 'receiver' ? 'conf>clearance' : `conf>${o.clearance}`);
   if (o.requires) parts.push(o.requires === 'receiver' ? 'auth<required' : `auth<${o.requires}`);
   if (!parts.length) return { empty: true, text: 'judges nothing', long: 'nothing: tick the failures it judges' };
@@ -221,8 +255,6 @@ export function addGuard(edgeId) {
 }
 export function addObs(edgeId) {
   const d = S.doc;
-  const there = d.observation_points.find((o) => o.edge === edgeId);
-  if (there) return there.id;
   const e = edge(d, edgeId);
   const recv = e ? nodeIdOfRef(e.to).replace('sys:', '') : edgeId.replace(/^e_/, '');
   const id = uniqueId(`o_${recv}`, new Set(d.observation_points.map((o) => o.id)));

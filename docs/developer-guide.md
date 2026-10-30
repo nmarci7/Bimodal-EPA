@@ -83,7 +83,7 @@ flowchart TB
   the same functions (`load_model`, `Engine.analyse`, `cert_import.classify`, `log_import.recognise_all`,
   `markdown.report`, …).
 * **Caching** has two levels: the SQLite run cache (`engine/cache.py`, keyed by a cone's behaviour hash
-  and the firing choices already explored) and TLC's work folders (`tlc/<hash>/`, keyed by the module
+  and the switch vectors already explored) and TLC's work folders (`tlc/<hash>/`, keyed by the module
   text). A second analysis of an unchanged model starts no Java process.
 
 ## 2. The pipeline: from a model to verdicts
@@ -115,7 +115,7 @@ flowchart LR
    one ready component each: TLC branches on which, so it walks every firing order. A run ends when no
    component is ready; the terminal states, one per distinct outcome, are the runs.
 4. **Candidates, the epistemic layer** ([dev/engine.md](dev/engine.md)). A candidate gives each open row
-   an activation (never, sometimes, always). clingo keeps the candidates the evidence allows:
+   a frequency (never, sometimes, always). clingo keeps the candidates the evidence allows:
    certificates fix rows, witnesses need a matching run, the LLM rule forbids "never" on LLM rows. The
    statuses the remaining candidates give the failure are the verdict.
 5. **Report** ([dev/engine.md](dev/engine.md), [dev/intake-api.md](dev/intake-api.md)). Reasons (what

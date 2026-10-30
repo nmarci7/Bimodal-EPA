@@ -82,6 +82,18 @@ test('changing the kind keeps what fits', () => {
   assert.ok(sink.when.some((c) => !c.any));
 });
 
+test('frequency is what is saved, and a failure is present', () => {
+  const old = { id: 'r', when: { view: { late: 'present' } }, then: { request: { dup: 'present' } }, activation: 'sometimes' };
+  const row = R.fromDraft(R.toDraft(old), old);
+  assert.deepEqual(row, { id: 'r', when: { view: { late: 'present' } }, then: { request: { dup: 'present' } }, frequency: 'sometimes' });
+  assert.deepEqual(R.fromDraft(R.toDraft({ id: 'n', when: { view: { late: 1 } }, then: {} }), null).when, { view: { late: 'present' } });
+  assert.deepEqual(R.fromDraft(R.toDraft({ id: 'n', when: { view: { late: 3 } }, then: {} }), null).when, { view: { late: 3 } });
+  // an emission that stops being "as it is" starts as present
+  assert.equal(R.toDraft({ id: 'f', when: { '*': 'any' }, then: { request: 'as it is' } }).then[0].op, 'present');
+  assert.equal(R.setKind(draft(), 'forwarding', agent, fields).then[0].op, 'present');
+  assert.equal(R.rowSentence(old, agent), 'When a message with late on view arrives, agent sends dup on request.');
+});
+
 test('the sentence says what the row does', () => {
   assert.equal(R.rowSentence({ id: 'p_dup', when: { view: { late: 3 } }, then: { request: { dup: 'const 9' } } }, agent),
     'When late ≥ 3 on view arrives, agent sends dup at 9 on request.');

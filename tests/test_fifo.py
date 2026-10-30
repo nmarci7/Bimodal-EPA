@@ -336,7 +336,7 @@ def test_a_run_is_told_step_by_step(work):
     from epa.report import explain
     story = explain.trace_story(m, tr, ["bad"])
     assert story[0]["step"] == "start"
-    assert any(s["step"].endswith(": a") and any("bad 1" in e for e in s["edges"]) for s in story)
+    assert any(s["step"].endswith(": a") and any("bad present" in e for e in s["edges"]) for s in story)
 
 
 def test_the_rounds_translator_stays_selectable(tmp_path):

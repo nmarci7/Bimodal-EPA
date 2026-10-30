@@ -75,7 +75,7 @@ def test_a_race_of_the_hub_is_told_step_by_step(work):
     story = explain.trace_story(m, tr, ["heat_open"])
     assert story[0]["step"] == "start"
     assert any(s["step"].endswith(": planner") for s in story)
-    assert any(s["step"].endswith(": hub") and any("heat_open 1" in e for e in s["edges"]) for s in story)
+    assert any(s["step"].endswith(": hub") and any("heat_open present" in e for e in s["edges"]) for s in story)
     for s in story[1:]:                     # one firing per step: only the component named sends in it
         comp = s["step"].split(": ")[1]
         assert all(e.startswith(f"{comp} → ") for e in s["edges"]), s

@@ -64,7 +64,7 @@ step by step in the real interface, and uses every part of the reasoner. The rea
    external systems and users, system inputs and outputs, guards and observation points. Drag a
    component onto the canvas, drag from the round handle on its right to another component to
    connect them (ports are named for you), drop a guard or an eye onto an edge. Everything is added
-   and changed in windows: a step-by-step window for a row (kind, when, then, name and activation,
+   and changed in windows: a step-by-step window for a row (kind, when, then, name and frequency,
    with the row read back as a sentence), and one window each for a component (properties, ports,
    flow, absorptions, worst-case defaults), a guard, an observation point, an edge, a use case, a claim and
    the model's settings; *Edit…* opens the same window filled in. The inspector and the rows table

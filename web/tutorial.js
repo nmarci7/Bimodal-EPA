@@ -91,7 +91,7 @@ const T = {
 // run step (run: true) shows the followed cell's verdict, and `expect` is the verdict the story
 // promises; nav: true steps only open a page, and catching up passes over them and over runs;
 // needsRun: true steps need a current analysis; focus: true selects the followed cell.
-const RUN = (after, expect) => ({ title: 'Run the analysis', text: 'Press Run analysis, top right. It runs every possibility of the rows that matter and keeps what the evidence allows.', target: T.run, run: true,
+const RUN = (after, expect) => ({ title: 'Run the analysis', text: 'Press Run analysis, top right. It runs every switch vector of the rows that matter, in every firing order, and keeps what the evidence allows.', target: T.run, run: true,
   done: () => current() && !!valueCell(), after, expect });
 
 export const CHAPTERS = ['Welcome', 'The model', 'Evidence', 'An LLM joins', 'Reading the verdicts', 'A guard', 'And more'];
@@ -134,7 +134,7 @@ export const STEPS = [
       for (const x of valueCerts(c.parser.id).filter((y) => !isSaying(y, 'always'))) addEvidence('decisions', { kind: 'withdraw-cert', certificate: x.id, by: 'the tour', reason: 'replaced by the test report' });
       addEvidence('certificates', { id: certId('c_test'), component: c.parser.id, rows: { [c.valueRow]: 'always' }, issuer: 'test team', method: 'integration tests' });
     },
-    after: 'A certificate fixes how often a row fires: never, sometimes or always.' },
+    after: 'A certificate fixes how often a row applies: never, sometimes or always.' },
   { ...RUN('value is exposed: it reaches the log every time (A). The other failures are still unchecked.', 'exposed'), ch: 2 },
   { ch: 2, view: 'evidence', title: 'The bug is fixed', target: T.certCard('always'), text: 'Click the test report and withdraw it, with a reason: the bug is fixed.',
     done: () => { const c = context(S.doc); return !!c.parser && ev().decisions.some((d) => d.kind === 'withdraw-cert') && !notNever(c.parser.id).length; },
@@ -163,7 +163,7 @@ export const STEPS = [
       const c2 = context(S.doc); if (!c2.llmIn) connectPorts({ node: `sys:${c2.sin}` }, { node: c2.llm.id }); if (!context(S.doc).llmEdge) connectPorts({ node: c2.llm.id }, { node: c2.parser.id });  },
     after: 'Boxes can be dragged to tidy up; Fit brings the whole model into view.' },
   { ...RUN('Unchecked again, now sometimes or always (S, A): an LLM can get it wrong, and no certificate may say "never" for an LLM.', 'unchecked'), ch: 3 },
-  { ch: 3, view: 'evidence', title: 'A clean log line', target: T.button('New witness'), text: 'The order log shows an order that came out right. New witness…: at the log point, set value to "not there (0)", then add it.',
+  { ch: 3, view: 'evidence', title: 'A clean log line', target: T.button('New witness'), text: 'The order log shows an order that came out right. New witness…: at the log point, set value to "absent", then add it.',
     done: () => { const c = context(S.doc); return !!c.obs && ev().witnesses.some((w) => { const m = w.at && w.at[c.obs.id] && w.at[c.obs.id].modes; return m && m.value && m.value[1] === 0; }); },
     doIt: () => { const c = context(S.doc); addEvidence('witnesses', { id: fresh('w_clean', new Set(ev().witnesses.map((w) => w.id))), use_case: (S.doc.use_cases[0] || {}).id, at: { [c.obs.id]: { used: true, modes: { value: [0, 0] } } }, source: 'order log, line 1042', recogniser: 'manual' }); },
     after: 'A witness says what one logged interaction delivered. Logs dropped on this page become witnesses too.' },
@@ -172,18 +172,18 @@ export const STEPS = [
   { ch: 4, nav: true, needsRun: true, title: 'Open the verdict', target: () => [...T.step('verdicts')(), ...T.cell()], text: 'Open 4 Verdicts and click the value row.',
     done: () => S.view === 'verdicts' && !!document.querySelector('#view-verdicts .cellbtn.active') && (document.querySelector('#view-verdicts .cellbtn.active .f') || {}).textContent === 'value',
     doIt: () => { const c = context(S.doc); emit('focus-cell', `value@${c.obs.id}`); } },
-  { ch: 4, view: 'verdicts', needsRun: true, focus: true, title: 'Why, and what to do', target: () => [...T.button('Show the candidates')(), ...T.button('Show a reaching run')()], text: 'The right side says why and what to do. Try Show the candidates and Show a reaching run: the run is a story of how the wrong value gets through.' },
+  { ch: 4, view: 'verdicts', needsRun: true, focus: true, title: 'Why, and what to do', target: () => [...T.button('Show the candidates')(), ...T.button('Show a reaching run')()], text: 'The right side says why and what to do. Try Show the candidates and Show a reaching run: the run tells, firing by firing, how the wrong value gets through.' },
   { ch: 4, view: 'verdicts', needsRun: true, title: 'What to certify next', target: T.panel('Certify next'), text: 'Certify next ranks what to certify first, by how much it would settle. Scroll down to see it.' },
 
   { ch: 5, view: 'model', title: 'Add a guard', target: T.pal('Guard'), text: 'Drag a Guard onto the edge from the LLM to your component. In its window, make it catch value, and add it.',
     done: () => { const g = context(S.doc).guard; return !!g && (g.targets || []).some((t) => t.mode === 'value'); },
     doIt: () => editDoc((d) => {
       const c = context(d);
-      const target = { mode: 'value', threshold: 1, decidable: true };
+      const target = { mode: 'value', decidable: true };
       if (c.guard) c.guard.targets = [...(c.guard.targets || []), target];
       else d.guards.push({ id: fresh('schema', new Set([...d.guards.map((g) => g.id), ...d.components.map((x) => x.id)])), edge: c.llmEdge.id, label: 'schema check', targets: [target] });
     }),
-    after: 'A guard catches what it targets, unless its leak row fires. Nobody has vouched for it yet.' },
+    after: 'A guard catches what it targets, unless its leak row applies. Nobody has vouched for it yet.' },
   { ch: 5, view: 'evidence', title: 'Certify the guard', target: T.button('New certificate'), text: 'New certificate…: pick the guard, say it never lets value through.',
     done: () => { const g = context(S.doc).guard; return !!g && certSays(g.id, 'never'); },
     doIt: () => { const g = context(S.doc).guard; addEvidence('certificates', { id: certId('c_schema'), component: g.id, targets: { value: 'never' }, issuer: 'platform team', method: 'schema tests' }); } },

@@ -1,7 +1,7 @@
 // View 2: the evidence register. Logs become witnesses through recognisers; certificates are
 // classified against the model (the LLM rule, decidability, versions); decisions withdraw or reject.
 import { h, clear, api, readFile, dropZone, toast, modal } from './lib.js';
-import { S, on, emit, persist } from './state.js';
+import { S, on, emit, persist, TAINT_LEVELS } from './state.js';
 import { button } from './dialog.js';
 import { openCertDialog, openCertDetails, openWitnessDialog, openWitnessDetails, openWithdrawDialog, openRejectDialog } from './evidencedialogs.js';
 
@@ -14,14 +14,14 @@ export function fmtAt(at, doc) {
     const n = (i) => (names ? names[i] ?? i : i);
     return a === b ? `${n(a)}` : `${n(a)}–${n(b)}`;
   };
+  const seen = ([a, b]) => (a === 0 && b === 0 ? 'absent' : a === 1 && (b === 1 || b === 10) ? 'present' : rng([a, b]));
   const out = [];
   for (const [obs, v] of Object.entries(at || {})) {
     const parts = [];
-    for (const [f, r] of Object.entries(v.modes || {})) parts.push(`${f} ${rng(r)}`);
-    if (v.taint !== undefined && v.taint !== null) {
-      const t = Array.isArray(v.taint) ? v.taint : [v.taint, v.taint];
-      parts.push(Boolean(t[0]) === Boolean(t[1]) ? (t[0] ? 'tainted' : 'untainted') : 'taint unknown');
-    }
+    for (const [f, r] of Object.entries(v.modes || {})) parts.push(`${f} ${seen(r)}`);
+    if (v.taint === true) parts.push('taint above what the point accepts');
+    else if (v.taint === false) parts.push('taint accepted');
+    else if (v.taint !== undefined && v.taint !== null) parts.push(`taint ${rng(Array.isArray(v.taint) ? v.taint : [v.taint, v.taint], TAINT_LEVELS)}`);
     if (v.used !== undefined) parts.push(v.used ? 'a message was sent' : 'no message');
     if (v.conf) parts.push(`conf ${rng(v.conf, conf)}`);
     if (v.auth) parts.push(`authority ${rng(v.auth, auth)}`);
@@ -116,7 +116,7 @@ export class EvidenceView {
     p.appendChild(h('div', { class: 'panel' },
       h('div', { class: 'panel-head' }, h('h2', {}, 'Evidence register'),
         h('span', { class: 'muted' }, 'evidence narrows the candidates; it never changes the model')),
-      h('p', { class: 'hint' }, 'A certificate fixes rows of a guard to never or always for the versions it names. A witness says what one logged interaction delivered at an observation point. Each is in force, or rejected, stale or withdrawn, and the register keeps the reason.'),
+      h('p', { class: 'hint' }, 'A certificate fixes rows of a guard to never, sometimes or always for the versions it names, or confirms a component\'s table. A witness says what one logged interaction delivered at an observation point. Each is in force, or rejected, stale or withdrawn, and the register keeps the reason.'),
       h('div', { class: 'summary' },
         h('span', { class: 'v guarantee' }, `${count(reg.certificates, 'in force')} certificate(s) in force`),
         count(reg.certificates, 'rejected') ? h('span', { class: 'v exposed' }, `${count(reg.certificates, 'rejected')} rejected`) : null,
@@ -180,12 +180,12 @@ export class EvidenceView {
   certsPanel(reg) {
     const panel = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Certificates'), h('span', { class: 'spacer' }),
       button('New certificate…', () => openCertDialog(null), { small: true, primary: true, title: 'write a certificate step by step' })),
-      dropZone('Drop certificate files here, or click to choose', 'JSON or YAML: component, targets or rows, version, issuer, method', (fs) => this.addFiles(fs, 'cert'), '.json,.yaml,.yml'),
+      dropZone('Drop certificate files here, or click to choose', 'JSON or YAML: component, targets, rows or table, version, issuer, method', (fs) => this.addFiles(fs, 'cert'), '.json,.yaml,.yml'),
       this.available(S.bundle && S.bundle.certificates, 'cert'));
     if (!reg.certificates.length) panel.appendChild(h('p', { class: 'empty' }, 'No certificates. Every decidable guard target stays open: never, sometimes or always. Drop a file above, or write one with New certificate….'));
     const conflicts = new Set(((S.analysis && S.analysis.report) ? S.analysis.report.cells : []).flatMap((c) => c.suspended || []));
     for (const c of reg.certificates) {
-      const what = Object.entries(c.targets || c.rows || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
+      const what = [...Object.entries({ ...(c.targets || {}), ...(c.rows || {}) }), ...(c.table ? [['table', c.table]] : [])].map(([k, v]) => `${k}: ${v}`).join(', ');
       const st = conflicts.has(c.id) && c.state === 'in force' ? 'suspended' : c.state;
       panel.appendChild(h('div', { class: 'wit clickable', role: 'button', tabindex: 0, title: 'show the certificate', onclick: () => openCertDetails(c, { suspended: conflicts.has(c.id) }), onkeydown: (e) => { if (e.key === 'Enter') openCertDetails(c, { suspended: conflicts.has(c.id) }); } },
         h('div', { class: 'inline' }, h('b', { class: 'mono' }, c.id), h('span', { class: 'tag guard' }, c.component), c.manual ? h('span', { class: 'tag plain' }, 'by hand') : null, h('span', { class: 'spacer' }), h('span', { class: `state ${STATE_CLASS[st] || ''}` }, st)),

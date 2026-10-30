@@ -2,7 +2,7 @@
 //
 // Definition (Component) gives every component a normal flow and a mapping table of rows: a when
 // part (a pattern on one or more input ports, all of which must match) and a then part (failures
-// emitted on output ports: const k, keep, +k, max). The table shows every row the analysis uses,
+// emitted on output ports: present, or on a refined scale const k, keep, +k, max). The table shows every row the analysis uses,
 // each as one sentence:
 //   * the analyst's rows: added and edited in the row dialog (rowdialog.js), never in place,
 //   * the rows the engine adds, folded away until asked for:
@@ -15,7 +15,7 @@
 //   * for a guardrail, its fixed catching behaviour, one leak row per target and, if learned, its
 //     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
-import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc, edgeName } from './state.js';
+import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc, edgeName, modeAt } from './state.js';
 import { rowSentence, rowKind, rowFrequency, KINDS, defaultStatus, hasDefaults } from './rows.js';
 import { openRowDialog, deleteRow } from './rowdialog.js';
 import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
@@ -79,7 +79,7 @@ export class MapTable {
     const touches = (r) => port && (port.side === 'in' ? (r.when || {})[port.name] !== undefined || (r.when || {})['*'] !== undefined : (r.then || {})[port.name] !== undefined);
 
     // the analyst's rows
-    const mine = this.table(['Row', 'What it does', 'Activation', '']);
+    const mine = this.table(['Row', 'What it does', 'Frequency', '']);
     for (const r of c.rows || []) {
       const kind = rowKind(r);
       const tr = h('tr', { class: `analyst${touches(r) ? ' hl' : ''}`, ondblclick: () => openRowDialog(c.id, r.id), title: 'double-click to edit' },
@@ -103,7 +103,7 @@ export class MapTable {
 
   generated(c, port, tops) {
     const llm = c.kind === 'llm';
-    const gen = this.table(['Row', 'What it does', 'Activation', ''], 'gen-table');
+    const gen = this.table(['Row', 'What it does', 'Frequency', ''], 'gen-table');
     let n = 0;
     if (!llm && c.in.length && c.out.length) {
       const flow = c.flow || Object.fromEntries(c.in.map((p) => [p, c.out.slice()]));
@@ -128,7 +128,7 @@ export class MapTable {
           const hl = port && ((port.side === 'out' && port.name === q) || port.side === 'in') ? ' hl' : '';
           gen.body.appendChild(h('tr', { class: `gen ${st.status}${hl}` },
             h('td', { class: 'mono small' }, `default.${c.id}.${q}.${m}`),
-            h('td', { class: 'small' }, h('span', { class: 'tag llm' }, 'worst case'), ' ', `On any message, ${c.id} sends ${m} at 10 on ${q}.`,
+            h('td', { class: 'small' }, h('span', { class: 'tag llm' }, 'worst case'), ' ', `On any message, ${c.id} sends ${m} on ${q}.`,
               st.status === 'active' && st.beside.length ? h('div', { class: 'muted' }, `${st.beside.join(', ')} emit on ${q} beside it.`) : null,
               st.status === 'dropped' ? h('div', { class: 'muted' }, `Dropped: ${st.drop.reason || 'no reason given yet'}`) : null),
             h('td', { class: 'small' }, st.status === 'refined' ? h('span', { class: 'muted' }, `replaced by ${st.refinedBy.join(', ')}`) : st.status === 'dropped' ? h('span', { class: 'muted' }, 'dropped') : llm ? 'open: S | A' : 'open: N | S | A'),
@@ -169,8 +169,8 @@ export class MapTable {
     this.head(`Rows of ${g.label || 'unnamed guard'} (${g.id})`, g.learned ? 'learned guardrail' : 'guardrail', 'guard',
       `cuts ${e ? edgeName(e) : g.edge}`, button('Edit guard…', () => openGuardDialog(g.id), { small: true, primary: true }));
     this.host.appendChild(h('div', { class: 'mt-flow' }, h('span', { class: 'section-title' }, 'Normal flow'), h('span', { class: 'mono small' }, 'in → out'),
-      h('span', { class: 'small muted grow' }, 'Everything about a guardrail is fixed by its definition except one leak row per target, whose activation is the guard\'s quality.')));
-    const { t, body } = this.table(['Row', 'What it does', 'Activation', '']);
+      h('span', { class: 'small muted grow' }, 'Everything about a guardrail is fixed by its definition except one leak row per target, whose frequency is the guard\'s quality.')));
+    const { t, body } = this.table(['Row', 'What it does', 'Frequency', '']);
     const ts = g.targets || [];
     if (!ts.length) body.appendChild(h('tr', { class: 'note' }, h('td', { colspan: 4 }, 'No target yet: the guard passes everything and changes no verdict. ', h('button', { class: 'linkish small', onclick: () => openGuardDialog(g.id, { startAt: 'targets' }) }, 'Add what it catches…'))));
     const onCycle = !!(S.check && S.check.ok && S.check.summary.components[g.id] && S.check.summary.components[g.id].on_cycle);
@@ -188,7 +188,7 @@ export class MapTable {
     }
     if (g.learned) {
       body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `fp.${g.id}`),
-        h('td', { class: 'small' }, h('span', { class: 'tag guard' }, 'false positive'), ' ', `It refuses a harmless message: omission at ${g.fp_omission ?? 10}.`),
+        h('td', { class: 'small' }, h('span', { class: 'tag guard' }, 'false positive'), ' ', `It refuses a harmless message: ${modeAt('omission', g.fp_omission)}.`),
         h('td', { class: 'small' }, 'open: S | A', h('div', { class: 'muted' }, 'learned guard')), h('td', {})));
     }
     body.appendChild(h('tr', { class: 'gen' }, h('td', { class: 'mono small' }, `pass.${g.id}`),

@@ -114,7 +114,7 @@ guards:
   - {id: gx, label: tests, edge: e_release, version: tests-2026-10, targets: [{mode: malicious, decidable: false}]}
 
 edges:
-  - {id: e_issue, from: sys.issues, to: planner.issue, label: untrusted}
+  - {id: e_issue, from: sys.issues, to: planner.issue, label: open or identified}
   - {id: e_plan, from: planner.plan, to: runner.plan, label: "LLM plan ~"}
   - {id: e_edits, from: runner.edits, to: workspace.edits, label: file edits}
   - {id: e_checkout, from: sys.checkout, to: workspace.checkout, label: checkout}

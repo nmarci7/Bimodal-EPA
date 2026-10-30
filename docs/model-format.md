@@ -89,7 +89,7 @@ A failure stops only where the model says so, and every such place is a claim wi
 
 * `absorbs: [{port, modes, reason}]` - the component always absorbs these modes (and their sub-kinds)
   arriving on that port (`modes: all` for every mode); the reason is required and is reported;
-* a sink row (below) - the component may absorb a failure; whether it does is an activation the
+* a sink row (below) - the component may absorb a failure; whether it does is a frequency the
   candidates choose and a certificate can fix.
 
 An LLM component passes nothing through: what it sends carries only the failures its rows emit (its
@@ -264,7 +264,7 @@ asks for re-verification without voiding it.
 
 `scope` names the use cases the certificate was established for. It counts for a cell only if the
 scope covers every use case in which the cell's observation point can carry a message, apart from use
-cases in which none of the certified rows can fire. No scope means every use case.
+cases in which none of the certified rows can apply. No scope means every use case.
 
 A certificate that says `"table": "confirmed"` (with or without `targets` or `rows`) states that a fault
 injection campaign fed the real component every reachable combination of error tokens and that every

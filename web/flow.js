@@ -8,7 +8,7 @@ import { S, on, emit, analysisBasis } from './state.js';
 export const STEPS = [
   { view: 'model', n: 1, name: 'Model', purpose: 'Draw the system: components, edges, what each component does with failures (rows), guards, and the points where logs are read.' },
   { view: 'evidence', n: 2, name: 'Evidence', purpose: 'What you know: certificates from the teams, witnesses from the logs, and the decisions taken on them.' },
-  { view: 'analysis', n: 3, name: 'Analysis', purpose: 'How the verdicts are computed: TLC runs every firing choice of the rows that matter, clingo keeps the candidates the evidence allows. Watch a run here, with its log and its cones.' },
+  { view: 'analysis', n: 3, name: 'Analysis', purpose: 'How the verdicts are computed: TLC runs every switch vector of the rows that matter in every firing order, clingo keeps the candidates the evidence allows. Watch a run here, with its log and its cones.' },
   { view: 'verdicts', n: 4, name: 'Verdicts', purpose: 'The answer: for each log point and failure, what the evidence leaves possible, why, and what to certify next.' },
 ];
 

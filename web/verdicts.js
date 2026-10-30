@@ -14,6 +14,7 @@ const MEANING = {
   'not exercised': 'No use case sends a message over this point.',
   conflict: 'The evidence contradicts itself for this cell.',
 };
+const ORDER_HOPE = 'In every remaining candidate the failure reaches this point sometimes, never always: the firing order decides it, and no evidence changes that order.';
 const STATUS_WORD = { N: 'never', S: 'sometimes', A: 'always' };
 
 export class VerdictsView {
@@ -86,10 +87,11 @@ export class VerdictsView {
     panel.append(...[
       h('div', { class: 'panel-head' }, h('h2', { class: 'mono' }, c.cell), h('span', { class: `v ${verdictClass(c.verdict)}` }, c.verdict),
         h('span', { class: 'muted' }, `${{ mode: `failure mode ${c.field}`, taint: 'taint', conf: 'confidentiality', auth: 'authority' }[c.kind] || c.field} at ${o.label || c.obs}`)),
-      h('p', { style: 'margin:0;line-height:1.55' }, MEANING[c.verdict]),
+      h('p', { style: 'margin:0;line-height:1.55' }, c.order_dependent && c.verdict === 'hope' ? ORDER_HOPE : MEANING[c.verdict]),
       c.statuses.length ? h('div', { class: 'inline' }, h('span', { class: 'small muted' }, 'statuses the candidates give it:'), c.statuses.map((s) => h('span', { class: 'tag plain' }, `${s} ${STATUS_WORD[s]}`)),
         Object.keys(c.per_uc || {}).length > 1 ? h('span', { class: 'small muted' }, `per use case: ${Object.entries(c.per_uc).map(([u, st]) => `${u} {${st.map((x) => (x === 'x' ? 'unused' : x)).join(',')}}`).join(' · ')}`) : null) : null,
-      c.advice ? h('div', { class: 'card gen' }, h('span', { class: 'section-title' }, 'What to do'), h('span', {}, c.advice)) : null].filter(Boolean));
+      c.advice ? h('div', { class: 'card gen' }, h('span', { class: 'section-title' }, 'What to do'), h('span', {}, c.advice)) : null,
+      orderCard(c.order_dependent), fidelityCard(c.fidelity)].filter(Boolean));
     if (c.conflicts.length || c.lacks_path) {
       panel.appendChild(h('div', { class: 'conflictbox' },
         c.lacks_path ? 'The witnesses alone leave no candidate: some run the logs show is not a run of the model. The model lacks a path.'
@@ -101,13 +103,13 @@ export class VerdictsView {
     const reasons = c.reasons || {};
     add('Why', [reasons.structural ? 'structural: no candidate the model allows can change it' : null,
       reasons.certificates && reasons.certificates.length ? `rests on ${reasons.certificates.join(', ')}` : null,
-      ...(reasons.decisions || []).map((d) => `default dropped on ${d.component}.${d.port} (${d.mode}): "${d.reason}"`)].filter(Boolean).join('; ') || (c.verdict === 'hope' ? 'an LLM row the evidence cannot pin' : null));
+      ...(reasons.decisions || []).map((d) => `default dropped on ${d.component}.${d.port} (${d.mode}): "${d.reason}"`)].filter(Boolean).join('; ') || (c.verdict === 'hope' ? (c.order_dependent ? 'the firing order' : 'an LLM row the evidence cannot pin') : null));
     add('Candidates', c.candidates ? `${c.candidates.remaining ?? (c.candidates.at_least ? `more than ${c.candidates.at_least}` : '?')} of ${c.candidates.space} remain` : null);
     add('Open rows in the cone', c.rows.length ? h('span', { class: 'mono small' }, c.rows.join(', ')) : 'none');
-    add('Root causes', (c.root_causes || []).length ? h('span', { class: 'mono small' }, c.root_causes.map((s) => (s.length ? `{${s.join(', ')}}` : 'no row needs to fire: the normal flow delivers it')).join('  ')) : null);
-    add('Severity', c.severity ? `${c.severity} of 10` : null);
+    add('Root causes', (c.root_causes || []).length ? h('span', { class: 'mono small' }, c.root_causes.map((s) => (s.length ? `{${s.join(', ')}}` : 'no row needs to apply: the normal flow delivers it')).join('  ')) : null);
+    add('Severity', c.severity ? `${c.severity} (its weight in the ranking)` : null);
     add('Certificates used', c.certs_used.length ? c.certs_used.join(', ') : null);
-    add('Not counted here', (c.scope_withheld || []).length ? c.scope_withheld.map((w) => `${w.certificate}: its scope (${(w.scope || []).join(', ')}) does not cover ${w.uncovered.join(', ')}, in which this point can carry a message and its rows can fire`).join('; ') : null);
+    add('Not counted here', (c.scope_withheld || []).length ? c.scope_withheld.map((w) => `${w.certificate}: its scope (${(w.scope || []).join(', ')}) does not cover ${w.uncovered.join(', ')}, in which this point can carry a message and its rows can apply`).join('; ') : null);
     add('Witnesses used', c.witnesses_used.length ? `${c.witnesses_used.length}: ${c.witnesses_used.slice(0, 6).join(', ')}${c.witnesses_used.length > 6 ? ', …' : ''}` : null);
     panel.appendChild(kv);
     const actions = h('div', { class: 'inline' },
@@ -153,9 +155,10 @@ export class VerdictsView {
       const t = await api(`/api/analyses/${S.analysis.id}/cells/${encodeURIComponent(c.cell)}/trace`);
       clear(host);
       if (!t.story.length) { host.appendChild(h('p', { class: 'hint' }, t.note || 'No run to show.')); return; }
-      host.append(h('span', { class: 'section-title' }, `A run that reaches the point · use case ${t.run.uc} · rows firing: ${t.run.fire.join(', ') || 'none'}`),
-        h('ol', { class: 'story' }, t.story.map((st) => h('li', {}, h('b', {}, st.step), ' ', st.edges.join('; '),
-          st.fired && st.fired.length ? h('span', { class: 'fired' }, `  fired: ${st.fired.join(', ')}`) : null))));
+      host.append(h('span', { class: 'section-title' }, `A run that reaches the point · use case ${t.run.uc} · rows switched on: ${t.run.fire.join(', ') || 'none'}`),
+        h('p', { class: 'hint' }, 'One firing order, firing by firing. Each line is one component firing: it takes the head of every non-empty queue, the rows that match apply, and it delivers on its edges.'),
+        h('ol', { class: 'story' }, t.story.map((st) => h('li', {}, h('b', {}, st.step), ' ', st.edges.join('; ') || 'delivers nothing new',
+          st.applied && st.applied.length ? h('span', { class: 'fired' }, `  rows applied: ${st.applied.join(', ')}`) : null))));
     } catch (e) { clear(host).appendChild(h('p', { class: 'hint' }, `Not available: ${e.message}`)); }
   }
 
@@ -219,8 +222,28 @@ export class VerdictsView {
   }
 }
 
+/** When the outcome depends on the firing order: which component, which ports, which use cases. */
+function orderCard(o) {
+  if (!o) return null;
+  return h('div', { class: 'card gen' }, h('span', { class: 'section-title' }, 'Depends on the firing order'),
+    h('span', {}, o.component ? `${o.component} fires on ${(o.ports || []).join(' and ') || 'its inputs'}: which token stands at the head when it fires decides the outcome.` : 'The order of the firings decides the outcome.'),
+    o.use_cases && o.use_cases.length ? h('span', { class: 'small muted' }, `in use case ${o.use_cases.join(', ')}`) : null);
+}
+
+/** Whether the model is consistent, complete and correct for this cell (docs/model-format.md, "Evidence"). */
+function fidelityCard(f) {
+  if (!f) return null;
+  const mark = (ok, word) => h('span', { class: `tag ${ok ? 'plain' : 'warn-tag'}` }, ok ? word : `not ${word}`);
+  const gaps = (f.uncovered || []).map((u) => `${u.component}: ${Object.entries(u.heads).map(([p, fs]) => `${fs.join(', ')} on ${p}`).join('; ')}`);
+  return h('div', { class: 'card gen' }, h('span', { class: 'section-title' }, 'The model for this cell'),
+    h('div', { class: 'inline' }, mark(f.consistent, 'consistent'), mark(f.complete, 'complete'), mark(f.correct, 'correct')),
+    gaps.length ? h('span', { class: 'small' }, `Uncovered: ${gaps.join(' · ')}`) : null,
+    (f.unconfirmed || []).length ? h('span', { class: 'small muted' }, `No confirmed table: ${f.unconfirmed.join(', ')}`) : null);
+}
+
 function shortReason(c) {
   const r = c.reasons || {};
+  if (c.order_dependent) return 'depends on the firing order';
   if (c.suspended && c.suspended.length) return `suspended ${c.suspended.join(', ')}`;
   if (r.structural) return 'structural';
   if (r.certificates && r.certificates.length) return `rests on ${r.certificates.join(', ')}`;

@@ -11,7 +11,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 ## 1. Purpose
 
 ### epa/intake/cert_import.py
-- This module reads certificates. A certificate is a JSON or YAML record that states the activation (N = never, S = sometimes, A = always) of some rows of one component.
+- This module reads certificates. A certificate is a JSON or YAML record that states the frequency (N = never, S = sometimes, A = always) of some rows of one component.
 - `load` turns a path, text or parsed data into a list of certificate dicts.
 - `resolve_rows` maps a certificate's `targets` and `rows` to model row ids, giving `{row id: N|S|A}`.
 - `classify` gives the state `in force`, `stale`, `rejected` or `withdrawn`. `reverify` lists upstream components whose version changed since signing.
@@ -98,7 +98,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 |---|---|---|
 | `WORD` (constant) | Maps `never/sometimes/always`, `n/s/a` and `N/S/A` to `N/S/A`. | — |
 | `load(src)` | String input: a single-line string ending in `.json/.yaml/.yml` that exists is read as a file; any other string is treated as the text. The text is parsed as JSON, then YAML if JSON fails. Dict or list input is used as is. `{certificates: [...]}` is unwrapped. Returns a list; a single record is wrapped. | — |
-| `resolve_rows(cert, m)` | Returns `{row id: activation}`. Each `targets` key `k` becomes `leak.<component>.<k>`. Each `rows` key is kept if it is in `m.rows`; otherwise every existing candidate among `<comp>.<k>`, `leak.<comp>.<k>`, `default.<comp>.<k>` overwrites it, so the last one that exists wins. Values go through `WORD`; unknown values are kept verbatim. | — (uses `WORD`) |
+| `resolve_rows(cert, m)` | Returns `{row id: frequency}`. Each `targets` key `k` becomes `leak.<component>.<k>`. Each `rows` key is kept if it is in `m.rows`; otherwise every existing candidate among `<comp>.<k>`, `leak.<comp>.<k>`, `default.<comp>.<k>` overwrites it, so the last one that exists wins. Values go through `WORD`; unknown values are kept verbatim. | — (uses `WORD`) |
 | `classify(cert, m, withdrawn=())` | Returns `(state, reason, rows)`, where `rows` is the resolved map. State is `withdrawn`, `rejected`, `stale` or `in force`; rules in section 4. | cert_import.resolve_rows |
 | `reverify(cert, m)` | For each `context` entry (component → version at signing) whose component exists in `m` with a non-null version different from the signed one, adds `{component, signed_with, now}`. Returns the list. | — |
 
@@ -147,8 +147,8 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 | `NEUTRAL` (constant) | Maps verdicts to labels: guarantee → "ruled out (model-relative)", hope → "possible, mitigated, monitored", exposed → "occurs whenever exercised", unchecked → "undetermined", not exercised → "not exercised by the modelled use cases", conflict → "evidence in conflict". | — |
 | `fidelity_line(cell)` | Consistent, complete and correct in words, with the uncovered head combinations and the components with no confirmed table. | — |
 | `reason_line(cell)` | Builds a `"; "`-joined line from `cell.reasons` and `cell.suspended`:<br>- `structural` gives "structural: no row can change it"<br>- `certificates` gives "rests on a, b"<br>- each decision gives `default dropped on <component> (<port>/<mode>): "<reason>"`<br>- `suspended` gives "suspended: …" | — |
-| `_tok(m, k, fields)` | Describes a token `k`:<br>- `"<field> <magnitude>"` for each field in `fields` with a non-zero `k.b[field]`<br>- "tainted" if `k.t`<br>- the confidentiality level name if `k.c` is non-zero<br>- "authority <level>" if `k.a` < `m.auth_top`<br>Returns "clean" if none apply. | — |
-| `trace_story(m, trace, fields)` | `None` or empty input gives `[]`. Otherwise returns one entry per step in which some edge label changed: `{step: "start" or "round N", edges: ["src → dst: <token>"], fired}`. The first step lists edges whose label has `u` set; later steps list edges whose label differs from the previous step. A `sys` endpoint is shown by its port name. | explain._tok |
+| `_tok(m, k, fields)` | Describes a token `k`:<br>- `"<field> present"` for each field in `fields` with `k.b[field]` 1, `"<field> <magnitude>"` on a refined scale<br>- "taint <level>" if `k.t`<br>- the confidentiality level name if `k.c` is non-zero<br>- "authority <level>" if `k.a` < `m.auth_top`<br>Returns "no failure" if none apply. | — |
+| `trace_story(m, trace, fields)` | `None` or empty input gives `[]`. Otherwise returns one entry per firing (rounds: per round in which some edge label changed): `{step: "start", "firing N: <component>" or "round N", edges: ["src → dst: <token>"], fired, applied}`; `fired` is every row applied so far, `applied` those of this step. The first step lists edges whose label has `u` set; later steps list edges whose label differs from the previous step. A `sys` endpoint is shown by its port name. | explain._tok |
 
 ### epa/report/markdown.py
 | Definition | What it does | Calls |
@@ -218,7 +218,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 | `_engine(aid)` | Raises 404 "analysis not ready" unless the status is `done`. Returns `(st, fresh Engine(st.model, WORK, cache=CACHE))`. | coordinator.Engine |
 | `possibilities(aid, cell)` | Under `RUN_LOCK`, returns `eng.possibilities(cell, st.evidence)`: candidates with their status and what strikes them. | api._engine, coordinator.Engine.possibilities |
 | `cell_trace(aid, cell)` | Finds the cell's `example_run` in the report. If there is none, returns `{cell, story: [], note}`. Otherwise, under `RUN_LOCK`, calls `trace_of(cell, uc, frozenset(fire))` and returns `{cell, run, story}`. | api._engine, coordinator.Engine.trace_of, explain.trace_story |
-| `cell_asp(aid, cell)` | Finds the cell's cone and builds the register. Under `RUN_LOCK`, calls `ensure(cone, [{}])` (every firing choice) and then `problem(...)` with the in-force certificates and witnesses. Returns the ASP program text. | api._engine, model.cone.cones, model.cone.cells, coordinator.Engine.register, coordinator.Engine.ensure, coordinator.Engine.problem, model.cone.Cell.parse, epistemic.reason (problem).program_text |
+| `cell_asp(aid, cell)` | Finds the cell's cone and builds the register. Under `RUN_LOCK`, calls `ensure(cone, [{}])` (every switch vector) and then `problem(...)` with the in-force certificates and witnesses. Returns the ASP program text. | api._engine, model.cone.cones, model.cone.cells, coordinator.Engine.register, coordinator.Engine.ensure, coordinator.Engine.problem, model.cone.Cell.parse, epistemic.reason (problem).program_text |
 | `tla(h)` | Reads `WORK/tlc/<basename(h)>/`. Returns `{module: Cone.tla, cfg: Cone.cfg, library: EpaLib.tla, stats: last 3000 characters of stats.txt}`; 404 if the directory is missing. | — |
 | `report_md(aid)` | Returns `markdown.report(report)` as `text/markdown`; 404 if there is no report. | report.markdown.report |
 | `report_cra(aid)` | Returns `markdown.cra_export(report)` as JSON; 404 if there is no report. | report.markdown.cra_export |
@@ -350,9 +350,9 @@ Checks run in order:
  "method": "exhaustive mandate-scope test …", "scope": ["pay"],
  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"}, "evidence": "ci://…"}
 ```
-- Either `targets` (guard target keys) or `rows` (`{row id or short key: activation}`) states the rows, or both.
+- Either `targets` (guard target keys) or `rows` (`{row id or short key: frequency}`) states the rows, or both.
 - `"table": "confirmed"` says instead, or as well, that a fault injection campaign confirmed the component's table. It changes no verdict: `Engine.fidelity` reads it for correctness.
-- Activations may be `never/sometimes/always`, `n/s/a` or `N/S/A`.
+- Frequencies may be `never/sometimes/always`, `n/s/a` or `N/S/A`.
 - A file may contain one record, a list, or `{certificates: [...]}` (`load`).
 - What reads which field:
   - `classify` reads `id`, `component`, `targets`, `rows` and `version`.
@@ -374,7 +374,7 @@ Checks run in order:
 4. For each resolved row:
    - not in `m.rows` → **rejected**, "unknown row r"
    - `row.comp` differs from the component → **rejected**, "row r belongs to X, not Y"
-   - activation not N/S/A → **rejected**, "unknown activation"
+   - frequency not N/S/A → **rejected**, "unknown frequency"
    - `N` on a `row.llm` row → **rejected**, "never on a learned guard / an LLM row (r): the LLM rule forbids it". Example: `vendor-eval.json` on `p_offmandate`.
    - `N` on a `leak` row that is not `decidable` → **rejected**, "never on a target that is not decidable from the edge".
 5. The component has a non-null version and the certificate's `version` is neither `None` nor equal to it → **stale**, "`<comp>` is now X, the certificate covers Y". Example: `c_gm_v3` against the base model, where gm is `mandate-v2`.
@@ -561,7 +561,7 @@ For this example the result has guard `gt` on `e_runner_github_mcp`, guard `ga` 
   - `/api/tla/{h}` and `Engine.trace_of` read those directories.
 - **`CACHE`**: one `engine.cache.RunCache` (SQLite with `check_same_thread=False`, its own `threading.Lock`, and an in-memory `mem` dict of runs per cone key).
   - Tables `runs(cone, uc, fire, fired, labels, rounds, variants)` and `coverage(cone, pins, tlc)`.
-  - Shared by every `Engine` the API builds, so explored firing choices persist across analyses and restarts. Runs are keyed by the cone's behaviour hash, not by versions.
+  - Shared by every `Engine` the API builds, so explored switch vectors persist across analyses and restarts. Runs are keyed by the cone's behaviour hash, not by versions.
 - **`ANALYSES`**: an in-memory dict `aid → {id, status: running|done|error, events, report, error, model (the Model object), evidence, label, started, engine}`. It is never pruned and is lost on restart; the UI then reports "the server no longer has this analysis".
 - **Threads and `RUN_LOCK`**:
   - `POST /api/analyses` starts a daemon `threading.Thread` per analysis. The thread holds the global `RUN_LOCK` for the whole run, so analyses execute one at a time; a waiting one still shows `running`.

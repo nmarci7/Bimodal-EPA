@@ -2,7 +2,7 @@
 // steps, as tabs). Rows are explained in docs/model-format.md ("Rows"); the checks and the sentence
 // come from rows.js, and Save asks the server's model check before the row goes in.
 import { h, toast } from './lib.js';
-import { S, comp, modeFields, cloneDoc, commitDoc, newProblems, emit } from './state.js';
+import { S, comp, modeFields, cloneDoc, commitDoc, newProblems, emit, details } from './state.js';
 import { wizard, field, textInput, numberInput, selectInput, choiceCards, button, confirmDialog } from './dialog.js';
 import * as R from './rows.js';
 
@@ -59,10 +59,10 @@ export function openRowDialog(cid, rowId, opts = {}) {
     d.when.forEach((cnd, i) => {
       const line = h('div', { class: 'edit-line' },
         field('Input port', selectInput(portOpts(cnd.port), cnd.port, (v) => { cnd.port = v; if (v === '*') cnd.any = true; ctx.rerender(); })),
-        field('What arrives', selectInput([['any', 'any message'], ['mode', 'a failure of at least', cnd.port === '*' || d.kind === 'forwarding']], cnd.any ? 'any' : 'mode',
+        field('What arrives', selectInput([['any', 'any message'], ['mode', 'a failure', cnd.port === '*' || d.kind === 'forwarding']], cnd.any ? 'any' : 'mode',
           (v) => { cnd.any = v === 'any'; if (!cnd.any && !cnd.mode) cnd.mode = fields[0]; ctx.rerender(); })),
         cnd.any ? null : field('Failure mode', selectInput(fields.map((f) => [f, f]), cnd.mode, (v) => { cnd.mode = v; ctx.update(); })),
-        cnd.any ? null : field('Magnitude ≥', numberInput(cnd.threshold, (v) => { cnd.threshold = v; ctx.update(); }, { min: 1, max: 10 })),
+        !cnd.any && (details() || cnd.threshold !== 1) ? field('Refined scale: at least', numberInput(cnd.threshold, (v) => { cnd.threshold = v; ctx.update(); }, { min: 1, max: 10 })) : null,
         h('span', { class: 'spacer' }),
         d.when.length > 1 || d.kind === 'failure' ? button('Remove', () => { d.when.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true, title: 'remove this condition' }) : null);
       box.appendChild(line);
@@ -71,8 +71,8 @@ export function openRowDialog(cid, rowId, opts = {}) {
     if (free.length && !d.when.some((x) => x.port === '*')) {
       box.appendChild(h('div', {}, button(d.when.length ? '+ And a condition on another input' : '+ Add a condition', () => { d.when.push({ port: free[0], any: true, mode: '', threshold: 1 }); ctx.rerender(); }, { small: true })));
     }
-    box.appendChild(h('p', { class: 'hint' }, d.when.length > 1 ? 'Every condition must hold at once: the row fires when all the listed ports receive what they say.'
-      : '"A failure of at least" matches a message carrying that failure at the given magnitude or more (magnitudes run from 1 to 10). "Any input" matches a message on any input port.'));
+    box.appendChild(h('p', { class: 'hint' }, d.when.length > 1 ? 'Every condition must hold in one firing: the row applies only when a matching token stands at the head of every listed port together.'
+      : '"A failure" matches a message with that failure present. "Any input" matches a message on any input port.'));
     return box;
   };
 
@@ -85,7 +85,7 @@ export function openRowDialog(cid, rowId, opts = {}) {
       for (const q of c0.out) {
         const on = d.then.some((e) => e.port === q);
         box.appendChild(h('label', { class: 'f-check' }, h('input', { type: 'checkbox', checked: on, onchange: (ev) => {
-          if (ev.target.checked) d.then.push({ port: q, asis: true, mode: '', op: 'const', k: 5 }); else d.then = d.then.filter((e) => e.port !== q);
+          if (ev.target.checked) d.then.push({ port: q, asis: true, mode: '', op: 'present', k: 1 }); else d.then = d.then.filter((e) => e.port !== q);
           ctx.update();
         } }), h('span', { class: 'mono' }, q)));
       }
@@ -99,21 +99,19 @@ export function openRowDialog(cid, rowId, opts = {}) {
         field('Output port', selectInput(c0.out.map((q) => [q, q]), em.port, (v) => { em.port = v; ctx.update(); })),
         field('Sends', selectInput([...fields.map((f) => [f, f]), ...(d.kind === 'internal' ? [] : [['__asis', 'the message as it is']])], what,
           (v) => { if (v === '__asis') em.asis = true; else { em.asis = false; em.mode = v; } ctx.rerender(); })),
-        em.asis ? null : field('How strong', selectInput(opOpts, em.op, (v) => { em.op = v; if (v === 'plus' && !(em.k >= 1)) em.k = 1; ctx.rerender(); })),
+        !em.asis && (details() || em.op !== 'present') ? field('How', selectInput(opOpts, em.op, (v) => { em.op = v; if (v === 'plus' && !(em.k >= 1)) em.k = 1; ctx.rerender(); })) : null,
         !em.asis && R.OPS[em.op] && R.OPS[em.op].needsK ? field(em.op === 'plus' ? '+ k' : 'Magnitude', numberInput(em.k, (v) => { em.k = v; ctx.update(); }, { min: em.op === 'plus' ? 1 : 0, max: 10 })) : null,
         h('span', { class: 'spacer' }),
         button('Remove', () => { d.then.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true, title: 'remove this emission' })));
     });
     box.appendChild(h('div', { class: 'inline' },
       button('+ Add an emission', () => { const q = c0.out[0]; const f = fields.find((x) => !d.then.some((e) => e.port === q && e.mode === x)) || fields[0]; d.then.push({ port: q, asis: false, mode: f, op: 'present', k: 1 }); ctx.rerender(); }, { small: true, disabled: !c0.out.length })));
-    box.appendChild(h('p', { class: 'hint' }, matched
-      ? 'The matched magnitude is the magnitude of the failure the condition matched (the largest, if it matches several). A magnitude runs from 0 to 10.'
-      : d.kind === 'internal' ? 'An internal fault starts its failures at a fixed magnitude, from 0 to 10.'
-        : 'With "any message" in the condition there is no matched failure, so the row sends a fixed magnitude. "The message as it is" sends it on unchanged; a guard may still drop it, because it exists only because the row fired.'));
+    box.appendChild(h('p', { class: 'hint' }, d.kind === 'internal' ? 'An internal fault starts its failures when the component first fires, once per run.'
+      : 'A failure is present or absent. "The message as it is" sends it on unchanged; a guard may still drop it, because it exists only because the row applied.'));
     return box;
   };
 
-  // ---------------------------------------------------------------- step: name and activation
+  // ---------------------------------------------------------------- step: name and frequency
   const renderName = (ctx) => {
     const d = data.draft;
     const renamed = original && d.id.trim() !== original.id;
@@ -122,10 +120,10 @@ export function openRowDialog(cid, rowId, opts = {}) {
       h('div', { class: 'fields2' },
         field('Id', textInput(d.id, (v) => { d.id = v; ctx.update(); }, { class: 'mono', spellcheck: 'false' }), renamed && users.length ? `Certificates ${users.join(', ')} name ${original.id}: they will no longer match.` : 'Certificates and the verdicts name the row by this id.'),
         field('Description', textInput(d.label, (v) => { d.label = v; ctx.update(); }, { placeholder: 'e.g. re-plans on a stale view and pays again' }), 'Optional: what this failure is, in words.')),
-      h('span', { class: 'f-label' }, 'Activation'),
+      h('span', { class: 'f-label' }, 'Frequency'),
       choiceCards(R.activationChoices(d, c0).map((a) => ({ value: a.value, title: a.value === 'open' ? 'Open' : a.value[0].toUpperCase() + a.value.slice(1), text: a.text,
         disabled: a.disabled, why: a.disabled ? 'The LLM rule: a row of an LLM that emits a failure is never "never".' : '' })), d.activation, (v) => { d.activation = v; ctx.rerender(); }),
-      h('p', { class: 'hint' }, 'Leave a row open unless the model fixes it on purpose: the analysis then keeps every activation as a candidate and lets the evidence choose.'));
+      h('p', { class: 'hint' }, 'Leave a row open unless the model fixes it on purpose: the analysis then keeps never, sometimes and always as candidates and lets the evidence choose.'));
   };
 
   // ---------------------------------------------------------------- preview and save
@@ -135,7 +133,7 @@ export function openRowDialog(cid, rowId, opts = {}) {
     return h('div', { class: 'preview' },
       h('div', { class: 'preview-head' }, h('span', { class: 'section-title' }, 'What it does'), h('span', { class: `tag ${ok ? 'plain' : 'warn-tag'}` }, R.KINDS[data.draft.kind] ? R.KINDS[data.draft.kind].title.toLowerCase() : '?')),
       h('p', { class: 'sentence' }, ok || row.id ? R.rowSentence(row, c0) : '…'),
-      h('p', { class: 'small muted' }, `Activation: ${R.activationText(data.draft.activation, llm && data.draft.then.some((e) => !e.asis), data.draft.kind)}.`),
+      h('p', { class: 'small muted' }, `Frequency: ${R.activationText(data.draft.activation, llm && data.draft.then.some((e) => !e.asis), data.draft.kind)}.`),
       h('details', { class: 'yaml-peek' }, h('summary', {}, 'As YAML'), h('pre', { class: 'code' }, R.rowYaml(row))));
   };
 
@@ -164,9 +162,9 @@ export function openRowDialog(cid, rowId, opts = {}) {
     saveLabel: mode === 'add' ? 'Add row' : 'Save row',
     steps: [
       { id: 'kind', title: 'Kind', hint: 'What sort of behaviour does this row describe?', render: renderKind, problems: () => P().kind },
-      { id: 'trigger', title: 'When', hint: `What has to arrive at ${cid} for the row to fire.`, render: renderTrigger, problems: () => P().trigger, skip: () => data.draft.kind === 'internal' },
-      { id: 'effect', title: 'Then', hint: () => (data.draft.kind === 'forwarding' ? 'Where the message goes on.' : `What ${cid} sends on when the row fires.`), render: renderEffect, problems: () => P().effect, skip: () => data.draft.kind === 'sink' },
-      { id: 'name', title: 'Name and activation', hint: 'How the row is called, and whether the model fixes how often it fires.', render: renderName, problems: () => P().name },
+      { id: 'trigger', title: 'When', hint: `What has to stand at the heads of ${cid} for the row to apply.`, render: renderTrigger, problems: () => P().trigger, skip: () => data.draft.kind === 'internal' },
+      { id: 'effect', title: 'Then', hint: () => (data.draft.kind === 'forwarding' ? 'Where the message goes on.' : `What ${cid} sends on when the row applies.`), render: renderEffect, problems: () => P().effect, skip: () => data.draft.kind === 'sink' },
+      { id: 'name', title: 'Name and frequency', hint: 'How the row is called, and whether the model fixes how often it applies.', render: renderName, problems: () => P().name },
     ],
     preview, onSave,
   });
@@ -187,7 +185,7 @@ export async function deleteRow(cid, rowId) {
   toast(`Row ${rowId} deleted.`);
 }
 
-/** Certificates in the register that state the activation of this row by its id. */
+/** Certificates in the register that state the frequency of this row by its id. */
 function certsNaming(rowId) {
   return (S.evidence.certificates || []).filter((c) => Object.keys(c.rows || {}).includes(rowId)).map((c) => c.id);
 }

@@ -82,11 +82,11 @@ def _states_of(dump_path, uc, fire):
 
 
 def trace(dump_path, uc, fire, edges, labels=None, sources=None):
-    """One run told step by step: [{round, fired, labels, component?}], skipping steps that changed no
-    edge. Under rounds that is the single chain of its states. Under fifo the dump has no successor
-    links, so a path is rebuilt from the states themselves: one consistent firing order that ends in the
-    outcome `labels` (any outcome if None). `sources` names the component sending on each edge, as it
-    is named in the queues."""
+    """One run told step by step: [{round, fired, labels, component?}]. Under rounds that is the single
+    chain of its states, skipping rounds that changed no edge. Under fifo the dump has no successor links,
+    so a path is rebuilt from the states themselves: one consistent firing order that ends in the outcome
+    `labels` (any outcome if None), every firing a step. `sources` names the component sending on each
+    edge, as it is named in the queues."""
     states = list(_states_of(dump_path, uc, fire))
     if states and "rnd" in states[0]:
         steps = [{"round": s["rnd"], "fired": sorted(s["fired"]),
@@ -96,7 +96,7 @@ def trace(dump_path, uc, fire, edges, labels=None, sources=None):
         steps = _fifo_path(states, edges, labels, sources or {})
     out, prev = [], None
     for st in steps:
-        if prev is not None and st["labels"] == prev["labels"]:
+        if prev is not None and "component" not in st and st["labels"] == prev["labels"]:
             continue
         out.append(st)
         prev = st

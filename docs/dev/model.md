@@ -125,7 +125,7 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | `_when_ports` | The input ports a row reads (every input for `"*"`). | — |
 | `forwarding` | Every way a component forwards a message: each `flow` pair `([p], q, None, "all")`, and each non-N `fwd`/`row` row with as-is outputs (join `any` for `"*"`, `all` otherwise). | load.Model.comp_rows |
 | `normal_edges` | Per use case, the edges that carry a normal message (fixpoint from the entry edges through flows and forwarding rows; guards pass normal messages). | load.Model.edges_into, load.Model.edges_from, cone.forwarding |
-| `possible` | Per use case, an over-approximation of which edges can carry a message and which fields can be non-zero there (fixpoint through forwarding, emitting rows whose trigger is possible, and false-positive rows; sinks, drops and activations are ignored). | load.Model.edges_into, load.Model.edges_from, load.Model.comp_rows, cone.forwarding, cone._trigger_possible |
+| `possible` | Per use case, an over-approximation of which edges can carry a message and which fields can be non-zero there (fixpoint through forwarding, emitting rows whose trigger is possible, and false-positive rows; sinks, drops and frequencies are ignored). | load.Model.edges_into, load.Model.edges_from, load.Model.comp_rows, cone.forwarding, cone._trigger_possible |
 | `_trigger_possible` | Whether a row's `when` can match given the reachable incoming edges and fields. | load.Model.family |
 | `_creates_message` | Whether, in some use case where the row's trigger is possible, the edges leaving the port are not all normal (the row would create a message); caches `normal_edges`/`possible` on the model. | cone.normal_edges, cone.possible, cone._trigger_possible |
 | `downstream_guards` | The guards reachable forwards from the edges leaving a port (every output port of each visited component is followed). | load.Model.edges_from, load.Component.is_guard |
@@ -177,7 +177,7 @@ generated), `obs`, `use_cases`, `claims`, `decisions` (the document's plus gener
 **Cell** (frozen): `kind` (mode, taint, conf, auth), `field`, `obs`.
 
 **Cone**: `cells`, `obs`, `components` (the upstream components, sorted), `edges` (the sub-edges),
-`use_cases`, `rows` (rows whose activation varies: open or fixed S), `always` (rows fixed A), `fields`,
+`use_cases`, `rows` (rows whose frequency varies: open or fixed S), `always` (rows fixed A), `fields`,
 `cell_rows`, `cell_fields`, `rel` (the `(edge, field)` pairs the runs compute exactly), `cell_rel`,
 `cell_always` (a cell's own always rows), `scope_ucs` (the use cases in which the observed segment can carry a message; for the scope rule).
 
@@ -300,7 +300,7 @@ These come from reading the code; none changes a verdict of the demo cases (the 
 * **Ids not checked for uniqueness**: rows, observation points and use cases (a duplicate silently
   overwrites in the model's dictionaries).
 * **Leak row ids collide** when one guard has two targets of the same key (two `conf` targets, or one
-  mode twice): both point to one row, coupling their activations.
+  mode twice): both point to one row, coupling their frequencies.
 * **`validate` changes its input** (`on` → `edge`), and `/api/model/check` runs it twice.
 * **Hard-coded `omission`** in fp rows, `cone_of_cell` and `to_tla`: a model without that mode has fp
   rows that emit nothing.

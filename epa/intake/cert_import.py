@@ -1,4 +1,4 @@
-"""Certificates: records that state the activation of some rows of one component.
+"""Certificates: records that state the frequency of some rows of one component.
 
 A certificate record (JSON):
   {"id": "c_gm", "component": "gm", "targets": {"oom": "never"}            # guard targets, or
@@ -78,7 +78,7 @@ def classify(cert, m, withdrawn=()):
         if row.comp != comp.id:
             return "rejected", f"row {r} belongs to {row.comp}, not {comp.id}", rows
         if x not in ("N", "S", "A"):
-            return "rejected", f"unknown activation {x!r} for {r}", rows
+            return "rejected", f"unknown frequency {x!r} for {r}", rows
         if x == "N" and row.llm:
             what = "a learned guard" if comp.is_guard else "an LLM row"
             return "rejected", f"never on {what} ({r}): the LLM rule forbids it", rows
