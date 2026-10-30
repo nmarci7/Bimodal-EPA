@@ -32,6 +32,7 @@ restored on load (`restore`). Views never call each other: they talk through a t
 | `report` | an analysis finished | canvas (verdict colours), verdicts view, flow strip, app (the dot on the Verdicts step) |
 | `analysis` | an analysis started (`AnalysisView.run`) | flow strip |
 | `show`, `shown:<view>` | a view is asked for / was shown | app / the view itself |
+| `fit` | the tour changed the model: fit it into view | model view |
 | `run` | "run the analysis" from anywhere (`{quiet: true}` stays on the current page) | app → `AnalysisView.run` |
 | `details` | Help → Show all details was switched | app (re-renders the views) |
 | `maptable:show`, `maptable:toggled` | the rows table is asked for / was toggled | rows table |
@@ -123,7 +124,11 @@ evidence lists). One cell, a wrong value at the log point, goes unchecked → ex
 |---|---|
 | `context(d)` | the parts the tour talks about, found in whatever the user built: the first non-LLM component, the first LLM, the system input and output, the edges between them, the log point on the edge into the output, the guard on the LLM's edge, the component's value default row |
 | `CHAPTERS`, `STEPS` | the chapters; per step: chapter, title, text, `target()` (the controls to outline), `view` (shown when the step starts), and for an action `done()` and `doIt()`; `after` (what it showed); `run: true` for the analysis steps, which also show the followed cell's verdict |
-| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and notices a step done; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window; `isDone()`; `render()`; `stop()` |
+| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`, through `loadModel`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and redraws when `state()` changes; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window, and still while the button is being clicked; `stepDone(st)`, `isDone()`; `render()`, `renderPaused()`; `stop()` |
+| `Tutorial.press()` | Do it for me. If the current step has work (`work(i)`), `catchUp(i)`; if not, it goes to the next step and catches up there, so the button can be clicked through the tour. One press at a time. A failure is shown on the card |
+| `Tutorial.catchUp(i)` | brings the model and the evidence to step i: closes any open window (`closeAllDialogs`), restores what the tour relies on (the value mode, `worst_case_defaults: all`), does every action not done yet in the story's order, runs the analysis if the step needs one (`analyse()`, which waits for a run already going instead of starting a second) and opens the step's page. It relies on `done()` staying true once the story has moved past a step |
+| `Tutorial.missing(i)` | the earlier actions that were skipped or undone; the card names them |
+| `Tutorial.resume()` | another model opened during the tour pauses it (`foreign`, set on `loaded` unless the tour itself loads); this brings the tour's model back from `saved` |
 
 #### `web/state.js`
 The state `S`, the event bus, the model helpers, every direct edit, and the check-then-save step of

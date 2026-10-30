@@ -50,8 +50,13 @@ where you were. To keep a model, export it (**File → Export the model as YAML*
 ### 1.1 The tour
 
 **Help → Start the tour** builds a small system with you and uses every part of the reasoner. You do
-each step yourself: the control to use is outlined, and the card notices when the step is done. If you
-are stuck, **Do it for me** does it the same way.
+each step yourself: the control to use is outlined, and the card notices when the step is done.
+
+You can leave the path at any time. **Skip** moves on, and the card says what was skipped; **Do it for
+me** catches up on everything missing, then does the current step. Pressed again it goes on to the next
+step, so you can click it through the whole tour. If you open another model, the tour pauses and
+**Back to the tour** brings its model back. If your model or evidence differs from the story, the card
+says what your verdict means instead.
 
 | chapter | what you do |
 |---|---|

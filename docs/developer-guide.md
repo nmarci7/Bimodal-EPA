@@ -408,6 +408,7 @@ sequenceDiagram
 | `tests/test_api.py`, `tests/test_manual_evidence.py` | the HTTP API; witnesses and certificates written by hand |
 | `tests/test_web.py` (runs `web/tests/*.test.js` under node) | the browser's row logic against every row of the shipped models (skipped without node) |
 | `tests/test_mcp.py` | the model edits, the MCP server through a real client and in raw JSON-RPC, the shared workspace |
+| `tests/test_tutorial.py`, `tests/test_tour_browser.py` (runs `tests/browser/tour_paths.mjs` in headless Chrome) | the tour's story with the engine; the tour off the happy path: skips, Do it for me clicked through, windows left open, another model opened, parts deleted (skipped without Chrome or Node 22+; `EPA_TOUR_FULL=1` skips to every step) |
 | `tests/test_docs.py` | every definition is described in `docs/dev/`, the call graph is current, links resolve |
 
 `bench/bench.py` measures how analysis time grows with open rows and use cases.

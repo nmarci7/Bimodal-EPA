@@ -25,6 +25,9 @@ document.addEventListener('keydown', (e) => {
 
 export function isDialogOpen() { return stack.length > 0; }
 
+/** Closes every open window without asking (the tour takes over from a window left open). */
+export function closeAllDialogs() { while (stack.length) stack[stack.length - 1].close(); }
+
 /** A button for a dialog footer or body. */
 export function button(label, onClick, opts = {}) {
   const cls = ['btn', opts.primary ? 'primary' : '', opts.danger ? 'danger' : '', opts.small ? 'small' : '', opts.ghost ? 'ghost' : ''].filter(Boolean).join(' ');
