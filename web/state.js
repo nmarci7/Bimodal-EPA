@@ -198,9 +198,12 @@ export function guardSummary(d, g) {
   const text = parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ');
   return { empty: false, text, long: `catches ${parts.join(', ')}${g.learned ? ' (learned: none can be certified never)' : ''}` };
 }
+/** Whether a point judges taint: the tolerated level, or the old `taint: reject`. */
+export function judgesTaint(o) { return o.tolerate_taint !== undefined || o.taint === 'reject'; }
+
 export function obsSummary(d, o) {
   const parts = Object.entries(o.tolerate || {}).map(([m, v]) => `${m}≥${v}`);
-  if (o.taint === 'reject') parts.push('taint');
+  if (judgesTaint(o)) parts.push('taint');
   if (o.clearance) parts.push(o.clearance === 'receiver' ? 'conf>clearance' : `conf>${o.clearance}`);
   if (o.requires) parts.push(o.requires === 'receiver' ? 'auth<required' : `auth<${o.requires}`);
   if (!parts.length) return { empty: true, text: 'judges nothing', long: 'nothing: tick the failures it judges' };

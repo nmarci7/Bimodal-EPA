@@ -7,6 +7,10 @@ A certificate record (JSON):
    "method": "exhaustive mandate-scope test + review", "scope": ["pay"],
    "context": {"agent": "gpt-x-2026-05"},      # upstream versions at signing (re-verify list)
    "evidence": "link to the report"}
+
+A certificate may instead, or as well, say `"table": "confirmed"`: a fault injection campaign fed the
+real component every reachable combination of error tokens and every output is covered by its table.
+It carries the same issuer, date, method, scope and version, and goes stale the same way.
 """
 from __future__ import annotations
 
@@ -60,7 +64,12 @@ def classify(cert, m, withdrawn=()):
         return "withdrawn", "withdrawn by a recorded decision", rows
     if comp is None:
         return "rejected", f"unknown component {cert.get('component')!r}", rows
-    if not rows:
+    table = cert.get("table")
+    if table not in (None, "confirmed"):
+        return "rejected", f"table may only say confirmed, not {table!r}", rows
+    if table and (comp.llm or comp.learned):
+        return "rejected", f"{comp.id} is an LLM or a learned guard: its table is the worst case and is not confirmed", rows
+    if not rows and not table:
         return "rejected", "states no row", rows
     for r, x in rows.items():
         row = m.rows.get(r)

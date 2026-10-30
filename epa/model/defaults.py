@@ -5,6 +5,11 @@ says `worst_case_defaults: all`) and the rows every guard carries."""
 # only; `all` gives it to every component, FPTC style, so an unmodelled component is never a guarantee.
 WORST_CASE = ("llm", "all")
 
+# What a worst-case default emits: the mode, present. The rounds translator reads a default as magnitude
+# ROUNDS_TOP instead, the old top of the scale, which the reference semantics of the differential test uses.
+PRESENT = 1
+ROUNDS_TOP = 10
+
 
 def replaces_default(comp, r, port, mode):
     """An analyst row refines the default (port, mode) in place only if it keeps the default's trigger -
@@ -28,8 +33,8 @@ def has_defaults(doc, cdoc):
 
 def add_worst_case_defaults(m):
     """A component with defaults (`has_defaults`) starts with a worst-case table: for each output port
-    and each top-level mode, `any message => mode const 10`, open. An analyst row with the same trigger
-    that emits the same mode on the same port replaces it (a magnitude below 10 is recorded as a
+    and each top-level mode, `any message => the mode, present`, open. An analyst row with the same trigger
+    that emits the same mode on the same port replaces it (a magnitude on a refined scale is recorded as a
     calibration); every other analyst row is added beside it; a default may be dropped only with a
     recorded reason. An LLM component's default falls under the LLM rule (never "never"); any other
     component's default may be certified never, which is how evidence earns a guarantee for a
@@ -49,9 +54,9 @@ def add_worst_case_defaults(m):
                         covered.setdefault(mode, r)
             for mode, r in covered.items():
                 op, k = r.then[port][mode]
-                if op == "const" and k < 10:
+                if op == "const" and k != PRESENT:
                     m.decisions.append({"kind": "calibrate-default", "component": cid, "port": port, "mode": mode,
-                                        "row": r.id, "from": 10, "to": k,
+                                        "row": r.id, "from": PRESENT, "to": k,
                                         "reason": r.reason or r.label or "calibrated by the analyst"})
             for mode in m.top_modes:
                 if mode in covered:
@@ -62,7 +67,7 @@ def add_worst_case_defaults(m):
                     continue
                 rid = f"default.{cid}.{port}.{mode}"
                 m.rows[rid] = Row(id=rid, comp=cid, kind="default", when={"*": {"any": True}},
-                                  then={port: {mode: ("const", 10)}}, open=True, llm=comp.llm,
+                                  then={port: {mode: ("const", PRESENT)}}, open=True, llm=comp.llm,
                                   label=f"worst-case default: {mode} on {port}")
 
 
@@ -84,5 +89,5 @@ def add_guard_rows(m):
         if g.learned:
             rid = f"fp.{g.id}"
             m.rows[rid] = Row(id=rid, comp=g.id, kind="fp", when={"in": {"any": True}},
-                              then={"out": {"omission": ("const", g.fp_omission or 10)}} if "omission" in m.fields else {},
+                              then={"out": {"omission": ("const", g.fp_omission or PRESENT)}} if "omission" in m.fields else {},
                               open=True, llm=True, label=f"{g.label} refuses a harmless message (false positive)")

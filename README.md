@@ -5,8 +5,8 @@ Bimodal error propagation analysis (EPA) for agentic systems, engine v2.
 BME VIK TDK 2026 project.
 
 This repository is the tool of the TDK paper. It takes a model of an agentic system (components,
-edges, guards, observation points, use cases), runs every firing choice of the rows that matter
-for each observation point through **TLA+/TLC**, hands those runs to **clingo** as facts, and
+edges, guards, observation points, use cases), runs every switch vector of the rows that matter
+and every firing order for each observation point through **TLA+/TLC**, hands those runs to **clingo** as facts, and
 answers, for every observation point and failure mode, what the evidence leaves possible:
 
 | verdict | meaning |
@@ -86,7 +86,7 @@ step by step in the real interface, and uses every part of the reasoner. The rea
    TLA+ module of every cone and the ASP program of every cell can be opened.
 4. **Verdicts.** The verdict of every cell, grouped by observation point, with the statuses,
    what to do, why (structural, the certificates it rests on, dropped defaults), the root causes,
-   the candidates as boxes with what struck them, a reaching run told round by round, the
+   the candidates as boxes with what struck them, a reaching run told firing by firing, the
    certify-next ranking, the claims and whether the evidence supports them, certificates to
    re-verify, and the exports (Markdown report, CRA JSON).
 
@@ -132,12 +132,12 @@ pytest -q                                # the paper's table, the cases, ASP aga
 epa/model/       load.py (the YAML/JSON document → Model), defaults.py (LLM worst-case rows, guard
                  leak and false-positive rows), wellformed.py, cone.py (cells, path-sensitive cones),
                  edit.py (edits of a model document, used by the MCP server)
-epa/translate/   to_tla.py: one TLA+ module per cone; Init picks a use case and a firing choice,
-                 Next is one synchronous round, the run ends at the fixpoint
+epa/translate/   to_tla.py: one TLA+ module per cone; Init picks a use case and a switch vector,
+                 Next fires one ready component, a run ends when none is ready
 epa/alethic/     tlc_runner.py (runs TLC, caches by module hash), dump_reader.py, runs.py
 epa/epistemic/   asp/epistemic.lp, reason.py (brave reasoning, minimal conflict sets), verdicts.py
 epa/intake/      cert_import.py, log_import.py (recognisers), mcp_import.py, bootstrap.py
-epa/engine/      coordinator.py (certificates prune firing choices before TLC; conflicts; reasons;
+epa/engine/      coordinator.py (certificates prune switch vectors before TLC; conflicts; reasons;
                  certify-next ranking), cache.py (SQLite run cache), scenario.py (case stages)
 epa/report/      explain.py, markdown.py (report and CRA export)
 epa/api/app.py   FastAPI: model check, evidence intake, analyses with server-sent events, the shared workspace

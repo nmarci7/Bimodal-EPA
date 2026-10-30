@@ -8,9 +8,12 @@ description: >
   Design v2: redaction before the cloud, state reports from devices only, skill schema 2.
 modes:
   - omission
-  - commission: [unsafe, chatter, instr]
+  - commission: [unsafe, chatter, instr]   # unsafe actuation, command chatter, planted standing instruction
+  - hazard: [heat_open, door_armed]        # a command a sensor reading forbids: heating with the window open,
+                                           # the front door unlocked while the alarm is armed
   - late
   - value
+severity: {omission: 10, unsafe: 8, chatter: 3, instr: 7, heat_open: 8, door_armed: 9, late: 6, value: 10}
 lattices:
   confidentiality: [public, household, presence]
   authority: [none, guest, owner]
@@ -20,19 +23,23 @@ components:
     kind: llm
     label: "cloud LLM · discretionary"
     version: cloud-llm-2026-08
-    in: [context, feed, memory]
+    in: [context, feed, memory, ask_heat, ask_door]
     out: [plan, write]
-    flow: {context: [plan, write], feed: [plan], memory: [plan]}
+    flow: {context: [plan, write], feed: [plan], memory: [plan], ask_heat: [plan], ask_door: [plan]}
     authority: owner
     clearance: presence
     rows:
-      - {id: h_unsafe, label: plans an unsafe actuation (unlock at night, disarm the alarm), when: {"*": any}, then: {plan: {unsafe: const 8}}}
-      - {id: h_chatter, label: repeats a command, when: {"*": any}, then: {plan: {chatter: const 3}}}
-      - {id: h_late, label: answers late (cloud latency), when: {"*": any}, then: {plan: {late: const 6}}}
-      - {id: h_fabricate, label: claims a device state it did not check, when: {"*": any}, then: {plan: {value: const 7}}}
-      - {id: h_instr, label: stores an instruction planted in a feed item, when: {feed: any}, then: {write: {instr: const 7}}}
+      - {id: h_unsafe, label: plans an unsafe actuation (unlock at night, disarm the alarm), when: {"*": any}, then: {plan: {unsafe: present}}}
+      - {id: h_chatter, label: repeats a command, when: {"*": any}, then: {plan: {chatter: present}}}
+      - {id: h_late, label: answers late (cloud latency), when: {"*": any}, then: {plan: {late: present}}}
+      - {id: h_fabricate, label: claims a device state it did not check, when: {"*": any}, then: {plan: {value: present}}}
+      - {id: h_instr, label: stores an instruction planted in a feed item, when: {feed: any}, then: {write: {instr: present}}}
+      - {id: h_heat, label: raises the heating as asked; it cannot see the window, frequency: always, when: {ask_heat: any}, then: {plan: {heat_open: present}}}
+      - {id: h_door, label: unlocks the front door as asked; it cannot see the alarm, frequency: always, when: {ask_door: any}, then: {plan: {door_armed: present}}}
     drop_defaults:
       - {port: plan, mode: commission, reason: "the planner's commissions on the plan are modelled as unsafe actuation and chatter"}
+      - {port: plan, mode: hazard, reason: "the planner asks for what the owner asked; its two hazards are the rows h_heat and h_door"}
+      - {port: write, mode: hazard, reason: "a memory write commands no device"}
       - {port: write, mode: commission, reason: "the only commission a memory write carries here is a planted instruction"}
       - {port: write, mode: omission, reason: "a lost memory write loses a convenience, not a function"}
       - {port: write, mode: late, reason: "standing instructions are not time-critical"}
@@ -52,33 +59,37 @@ components:
     kind: deterministic
     label: firmware and guards
     version: hub-fw-5.2
-    in: [request, plan, local, state]
+    in: [request, plan, local, state, window, alarm]
     out: [context, command, report, skill]
     flow:
       request: [context]
       plan: [command, skill]
       local: [command]
       state: [report, context]
+      window: []
+      alarm: []
     absorbs:
       - {port: plan, modes: [omission], reason: "whether a missing plan becomes a missing command is row hub_drop (the failover)"}
     authority: owner
     clearance: presence
     rows:
-      - {id: hub_drop, label: a missing plan becomes a missing command (no fallback to the local path), when: {plan: {omission: 1}}, then: {command: {omission: keep}}}
+      - {id: hub_hold_heat, label: holds the heating back when the plan and the window reading stand together, frequency: always, when: {plan: {heat_open: present}, window: any}}
+      - {id: hub_hold_door, label: holds the unlock back when the plan and the alarm reading stand together, frequency: always, when: {plan: {door_armed: present}, alarm: any}}
+      - {id: hub_drop, label: a missing plan becomes a missing command (no fallback to the local path), when: {plan: {omission: present}}, then: {command: {omission: present}}}
     pos: {x: 450, y: 336}
 
   - id: devices
     kind: external
     label: lock, alarm, heating
     version: zigbee-2026
-    trusted: true
+    taint: clean
     in: [command]
     out: [state]
     clearance: presence
     absorbs:
       - {port: command, modes: all, reason: "a device reports its own state; a failed command is judged at the actuator log, not repeated in the report"}
     rows:
-      - {id: d_stale, label: reports its state late, when: {command: any}, then: {state: {late: const 4}}}
+      - {id: d_stale, label: reports its state late, when: {command: any}, then: {state: {late: present}}}
     pos: {x: 980, y: 336}
 
   - id: local
@@ -90,8 +101,9 @@ components:
     authority: owner
     clearance: presence
     rows:
-      - {id: l_unsafe, label: the local model issues an unsafe command, when: {voice: any}, then: {cmd: {unsafe: const 8}}}
+      - {id: l_unsafe, label: the local model issues an unsafe command, when: {voice: any}, then: {cmd: {unsafe: present}}}
     drop_defaults:
+      - {port: cmd, mode: hazard, reason: "the owner asks the cloud agent for heating and doors; the local model only relays voice"}
       - {port: cmd, mode: omission, reason: "the local path is the fallback; its silence is the cloud path's availability problem"}
       - {port: cmd, mode: commission, reason: "the local model's commissions are modelled as unsafe commands"}
       - {port: cmd, mode: late, reason: "local inference, no network round trip"}
@@ -100,24 +112,28 @@ components:
 guards:
   - {id: redact, label: redact, edge: e_context, version: redact-v1,
      targets: [{conf: household, decidable: true}]}
-  - {id: mf, label: mem. filter, edge: e_write, version: memfilter-llm-2, learned: true, fp_omission: 3,
-     targets: [{mode: instr, threshold: 1}]}
-  - {id: gj, label: "LLM judge ~", edge: e_command, version: judge-llm-1, learned: true, fp_omission: 4,
-     targets: [{mode: unsafe, threshold: 1}]}
+  - {id: mf, label: mem. filter, edge: e_write, version: memfilter-llm-2, learned: true,
+     targets: [{mode: instr}]}
+  - {id: gj, label: "LLM judge ~", edge: e_command, version: judge-llm-1, learned: true,
+     targets: [{mode: unsafe}]}
   - {id: gi, label: interlock, edge: e_command, version: interlock-v4,
-     targets: [{mode: unsafe, threshold: 1, decidable: true}, {auth: owner, decidable: true}]}
+     targets: [{mode: unsafe, decidable: true}, {auth: owner, decidable: true}]}
   - {id: gw, label: watchdog, edge: e_command, version: watchdog-v2,
-     targets: [{mode: chatter, threshold: 1, decidable: true}, {mode: late, threshold: 5, decidable: true}]}
+     targets: [{mode: chatter, decidable: true}, {mode: late, decidable: true}]}
   - {id: gf, label: freshness, edge: e_report, version: freshness-v1,
-     targets: [{mode: late, threshold: 3, decidable: true}]}
+     targets: [{mode: late, decidable: true}]}
   - {id: gl, label: failover, edge: e_local, version: failover-v2,
-     targets: [{mode: unsafe, threshold: 1, decidable: true}]}
+     targets: [{mode: unsafe, decidable: true}]}
   - {id: gs, label: schema, edge: e_skill, version: skill-schema-2, closed_output: true,
      targets: [{taint: true, decidable: true}, {conf: public, decidable: true}]}
 
 edges:
   - {id: e_voice, from: sys.voice, to: hub.request, label: voice and app request}
   - {id: e_sensors, from: sys.sensors, to: hub.state, label: occupancy and sensor state}
+  - {id: e_window, from: sys.window, to: hub.window, label: window sensor}
+  - {id: e_alarm, from: sys.alarm, to: hub.alarm, label: alarm and presence sensor}
+  - {id: e_ask_heat, from: sys.ask_heat, to: planner.ask_heat, label: the owner asks for heat}
+  - {id: e_ask_door, from: sys.ask_door, to: planner.ask_door, label: the owner asks to unlock}
   - {id: e_feed, from: sys.feeds, to: planner.feed, label: untrusted}
   - {id: e_context, from: hub.context, to: planner.context, label: context sent to the cloud}
   - {id: e_plan, from: planner.plan, to: hub.plan, label: "LLM plan ~"}
@@ -134,26 +150,39 @@ use_cases:
   - id: voice
     label: the owner asks by voice or app
     entries:
-      - {port: voice, token: {auth: owner, conf: household}}
+      - {port: voice, token: {taint: identified, auth: owner, conf: household}}
       - {port: sensors, token: {auth: owner, conf: presence}}
   - id: calendar
     label: a calendar invite or delivery notice arrives and the planner acts on it
     entries:
-      - {port: feeds, token: {taint: true, auth: none, conf: public}}
+      - {port: feeds, token: {taint: open, auth: none, conf: public}}
       - {port: sensors, token: {auth: owner, conf: presence}}
   - id: offline
     label: the cloud is unreachable; the owner speaks to the local model
     entries:
-      - {port: local_voice, token: {auth: owner, conf: household}}
+      - {port: local_voice, token: {taint: identified, auth: owner, conf: household}}
+      - {port: sensors, token: {auth: owner, conf: presence}}
+  - id: heating
+    label: the owner asks the agent for more heat while the window sensor reports the window open
+    entries:
+      - {port: ask_heat, token: {taint: identified, auth: owner, conf: household}}
+      - {port: window, token: {auth: owner, conf: household}}
+      - {port: sensors, token: {auth: owner, conf: presence}}
+  - id: door
+    label: the owner asks the agent to unlock the front door while the alarm is armed
+    entries:
+      - {port: ask_door, token: {taint: identified, auth: owner, conf: household}}
+      - {port: alarm, token: {auth: owner, conf: household}}
       - {port: sensors, token: {auth: owner, conf: presence}}
 
 observation_points:
   - {id: o_egress, edge: e_context, label: egress log, log: the hub's outbound proxy log, clearance: household}
-  - {id: o_memory, edge: e_read, label: memory audit, log: the standing-instruction audit trail, tolerate: {instr: 1}, taint: reject}
+  - {id: o_memory, edge: e_read, label: memory audit, log: the standing-instruction audit trail, tolerate: {instr: 1}, tolerate_taint: identified}
   - {id: o_actuator, edge: e_command, label: actuator log, log: the device command log,
-     tolerate: {unsafe: 1, chatter: 1, commission: 1, late: 5, value: 3, omission: 5}, requires: owner}
-  - {id: o_report, edge: e_report, label: app report log, log: what the app showed the household, tolerate: {late: 3, value: 3}}
-  - {id: o_skill, edge: e_skill, label: skill call log, log: the third-party skill gateway log, clearance: public, taint: reject}
+     tolerate: {unsafe: 1, chatter: 1, commission: 1, late: 1, value: 1, omission: 1}, requires: owner}
+  - {id: o_safety, edge: e_command, label: safety relay log, log: the relay's record of commands executed against a sensor reading, tolerate: {heat_open: 1, door_armed: 1}}
+  - {id: o_report, edge: e_report, label: app report log, log: what the app showed the household, tolerate: {late: 1, value: 1}}
+  - {id: o_skill, edge: e_skill, label: skill call log, log: the third-party skill gateway log, clearance: public, tolerate_taint: identified}
 
 claims:
   - {cell: unsafe@o_actuator, verdict: guarantee, by: hub firmware team, note: "no unsafe actuation reaches a device"}
@@ -165,6 +194,10 @@ layout:
     feeds: {x: 80, y: 76, dir: in}
     voice: {x: 230, y: 214, dir: in}
     sensors: {x: 990, y: 520, dir: in}
+    window: {x: 760, y: 520, dir: in}
+    alarm: {x: 860, y: 520, dir: in}
+    ask_heat: {x: 660, y: -60, dir: in}
+    ask_door: {x: 800, y: -60, dir: in}
     local_voice: {x: 80, y: 770, dir: in}
     user: {x: 80, y: 342, dir: out}
     skill: {x: 462, y: 612, dir: out}

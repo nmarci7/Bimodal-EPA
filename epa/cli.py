@@ -45,6 +45,11 @@ def _print(rep, fmt):
             frac = "" if rem is None else f"{rem}/{c['candidates']['space']}"
             st_txt = ("{" + st + "}") if st else ""
             print(f"{c['cell']:<28} {c['verdict']:<14} {st_txt:<10} {frac:>12}  {explain.reason_line(c)}")
+            if c.get("order_dependent"):
+                print(f"{'':<28} {c['advice']}")
+        print("\nmodel:")
+        for c in rep["cells"]:
+            print(f"  {c['cell']:<28} {explain.fidelity_line(c)}")
         if rep.get("ranking"):
             print("\ncertify next:")
             for a in rep["ranking"][:8]:

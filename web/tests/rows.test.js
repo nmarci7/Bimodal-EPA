@@ -11,11 +11,11 @@ const models = process.env.EPA_MODELS_JSON ? JSON.parse(fs.readFileSync(process.
 /** A row in one canonical spelling, so that two spellings of the same row compare equal. */
 function canon(r) {
   const when = {};
-  for (const [p, pat] of Object.entries(r.when || {})) when[p] = pat && typeof pat === 'object' ? Object.fromEntries(Object.entries(pat).map(([m, t]) => [m, Number(t)])) : 'any';
+  for (const [p, pat] of Object.entries(r.when || {})) when[p] = pat && typeof pat === 'object' ? Object.fromEntries(Object.entries(pat).map(([m, t]) => [m, t === 'present' ? 1 : Number(t)])) : 'any';
   const then = {};
   for (const [q, em] of Object.entries(r.then || {})) then[q] = R.isAsIs(em) ? 'as it is' : Object.fromEntries(Object.entries(em).map(([m, op]) => [m, R.formatOp(R.parseOp(op))]));
-  const { id, label, activation, when: _w, then: _t, ...rest } = r;
-  return { id, label: label || '', when, then, activation: activation || R.defaultActivation(R.rowKind(r)), ...rest };
+  const { id, label, activation, frequency, when: _w, then: _t, ...rest } = r;
+  return { id, label: label || '', when, then, frequency: frequency || activation || R.defaultActivation(R.rowKind(r)), ...rest };
 }
 
 test('the fixture lists the shipped models', () => {

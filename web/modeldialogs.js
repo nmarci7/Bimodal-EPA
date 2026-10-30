@@ -3,7 +3,7 @@
 // claim, and the model's own settings. Each edits a copy of the model and commits it on Save, after
 // the server's model check (state.saveChecked); Cancel leaves the model untouched.
 import { h, toast } from './lib.js';
-import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText, details, edgeName } from './state.js';
+import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText, details, edgeName, judgesTaint } from './state.js';
 import { wizard, field, textInput, numberInput, selectInput, checkInput, button, confirmDialog, openDialog } from './dialog.js';
 import { openRowDialog } from './rowdialog.js';
 import { defaultStatus, hasDefaults } from './rows.js';
@@ -342,14 +342,14 @@ export function openObsDialog(oid, { edge: edgeId, startAt } = {}) {
     const r = receiver();
     const opts = (levels, mine, what) => [['', 'not judged'], ...(r ? [['receiver', `the receiver's ${what} (${mine})`]] : []), ...levels.map((l) => [l, l])];
     return h('div', { class: 'block' },
-      checkInput('Flags any tainted message', o.taint === 'reject', (v) => { if (v) o.taint = 'reject'; else delete o.taint; ctx.update(); }, 'The receiver tolerates no text from outside the system.'),
+      checkInput('Flags any tainted message', judgesTaint(o), (v) => { delete o.tolerate_taint; if (v) o.taint = 'reject'; else delete o.taint; ctx.update(); }, 'The receiver tolerates no text from outside the system.'),
       h('div', { class: 'fields2' },
         field('Confidentiality above', selectInput(opts(conf, r && (r.clearance || conf.at(-1)), 'clearance'), o.clearance || '', (v) => { if (v) o.clearance = v; else delete o.clearance; ctx.update(); })),
         field('Authority below', selectInput(opts(auth, r && (r.requires || auth[0]), 'required authority'), o.requires || '', (v) => { if (v) o.requires = v; else delete o.requires; ctx.update(); }))),
       h('p', { class: 'hint' }, r ? `Judged against its receiver ${r.id}: a message more confidential than the clearance, or with less authority than required, reaches this point.` : 'The receiver is outside the model, so name the levels it demands.'));
   };
 
-  const judgesNothing = () => !Object.keys(o.tolerate).length && o.taint !== 'reject' && !o.clearance && !o.requires;
+  const judgesNothing = () => !Object.keys(o.tolerate).length && !judgesTaint(o) && !o.clearance && !o.requires;
   wizard({
     title: mode === 'add' ? 'New observation point' : `Edit ${o.label || o.id}`, mode, size: 'lg', startAt,
     subtitle: 'An observation point is an edge where a log exists; it judges what the receiver gets.',

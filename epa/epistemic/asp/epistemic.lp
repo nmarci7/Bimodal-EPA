@@ -5,13 +5,13 @@
 %   crow(R)          a row of the cell's own cone; counts are projected onto these
 %   llm(R)           an LLM row or a learned guard's row: never N (the LLM rule)
 %   leak(R)          a guard's leak row;  decidable(R): its target is decidable from the edge
-%   run(F)           a run explored by TLC: a use case and a firing choice
-%   uc(F,U)          the run's use case;  fires(F,R): R is in the run's firing choice
+%   run(F)           a run explored by TLC: a use case and a switch vector
+%   uc(F,U)          the run's use case;  fires(F,R): R is in the run's switch vector
 %   uses(F)          the run sends a message over the observation point
 %   reaches(F)       the failure reaches the observation point in that run
 %   match(F,W)       the run matches witness W on the fields W logs
 %   wrun(W,F)        a run of witness W's own cone; wrow(W,R): an open row of that cone;
-%   wfires(W,F,R)    R is in that run's firing choice; wmatch(W,F): the run matches all W logged
+%   wfires(W,F,R)    R is in that run's switch vector; wmatch(W,F): the run matches all W logged
 %   cert(K,R,X)      certificate K states activation X (n, s, a) for row R
 %   wit(W)           a witness
 % The externals switch evidence on and off without grounding again (suspension, what-if).

@@ -37,6 +37,15 @@ def statuses_for_display(seen):
     return [x for x in "NSA" if x in s]
 
 
+def order_advice(comp=None, ports=()):
+    """The advice for an order-dependent cell. Its remedy is synchronisation: no certificate and no
+    mitigation changes which of two inputs is processed first."""
+    what = "these inputs are processed"
+    if comp:
+        what = f"{comp} processes {' and '.join(ports)}" if ports else f"{comp} processes its inputs"
+    return f"sometimes, because the outcome depends on the order in which {what}: synchronise them"
+
+
 def advice(verdict, seen):
     s = set(statuses_for_display(seen))
     if verdict == "unchecked":

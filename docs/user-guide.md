@@ -170,7 +170,7 @@ and *As YAML* shows the exact text that goes into the model.
 | step | what you choose |
 |---|---|
 | **Kind** | *Failure row* (a condition and a failure sent on), *Internal fault* (a failure started with no message arriving), *Forwarding* (a message goes on to other outputs as it is), *Sink* (a failure that arrives may be absorbed). Kinds that cannot apply are greyed out with the reason (an LLM has no sinks). |
-| **When** | the conditions, all of which must hold: an input port (or *any input*) and *any message* or *a failure of at least* a magnitude (1–10). |
+| **When** | the conditions, all of which must hold: an input port (or *any input*) and *any message* or a failure that is present (*at least* a magnitude on a refined scale). A row with two conditions needs both tokens at the heads of the queues in one firing. |
 | **Then** | the emissions: an output port, the failure sent, and how strong: *at a fixed magnitude* (0–10), *at the matched magnitude*, *at the matched magnitude + k*, or *at the largest matched magnitude*. The last three need a failure in the condition. *The message as it is* sends it on unchanged. |
 | **Name and activation** | the row's id and a description, and the activation: **Open** (the evidence decides: never, sometimes or always) or fixed **Always**, **Sometimes**, **Never**. An LLM row that sends a failure can never be *Never* (the LLM rule). |
 
@@ -206,7 +206,7 @@ For a guard the table shows its fixed behaviour (what catching does), one **leak
 
 ### 3.5 Worst-case defaults and the standard failure modes
 
-A component starts with the worst case: on any message it may send any failure at magnitude 10 on
+A component starts with the worst case: on any message it may send any failure on
 every output. These *worst-case defaults* are rows the engine adds, left open, so the evidence decides
 how often they fire. Every LLM component has them. In a new model every other component has them
 too (the model setting **Worst-case defaults for every component**, in **Edit…** with nothing
@@ -267,7 +267,7 @@ receiver gets, after every guard on the edge. In its window:
 * **The point**: name, id (witnesses and verdicts name it), the edge, and where the log comes from.
 * **Failures it judges**: tick each failure mode it judges and the magnitude from which it counts
   (1 accepts none). Every ticked mode is a *cell* of the verdict table.
-* **Provenance**: whether it flags tainted messages, and the confidentiality above which, or the
+* **Provenance**: whether it flags tainted messages (`tolerate_taint` in the document names the highest taint level it accepts), and the confidentiality above which, or the
   authority below which, a message counts as reaching it (against the receiver's own clearance and
   required authority, or a level you name).
 
@@ -398,8 +398,8 @@ it happens:
 * **Input**: the model and the evidence the run uses.
 * **Relevance**: the *cells* (one per observation point and judged failure) and the *cones* (the
   rows that can matter for each point).
-* **Alethic (TLA+ / TLC)**: for each cone, TLC runs every firing choice of its open rows for every
-  use case. Runs are cached, so a second run of the same model is fast.
+* **Alethic (TLA+ / TLC)**: for each cone, TLC runs every switch vector of its open rows and every
+  firing order, for every use case. Runs are cached, so a second run of the same model is fast.
 * **Epistemic (ASP / clingo)**: the runs become facts; candidates are assignments of never,
   sometimes or always to the open rows; certificates and witnesses strike the ones they contradict.
 * **Output**: the verdicts and the ranking of what to certify next.
@@ -417,7 +417,9 @@ does not count.
 On the left, every cell grouped by observation point, worst first, with the statuses the remaining
 candidates give it (N never, S sometimes, A always) and a short reason. Click a cell for the detail:
 
-* what the verdict means, the statuses, and **what to do**;
+* what the verdict means, the statuses, and **what to do**. When two runs differ only in the order in
+  which a component took its inputs, the advice says so and names them: the remedy is to synchronise
+  them, which no certificate or mitigation replaces;
 * a **conflict** box when the evidence contradicted itself: the minimal conflict sets, and which
   certificates were suspended (in every cell) so the rest could decide;
 * **why**: structural (no candidate can change it), the certificates it rests on, dropped defaults;
@@ -426,7 +428,7 @@ candidates give it (N never, S sometimes, A always) and a short reason. Click a 
   certificates **not counted here** because their scope does not cover a use case of this point;
 * **Show the candidates**: every remaining assignment as a box (and the struck ones, with what
   struck them, when there are few enough);
-* **Show a reaching run**: one run of the model, round by round, in which the failure reaches the
+* **Show a reaching run**: one run of the model, firing by firing, in which the failure reaches the
   point;
 * **ASP program**, and **Show on the canvas**.
 
@@ -572,9 +574,9 @@ needs Node) shows every tool and lets you call them by hand.
 
 | word | meaning |
 |---|---|
-| failure mode | a kind of behavioural failure (omission, commission, late, value, …), with a magnitude 0–10 |
+| failure mode | a kind of behavioural failure (omission, commission, late, value, …), present or absent; a refined scale uses magnitudes 0–10 |
 | row | one behaviour of a component: when this arrives, it sends that |
-| activation | how often a row fires: never, sometimes, always, or open (a candidate choice) |
+| frequency | how often a row applies: never, sometimes, always, or open (a candidate choice); called activation in the row window |
 | guard | a check on an edge that catches its targets unless its leak row fires |
 | observation point | an edge whose log you can read; it judges what the receiver gets |
 | cell | one observation point and one judged failure (or provenance dimension) |

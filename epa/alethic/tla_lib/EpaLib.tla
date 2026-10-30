@@ -3,15 +3,19 @@
 (* The small hand-written library every generated cone module extends.     *)
 (*                                                                         *)
 (* A token is a record                                                     *)
-(*   [b |-> [ModeSet -> 0..10],  behavioural magnitudes per mode field     *)
+(*   [b |-> [ModeSet -> 0..10],  behavioural modes: 0 absent, 1 present,   *)
+(*                               larger numbers on a refined scale         *)
 (*    c |-> level,               confidentiality (join = max)              *)
 (*    a |-> level,               authority (merge = min)                   *)
-(*    t |-> BOOLEAN]             taint (merge = or)                        *)
-(* An edge label is [u |-> used, n |-> exists on the normal flow, k |-> tok]*)
-(* Labels only grow: merging never makes a token better, so every run      *)
-(* ends in the least fixpoint of the propagation (the paper's Lemma).      *)
+(*    t |-> 0..3]                taint: 0 clean, 1 internal, 2 external    *)
+(*                               identified, 3 external open (join = max)  *)
+(* A message on a queue is [n |-> on the normal flow, k |-> token]; the    *)
+(* normal bit tells a guard whether it may drop the message.               *)
+(* The monitor label of an edge is [u |-> used, n |-> normal, k |-> tok],  *)
+(* the field-wise worst token the edge delivered over the run. It reads    *)
+(* the run; no component reads it under fifo.                              *)
 (***************************************************************************)
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals, FiniteSets, Sequences
 
 Max(x, y) == IF x > y THEN x ELSE y
 Min(x, y) == IF x < y THEN x ELSE y
@@ -23,7 +27,7 @@ MaxSet(S) == IF S = {} THEN 0 ELSE LET x == CHOOSE x \in S : TRUE IN Max(x, MaxS
 JoinTok(x, y) == [b |-> [f \in DOMAIN x.b |-> Max(x.b[f], y.b[f])],
                   c |-> Max(x.c, y.c),
                   a |-> Min(x.a, y.a),
-                  t |-> x.t \/ y.t]
+                  t |-> Max(x.t, y.t)]
 
 RECURSIVE JoinAll(_, _)
 JoinAll(S, bot) == IF S = {} THEN bot
@@ -34,5 +38,18 @@ MergeLab(l, o) == IF o.u THEN [u |-> TRUE, n |-> l.n \/ o.n, k |-> JoinTok(l.k, 
 
 \* a token at least as bad as another, field by field
 AtLeastAsBad(x, y) == /\ \A f \in DOMAIN x.b : x.b[f] >= y.b[f]
-                      /\ x.c >= y.c /\ x.a <= y.a /\ (y.t => x.t)
+                      /\ x.c >= y.c /\ x.a <= y.a /\ x.t >= y.t
+
+\* the heads leave every non-empty queue of the firing component
+Pop(Q, ports) == [p \in DOMAIN Q |-> IF p \in ports /\ Q[p] # <<>> THEN Tail(Q[p]) ELSE Q[p]]
+
+\* The stopping rule: an edge delivers a token value only if it has not carried it in this run. `port` is
+\* the queue the edge ends in; "" for an edge that leaves the cone.
+Deliver(s, e, port, o) ==
+  IF ~o.u THEN s
+  ELSE LET m == [n |-> o.n, k |-> o.k] IN
+       IF m \in s.seen[e] THEN s
+       ELSE [q |-> IF port = "" THEN s.q ELSE [s.q EXCEPT ![port] = Append(@, m)],
+             seen |-> [s.seen EXCEPT ![e] = @ \cup {m}],
+             lab |-> [s.lab EXCEPT ![e] = MergeLab(@, o)]]
 =============================================================================

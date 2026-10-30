@@ -9,13 +9,13 @@ id_prefix: rep
 rules:
   - label: wrong state shown, and stale
     when: {all: [{field: shown_state, ne_field: device_state}, {field: state_age_s, gt: 120}]}
-    witness: {o_report: {modes: {value: [3, 10], late: [3, 10]}}}
+    witness: {o_report: {modes: {value: [1, 10], late: [1, 10]}}}
   - label: wrong state shown
     when: {field: shown_state, ne_field: device_state}
-    witness: {o_report: {modes: {value: [3, 10], late: [0, 2]}}}
+    witness: {o_report: {modes: {value: [1, 10], late: [0, 0]}}}
   - label: right state, but stale
     when: {field: state_age_s, gt: 120}
-    witness: {o_report: {modes: {value: [0, 2], late: [3, 10]}}}
+    witness: {o_report: {modes: {value: [0, 0], late: [1, 10]}}}
   - label: right and fresh
     when: {field: state_age_s, le: 120}
-    witness: {o_report: {modes: {value: [0, 2], late: [0, 2]}}}
+    witness: {o_report: {modes: {value: [0, 0], late: [0, 0]}}}

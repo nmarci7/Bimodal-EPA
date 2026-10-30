@@ -12,6 +12,7 @@ modes:
   - commission: [escape, drift, malicious]   # edits outside the allowed paths, calls to a changed tool, compromised dependency
   - late
   - value
+severity: {value: 7, escape: 8, drift: 7, malicious: 9}   # what the ranking weighs; modes are present or absent
 lattices:
   confidentiality: [public, private]
   authority: [none, contributor, maintainer]
@@ -26,8 +27,8 @@ components:
     authority: maintainer
     clearance: private
     rows:
-      - {id: p_val, label: plans a wrong command, when: {issue: any}, then: {plan: {value: const 7}}}
-      - {id: p_escape, label: plans edits outside the allowed paths (its own config, CI files), when: {issue: any}, then: {plan: {escape: const 8}}}
+      - {id: p_val, label: plans a wrong command, when: {issue: any}, then: {plan: {value: present}}}
+      - {id: p_escape, label: plans edits outside the allowed paths (its own config, CI files), when: {issue: any}, then: {plan: {escape: present}}}
     drop_defaults:
       - {port: plan, mode: omission, reason: "an omitted plan leaves the issue open; no harm path"}
       - {port: plan, mode: commission, reason: "the planner's commissions are modelled as path escapes; tool drift and compromised packages enter elsewhere"}
@@ -46,11 +47,11 @@ components:
     authority: maintainer
     clearance: private
     rows:
-      - {id: r_cmd, label: runs the planned command, activation: always, when: {plan: {value: 1}}, then: {cmd: {value: keep}}}
-      - {id: r_call, label: calls the planned tool, activation: always, when: {plan: {value: 1}}, then: {call: {value: keep}}}
-      - {id: r_edit, label: applies the planned edits, activation: always, when: {plan: {escape: 1}}, then: {edits: {escape: keep}}}
-      - {id: r_scripts, label: runs the workspace scripts the command invokes, activation: always, when: {scripts: {escape: 1}}, then: {cmd: {escape: keep}}}
-      - {id: r_drift, label: calls a tool without re-checking its description, when: {plan: any}, then: {call: {drift: const 7}}}
+      - {id: r_cmd, label: runs the planned command, frequency: always, when: {plan: {value: present}}, then: {cmd: {value: present}}}
+      - {id: r_call, label: calls the planned tool, frequency: always, when: {plan: {value: present}}, then: {call: {value: present}}}
+      - {id: r_edit, label: applies the planned edits, frequency: always, when: {plan: {escape: present}}, then: {edits: {escape: present}}}
+      - {id: r_scripts, label: runs the workspace scripts the command invokes, frequency: always, when: {scripts: {escape: present}}, then: {cmd: {escape: present}}}
+      - {id: r_drift, label: calls a tool without re-checking its description, when: {plan: any}, then: {call: {drift: present}}}
     pos: {x: 400, y: 336}
 
   - id: workspace
@@ -77,7 +78,7 @@ components:
     kind: tool
     label: tools, OAuth token
     version: github-mcp-0.4
-    trusted: true
+    taint: clean
     in: [call, repos]
     out: [pr]
     flow: {call: [pr], repos: []}
@@ -91,7 +92,7 @@ components:
     in: [fetch]
     out: [packages]
     rows:
-      - {id: reg_bad, label: serves a compromised package version, when: {fetch: any}, then: {packages: {malicious: const 9}}}
+      - {id: reg_bad, label: serves a compromised package version, when: {fetch: any}, then: {packages: {malicious: present}}}
     pos: {x: 1166, y: 70}
 
   - id: ci
@@ -104,13 +105,13 @@ components:
     pos: {x: 1166, y: 336}
 
 guards:
-  - {id: gp, label: paths, edge: e_edits, version: paths-v1, targets: [{mode: escape, threshold: 1, decidable: true}]}
+  - {id: gp, label: paths, edge: e_edits, version: paths-v1, targets: [{mode: escape, decidable: true}]}
   - {id: ga, label: allowlist, edge: e_cmd, version: allowlist-v2, closed_output: true, targets: [{taint: true, decidable: true}]}
   - {id: gs, label: sandbox, edge: e_outbound, version: sandbox-v3, targets: [{conf: public, decidable: true}]}
-  - {id: gt, label: tool list, edge: e_call, version: toolpin-v1, targets: [{mode: drift, threshold: 1, decidable: true}]}
+  - {id: gt, label: tool list, edge: e_call, version: toolpin-v1, targets: [{mode: drift, decidable: true}]}
   - {id: gk, label: scope, edge: e_pr, version: token-scope-v0, targets: [{conf: public, decidable: true}]}
-  - {id: gl, label: lockfile, edge: e_release, version: lockfile-v2, targets: [{mode: malicious, threshold: 1, decidable: true}]}
-  - {id: gx, label: tests, edge: e_release, version: tests-2026-10, targets: [{mode: malicious, threshold: 1, decidable: false}]}
+  - {id: gl, label: lockfile, edge: e_release, version: lockfile-v2, targets: [{mode: malicious, decidable: true}]}
+  - {id: gx, label: tests, edge: e_release, version: tests-2026-10, targets: [{mode: malicious, decidable: false}]}
 
 edges:
   - {id: e_issue, from: sys.issues, to: planner.issue, label: untrusted}
@@ -133,7 +134,14 @@ use_cases:
   - id: issue
     label: the agent works on an issue in a public repository
     entries:
-      - {port: issues, token: {taint: true, auth: none, conf: public}}
+      - {port: issues, token: {taint: open, auth: none, conf: public}}
+      - {port: checkout, token: {auth: maintainer, conf: public}}
+      - {port: private_repos, token: {auth: maintainer, conf: private}}
+      - {port: shell_env, token: {auth: maintainer, conf: private}}
+  - id: command
+    label: a maintainer gives the agent a command; what authentication buys over a public issue
+    entries:
+      - {port: issues, token: {taint: identified, auth: maintainer, conf: public}}
       - {port: checkout, token: {auth: maintainer, conf: public}}
       - {port: private_repos, token: {auth: maintainer, conf: private}}
       - {port: shell_env, token: {auth: maintainer, conf: private}}
@@ -145,8 +153,8 @@ use_cases:
 
 observation_points:
   - {id: o_process, edge: e_cmd, label: process audit, log: the shell's process audit trail,
-     tolerate: {value: 5, escape: 1}, taint: reject, requires: maintainer}
-  - {id: o_mcp, edge: e_call, label: MCP call log, log: the MCP client's JSON-RPC log, tolerate: {drift: 1, value: 5}, requires: maintainer}
+     tolerate: {value: 1, escape: 1}, tolerate_taint: identified, requires: maintainer}
+  - {id: o_mcp, edge: e_call, label: MCP call log, log: the MCP client's JSON-RPC log, tolerate: {drift: 1, value: 1}, requires: maintainer}
   - {id: o_pr, edge: e_pr, label: PR diff scan, log: the secret and private-code scanner on pull requests, clearance: public}
   - {id: o_egress, edge: e_outbound, label: egress log, log: the sandbox's outbound proxy log, clearance: public}
   - {id: o_release, edge: e_release, label: SBOM and release scan, log: the CycloneDX SBOM and the release scanner, tolerate: {malicious: 1}}

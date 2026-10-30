@@ -147,6 +147,7 @@ the dialogs.
 | `addPort`, `removePort`, `moveEdgeEnd`, `renameComponent`, `renamePort` | direct edits on `S.doc` (each calls the matching `ops` function, then `changed`) |
 | `portEdges(d, cid, side, name)` | the edges at one port |
 | `targetText(t)`, `guardSummary(d, g)`, `obsSummary(d, o)` | short texts for a guard target, a guard pill and an eye on the canvas |
+| `judgesTaint(o)` | whether a point judges taint: a tolerated level, or the old `taint: reject` |
 | `useCasesAt(d, port)` | the use cases that enter at a system input |
 | `addGuard(edgeId)`, `addObs(edgeId)` | add a guard or an observation point directly (kept for scripts; the canvas now opens the dialogs instead) |
 | `removeSelection()`, `dropEdges(ids)` | delete the selection with its edges, and the guards and points on them |
@@ -196,6 +197,7 @@ Rows as plain data. No DOM, so node can test it against every row of the shipped
 | `isAsIs(em)`, `parseOp(op)`, `formatOp({op,k})`, `clamp` | "as it is" in any spelling; `"const 9"`/`9`/`"keep"`/`"+2"`/`"max"` ↔ `{op, k}` (as `_parse_op` in load.py) |
 | `rowKind(row)` | failure, internal (no `when`), forwarding (only `any` and `as it is`) or sink (no `then`), as load.py reads it |
 | `toDraft(row)`, `fromDraft(draft, original)` | the row ↔ the dialog's editable form (lists of conditions and emissions); fields the dialog does not edit are kept; the activation is written only when it differs from the kind's default |
+| `rowFrequency(r)` | How often a row applies, as the document says it: `frequency`, or its old name `activation`. | — |
 | `defaultActivation(kind)` | `always` for forwarding, `open` otherwise |
 | `setKind(draft, kind, comp, fields)` | reshape a draft for another kind, keeping what still fits |
 | `draftProblemsByStep(draft, ctx)`, `draftProblems(draft, ctx)` | what stands in the way of saving, by wizard step (kind, trigger, effect, name): the rules of `validate` in load.py plus the LLM rule and the operators that need a matched magnitude |

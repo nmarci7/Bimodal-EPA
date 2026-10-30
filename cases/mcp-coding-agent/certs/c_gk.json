@@ -6,6 +6,6 @@
   "issuer": "platform team, reviewed by security",
   "date": "2026-10-23",
   "method": "the classic token is replaced by a GitHub App installed on acme/public-site only (contents: write, pull_requests: write); review of the installation and a negative test against acme/payroll-private",
-  "scope": ["issue"],
+  "scope": ["issue", "command"],
   "evidence": "github://acme/settings/installations/58812"
 }

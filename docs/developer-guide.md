@@ -93,9 +93,9 @@ flowchart LR
   D["model document<br/>(YAML / JSON)"] -->|"load_model<br/>validate · normalise<br/>defaults · wellformed"| M["Model<br/>components, edge segments,<br/>rows (analyst + generated)"]
   M -->|"cone.cells"| C["cells<br/>mode@point"]
   C -->|"cone.cones<br/>(path-sensitive, merged per point)"| K["cones<br/>open rows, edges, use cases"]
-  K -->|"to_tla.module_for"| T["TLA+ module<br/>Init: use case × firing choice<br/>Next: one synchronous round"]
+  K -->|"to_tla.module_for"| T["TLA+ module<br/>Init: use case × switch vector<br/>Next: one ready component fires"]
   T -->|"tlc_runner.run<br/>(java TLC, -dump states)"| S["state dump"]
-  S -->|"runs.runs_from_dump"| R["runs<br/>(uc, firing choice) → labels"]
+  S -->|"runs.runs_from_dump"| R["runs<br/>(uc, switch vector, outcome) → labels"]
   EV["evidence<br/>certificates, witnesses,<br/>decisions"] -->|"Engine.register<br/>classify"| REG["register<br/>in force / rejected / stale / withdrawn"]
   R -->|"Engine.problem"| P["CellProblem<br/>facts + epistemic.lp"]
   REG --> P
@@ -111,9 +111,9 @@ flowchart LR
    *cell*. Its *cone* is the set of rows, edges and fields that can change it, found backwards from the
    point per `(edge, field)`; cones of one point are merged so one TLC run serves several cells.
 3. **Runs, the alethic layer** ([dev/alethic.md](dev/alethic.md)). A cone becomes a TLA+ module whose
-   initial states are every use case × every firing choice of the cone's open rows, and whose steps are
-   synchronous rounds until nothing changes. TLC lists the reachable states; the terminal ones are the
-   runs.
+   initial states are every use case × every switch vector of the cone's open rows, and whose steps fire
+   one ready component each: TLC branches on which, so it walks every firing order. A run ends when no
+   component is ready; the terminal states, one per distinct outcome, are the runs.
 4. **Candidates, the epistemic layer** ([dev/engine.md](dev/engine.md)). A candidate gives each open row
    an activation (never, sometimes, always). clingo keeps the candidates the evidence allows:
    certificates fix rows, witnesses need a matching run, the LLM rule forbids "never" on LLM rows. The
@@ -328,7 +328,7 @@ sequenceDiagram
   E-->>VV: candidates with their status and what struck them
   VV->>API: GET …/cells/{cell}/trace
   API->>E: trace_of(cell, uc, fire) → runs.trace (the dump)
-  API-->>VV: the run round by round (explain.trace_story)
+  API-->>VV: the run step by step (explain.trace_story)
   VV->>API: GET …/cells/{cell}/asp
   API->>E: ensure, problem → CellProblem.program_text
   API-->>VV: the ASP program
@@ -378,7 +378,7 @@ sequenceDiagram
 | certificate | `{id, component, targets \| rows, version, issuer, date, method, scope, context}` | [dev/intake-api.md](dev/intake-api.md#4-certificates) |
 | witness | `{id, use_case, at: {point: {modes: {f: [lo, hi]}, taint, conf, auth, used}}, date, source, recogniser, versions, rule, lines}` | [dev/intake-api.md](dev/intake-api.md#3-recognisers) |
 | decision | `{kind: withdraw-cert, certificate, by, reason}` or `{kind: reject-witness, witness, by, second_reviewer, reason}` | [dev/engine.md](dev/engine.md) |
-| run | `(uc, firing choice) → labels {u, n, k: {b, c, a, t}}` per edge | [dev/alethic.md](dev/alethic.md#5-reading-runs) |
+| run | `(uc, switch vector, variant) → labels {u, n, k: {b, c, a, t}}` per edge | [dev/alethic.md](dev/alethic.md#5-reading-runs-and-why-the-reductions-are-sound) |
 | report | `{model, register, cells, suspension, cones, tlc_calls, absorbed, reverify, claims, engine, ranking, log, seconds}` | [dev/engine.md](dev/engine.md#shape-of-the-returned-report) |
 | events | `{t, step, msg, …}`: model, evidence, cells, cone, tlc, tlc-done, conflict, verdict, ranking, done | [dev/engine.md](dev/engine.md#events-emitted-through-emit) |
 
@@ -388,7 +388,7 @@ sequenceDiagram
 |---|---|---|
 | browser `localStorage` | `epa.doc`, `epa.evidence`, `epa.case` (and small UI preferences) | until the browser's site data is cleared |
 | server memory (`ANALYSES` in `api/app.py`) | running and finished analyses, their events and reports | until the server restarts |
-| `.epa-work/runs.sqlite` | the run cache: runs and the firing choices covered, per cone | kept; safe to delete |
+| `.epa-work/runs.sqlite` | the run cache: runs and the switch vectors covered, per cone | kept; safe to delete |
 | `.epa-work/tlc/<hash>/` | each generated module, its cfg, TLC's output and state dump | kept; safe to delete |
 | `.epa-work/workspace.json` | the shared workspace of the MCP server and the reasoner | kept |
 

@@ -16,9 +16,9 @@ import re
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ROW_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 KINDS = ("llm", "deterministic", "tool", "store", "external", "user")
-COMPONENT_FIELDS = ("kind", "label", "version", "authority", "clearance", "requires", "trusted", "raises", "flow")
+COMPONENT_FIELDS = ("kind", "label", "version", "authority", "clearance", "requires", "trusted", "taint", "raises", "flow")
 GUARD_FIELDS = ("label", "edge", "version", "learned", "closed_output", "fp_omission", "targets")
-OBS_FIELDS = ("label", "edge", "log", "tolerate", "taint", "clearance", "requires")
+OBS_FIELDS = ("label", "edge", "log", "tolerate", "taint", "tolerate_taint", "clearance", "requires")
 
 
 class EditError(ValueError):

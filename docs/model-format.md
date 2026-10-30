@@ -17,6 +17,7 @@ lattices:                    # low → high
   authority: [none, agent, principal]
 worst_case_defaults: all     # optional: every component starts with worst-case rows (FPTC style);
                              # llm (the default when absent): only LLM components do
+severity: {oom: 9, dup: 9}   # optional: how much a mode weighs in the certify-next ranking (default 1)
 components: [...]
 guards: [...]
 edges: [...]
@@ -26,9 +27,14 @@ claims: [...]                # optional
 layout: {sys: {...}}         # optional: canvas positions of the system ports
 ```
 
-Every failure is a magnitude from 0 (none) to 10. A sub-kind is a failure of its parent mode: a
-guard that catches `commission` catches `dup` too, and an observation point that tolerates
-`commission` judges each sub-kind it lists.
+A failure mode is present or absent. A sub-kind is a failure of its parent mode: a guard that catches
+`commission` catches `dup` too, and an observation point that tolerates `commission` judges each
+sub-kind it lists. An engineer may refine a mode into ordered levels when the analysis needs it: the tool
+encodes such a scale as whole numbers 0 to 10, larger is worse, and rows, thresholds and tolerances may
+then use numbers (`const k`, `keep`, `+k`, `threshold: k`). Everything below works the same on either scale.
+
+`severity` only ranks: it says what the ranking weighs when a guard turns this failure into a guarantee.
+It changes no verdict.
 
 A new model (File → New model, or `new_model` over MCP) starts with the failure classes of FPTC
 (Wallace 2005), from the HAZOP/SHARD guide words, which match the service, timing and value error
@@ -55,7 +61,9 @@ range, malformed), `subtle` plausible but wrong (Bondavalli and Simoncini).
   flow: {invoice: [request], view: []}   # the normal flow; default: every input to every output
   absorbs:                   # non-LLM components: failures that stop here (everything else passes through)
     - {port: invoice, modes: [late], reason: "the intake re-reads the invoice; a stale copy is discarded"}
-  trusted: true              # an untrusted component taints what it touches (default: false for external and user)
+  taint: clean               # the taint level it adds to what it sends: clean | internal | identified | open, or 0..3
+                             # (default: internal for llm, external and user, clean otherwise);
+                             # the old `trusted: true/false` is still read and means clean/internal
   authority: principal       # the component's own authority
   raises: true               # acts on its own authority (signs, approves)
   clearance: personal        # the most confidential data it may receive
@@ -68,8 +76,8 @@ range, malformed), `subtle` plausible but wrong (Bondavalli and Simoncini).
 
 `in` and `out` are the component's input and output ports, In(c) and Out(c). An edge runs from an
 output port (or a system input) to an input port (or a system output). One output port may feed
-several edges, which then carry the same message; one input port may receive several edges, whose
-tokens are merged. A port may stay unconnected. The reasoner draws inputs as hollow dots and
+several edges, each of which delivers the same token; one input port may receive several edges, and has
+one queue, in arrival order. A port may stay unconnected. The reasoner draws inputs as hollow dots and
 outputs as filled dots on the component's border, and lists the component's whole mapping table
 (analyst rows, pass-through, worst-case defaults, absorbed failures) under the canvas.
 
@@ -87,32 +95,51 @@ A failure stops only where the model says so, and every such place is a claim wi
 An LLM component passes nothing through: what it sends carries only the failures its rows emit (its
 worst-case defaults cover every top-level mode). The old `pass:` key is rejected.
 
+### Firing
+
+Every input port has a FIFO queue, and arrival only appends to it. A component is ready when one of its
+queues is non-empty, or when it has a switched-on internal fault not yet applied. In each step of a run
+one ready component fires; which one is free, and the analysis covers every choice. A firing takes the
+head of every non-empty queue and applies the table to those heads. A component remembers nothing of
+earlier firings. A run ends when no component is ready, and an edge never delivers a token value it has
+already carried in the run, so every run ends. Tokens that stand at the heads together are combined in
+one firing; tokens taken in different firings are not.
+
 ### Rows
 
-A row says what a component does with a failure, which failure it starts, or where it forwards a
-message. Four kinds, read off the row:
+A row (a table entry) says what a component does with a failure, which failure it starts, or where it
+forwards a message. Four kinds, read off the row:
 
 * a **failure row** - a condition and at least one failure emitted (the usual row);
-* an **internal fault** - no `when` (or `when: {}`): it needs no incoming message and fires whenever it
-  is switched on; it may only emit `const k`;
+* an **internal fault** - no `when` (or `when: {}`): it needs no incoming message, makes its component
+  ready while it is switched on and not yet applied, and applies once per run, in the component's first
+  firing; it may only emit the mode present or `const k`;
 * a **forwarding row** - only `any` patterns and every output `as it is`: the message goes on with
-  nothing added (a fork-join forwarding when it names several ports). Its activation is fixed
-  (`always` unless given), and the messages it sends are normal ones, which a guard never drops;
-* a **sink row** - no `then`: when it fires it absorbs the failures its patterns name on those ports.
+  nothing added (a fork-join forwarding when it names several ports, which applies only when all of them
+  have a head in one firing). Its frequency is fixed (`always` unless given), and the messages it sends
+  are normal ones, which a guard never drops;
+* a **sink row** - no `then`: when it applies it absorbs the failures its patterns name on those ports,
+  in that firing. A sink naming a second port holds a failure back only when both stand at the heads
+  together: this is how a reading holds a command back, and why that is a race.
 
-`then: {port: as it is}` (or `{port: {}}`) on a failure row sends the message there as it arrived; it
-exists because the failure row fired, so a guard that catches something in it may drop it.
+A row applies in every firing whose heads match it, if it is switched on for the run. A row naming
+several ports matches only if all of them have a head that matches, in one firing: nothing is remembered
+between firings. `then: {port: as it is}` (or `{port: {}}`) on a failure row sends the message there as it
+arrived; it exists because the failure row applied, so a guard that catches something in it may drop it.
 
 ```yaml
 - id: p_dup
   label: re-plans on a stale account view and pays the invoice again
-  when: {view: {late: 3}}            # an input port and a pattern: "any", or {mode: threshold}
-  then: {request: {dup: const 9}}    # an output port and what it emits: const k | keep | +k | max
-  activation: sometimes              # optional: always | sometimes | never fixes the row
+  when: {view: {late: present}}      # an input port and a pattern: "any", or {mode: present}
+  then: {request: {dup: present}}    # an output port and what it emits: the mode present, or as it is;
+                                     # on a refined scale also const k | keep | +k | max, and a number in `when`
+  frequency: sometimes               # optional: always | sometimes | never fixes the row
 ```
 
-A row without `activation` is open: the analysis treats never, sometimes and always as candidates
-and lets the evidence choose. An LLM component's rows can only be sometimes or always (the LLM
+`frequency` is how often the row applies when its heads match, never, sometimes or always; its old name
+`activation` is still read. A row without `frequency` is open: the analysis treats never, sometimes and
+always as candidates and lets the evidence choose. The choice holds for the whole run: there is no
+counting, so a run cannot say that only the second retry goes wrong. An LLM component's rows can only be sometimes or always (the LLM
 rule). `when: {"*": any}` matches a message on any input port; "any input" takes only `any` and
 stands alone, so a failure pattern names its port.
 
@@ -120,9 +147,9 @@ stands alone, so a failure pattern names its port.
 
 Every output port of an LLM component - and of every component, when the model says
 `worst_case_defaults: all` - starts with one generated row per top-level mode: any message in, that
-mode at 10 out, open. Only an analyst row with the same trigger - `when: {"*": any}`, or
+mode present out, open. Only an analyst row with the same trigger - `when: {"*": any}`, or
 the only input port with `any` - that emits the same top-level mode on the same port replaces it; a
-magnitude below 10 is recorded as a calibration. Every other row emitting there (a failure pattern, a
+magnitude on a refined scale is recorded as a calibration. Every other row emitting there (a failure pattern, a
 fork-join, a sub-kind) is added beside the default, because a narrower trigger would say that the
 component does not start the failure on its own. A row of an LLM component that emits a failure can
 never be fixed to `never` (the LLM rule); the default of any other component can be, by a certificate
@@ -147,10 +174,16 @@ through); a learned guard also gets a false-positive row (it blocks a good messa
   version: mandate-v2
   learned: false             # a classifier or an LLM judge: no target can be certified never
   closed_output: false       # emits only from a closed set (enumerations): may wash taint
-  fp_omission: 10            # learned guards: the omission a false positive causes
   targets:
-    - {mode: oom, threshold: 1, decidable: true}   # or {taint: true}, {conf: pseudonymous}, {auth: agent}
+    - {mode: oom, decidable: true}   # or {taint: open}, {conf: pseudonymous}, {auth: agent}
 ```
+
+A guard judges each token it takes. A target present with its leak row off is caught: the mode is
+removed, `{taint: k}` lowers taint to just below k (present if the level is at least k; `{taint: true}`
+means any taint), `{conf: l}` lowers confidentiality to l and `{auth: l}` raises authority to l. A caught
+message that exists only because a failure row made it is dropped, unless the guard lies on a cycle.
+`threshold: k` (default 1) and `fp_omission: k` (the omission a learned guard's false positive causes,
+default present) belong to a refined scale.
 
 `decidable: true` says the target can be decided from the data on the edge, so a certificate may
 say never. A taint target needs `closed_output`.
@@ -170,9 +203,15 @@ A use case is where messages enter and what they carry.
 - id: pay
   label: pay an incoming invoice under the mandate
   entries:
-    - {port: invoice, token: {taint: true, auth: none, conf: personal}}
-    - {port: principal, token: {auth: principal, conf: personal, modes: {late: 2}}}
+    - {port: invoice, token: {taint: open, auth: none, conf: personal}}
+    - {port: principal, token: {taint: identified, auth: principal, conf: personal, modes: {late: present}}}
 ```
+
+`taint` says who could have written the content, not which channel it came through, with four levels from
+good to bad: `clean` (0) only trusted components and inputs touched it; `internal` (1) a component inside
+the system, typically an LLM, produced or changed it; `identified` (2) an outside party the system
+authenticates could have shaped it; `open` (3) anyone could have. What a component sends carries the
+worse of the taint of the heads it took and its own level. `taint: true` is still read and means `open`.
 
 ## Observation points
 
@@ -185,8 +224,10 @@ verdict table.
   edge: e_transfer
   label: bank statement
   log: the customer's bank statement (CSV export)
-  tolerate: {commission: 1, oom: 1, dup: 1, late: 5}   # the lowest magnitude no longer accepted
-  taint: reject              # optional: the receiver tolerates no taint
+  tolerate: {commission: 1, oom: 1, dup: 1}   # what it judges; 1 for a present mode, on a refined scale
+                             # the lowest magnitude no longer accepted
+  tolerate_taint: identified # optional: the highest taint level the receiver accepts (see use cases);
+                             # the old `taint: reject` still works and means clean
   clearance: pseudonymous    # optional: the most confidential data the receiver may get
   requires: principal        # optional: the authority the receiver requires
 ```
@@ -224,6 +265,27 @@ asks for re-verification without voiding it.
 `scope` names the use cases the certificate was established for. It counts for a cell only if the
 scope covers every use case in which the cell's observation point can carry a message, apart from use
 cases in which none of the certified rows can fire. No scope means every use case.
+
+A certificate that says `"table": "confirmed"` (with or without `targets` or `rows`) states that a fault
+injection campaign fed the real component every reachable combination of error tokens and that every
+output is covered by its table:
+
+```json
+{"id": "c_table_gm", "component": "gm", "table": "confirmed", "version": "mandate-v2",
+ "issuer": "wallet team", "date": "2026-10-01", "method": "fault injection campaign", "scope": ["pay"]}
+```
+
+It follows the same rules for version, withdrawal and scope, and it changes no verdict. It is rejected on
+an LLM component or a learned guard, whose tables are the worst case.
+
+Every cell also says whether the model is consistent, complete and correct for it (`fidelity` in the
+report). Only components with a row kept in the cell's cone count; a component that only forwards through
+its `flow` stays out, though the search goes through it. *Consistent*: the evidence leaves a candidate.
+*Complete*: every combination of tokens that stands at a component's heads in some state explored carries
+only failures its table names, by a row's pattern or a declared absorption. A row that says only `any`
+names nothing; an LLM component's table is the worst case and a guard's table is total by its definition,
+so neither is checked. What is not covered is listed under `uncovered`. *Correct*: every component that
+is not an LLM or a learned guard has a confirmed table in force, and no witness contradicts the model.
 
 When a witness and some certificates leave no candidate, the subset-minimal such sets are found for
 the whole model (each witness is checked over the cone of everything it logs), and every certificate

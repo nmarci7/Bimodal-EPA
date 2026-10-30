@@ -4,8 +4,8 @@
 //
 // A row in the document (docs/model-format.md, "Rows"):
 //   {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: op}},
-//    activation?: always | sometimes | never}
-// with op one of "const k", "keep", "+k", "max". Its kind is read off its shape, as epa/model/load.py does.
+//    frequency?: always | sometimes | never}          (`activation` is its old name and still read)
+// with op "present", or on a refined scale "const k", "keep", "+k", "max". Its kind is read off its shape, as epa/model/load.py does.
 
 export const KINDS = {
   failure: { title: 'Failure row', text: 'A condition on what arrives, and a failure the component sends on because of it.' },
@@ -15,7 +15,8 @@ export const KINDS = {
 };
 
 export const OPS = {
-  const: { label: 'at a fixed magnitude', needsK: true, needsMatch: false },
+  present: { label: 'present', needsK: false, needsMatch: false },
+  const: { label: 'at a fixed magnitude (refined scale)', needsK: true, needsMatch: false },
   keep: { label: 'at the matched magnitude', needsK: false, needsMatch: true },
   plus: { label: 'at the matched magnitude + k', needsK: true, needsMatch: true },
   max: { label: 'at the largest matched magnitude', needsK: false, needsMatch: true },
@@ -31,10 +32,11 @@ export function isAsIs(em) {
     || (typeof em === 'object' && !Array.isArray(em) && !Object.keys(em).length);
 }
 
-/** "const 9" | 9 | "keep" | "+2" | "max" -> {op, k} (as _parse_op in epa/model/load.py) */
+/** "present" | "const 9" | 9 | "keep" | "+2" | "max" -> {op, k} (as _parse_op in epa/model/load.py) */
 export function parseOp(op) {
   if (typeof op === 'number') return { op: 'const', k: clamp(op, 0, 10) };
   const s = String(op).trim();
+  if (s === 'present') return { op: 'present', k: 1 };
   if (s === 'keep') return { op: 'keep', k: 0 };
   if (s === 'max') return { op: 'max', k: 0 };
   if (s.startsWith('+')) return { op: 'plus', k: Number(s.slice(1)) || 0 };
@@ -81,10 +83,13 @@ export function toDraft(row) {
   }
   const kind = row ? rowKind(r) : 'failure';
   return {
-    id: r.id || '', label: r.label || '', activation: r.activation || defaultActivation(kind),
+    id: r.id || '', label: r.label || '', activation: rowFrequency(r) || defaultActivation(kind),
     kind, when, then,
   };
 }
+
+/** How often a row applies, as the document says it: `frequency`, or its old name `activation`. */
+export function rowFrequency(r) { return r.frequency || r.activation; }
 
 /** A forwarding row is always forwarded unless it says otherwise; every other row starts open. */
 export function defaultActivation(kind) { return kind === 'forwarding' ? 'always' : 'open'; }
@@ -109,9 +114,9 @@ export function fromDraft(draft, original) {
   row.when = when;
   row.then = then;
   const act = draft.activation || 'open';
-  if (act !== defaultActivation(draft.kind)) row.activation = act;
+  if (act !== defaultActivation(draft.kind)) row.frequency = act;
   for (const [k, v] of Object.entries(original || {})) {
-    if (!['id', 'label', 'when', 'then', 'activation'].includes(k)) row[k] = v;
+    if (!['id', 'label', 'when', 'then', 'activation', 'frequency'].includes(k)) row[k] = v;
   }
   return row;
 }
@@ -125,8 +130,8 @@ export function setKind(draft, kind, comp, fields) {
   const outPort = comp.out[0] || '';
   if (kind === 'internal') {
     d.when = [];
-    d.then = d.then.filter((e) => !e.asis).map((e) => ({ ...e, op: 'const', k: e.op === 'const' ? e.k : 5 }));
-    if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'const', k: 5 }];
+    d.then = d.then.filter((e) => !e.asis).map((e) => (e.op === 'const' ? e : { ...e, op: 'present', k: 1 }));
+    if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'present', k: 1 }];
   } else {
     if (!d.when.length) d.when = [{ port: inPort, any: true, mode: '', threshold: 1 }];
     if (kind === 'forwarding') {
@@ -141,7 +146,7 @@ export function setKind(draft, kind, comp, fields) {
         d.when = [{ port: c0.port, any: false, mode: fields[0], threshold: 1 }];
       }
     } else if (kind === 'failure') {
-      if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'const', k: 5 }];
+      if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'present', k: 1 }];
     }
   }
   return d;
@@ -203,7 +208,7 @@ export function draftProblemsByStep(draft, ctx) {
       if (!op) E.push(`Unknown operator ${e.op}.`);
       else {
         if (op.needsMatch && !matched) E.push(`"${op.label}" needs a failure in the condition: without one there is no matched magnitude.`);
-        if (k === 'internal' && e.op !== 'const') E.push('An internal fault emits a fixed magnitude.');
+        if (k === 'internal' && !['present', 'const'].includes(e.op)) E.push('An internal fault emits the mode present, or a fixed magnitude.');
         if (e.op === 'const' && !(e.k >= 0 && e.k <= 10)) E.push('A magnitude is from 0 to 10.');
         if (e.op === 'plus' && !(e.k >= 1 && e.k <= 10)) E.push('+k adds 1 to 10.');
       }
@@ -260,6 +265,7 @@ function condText(port, pat) {
 
 function emitText(mode, op) {
   const { op: o, k } = parseOp(op);
+  if (o === 'present') return mode;
   if (o === 'const') return `${mode} at ${k}`;
   if (o === 'keep') return `${mode} at the matched magnitude`;
   if (o === 'max') return `${mode} at the largest matched magnitude`;
@@ -298,8 +304,8 @@ export function rowYaml(row) {
   if (row.label) lines.push(`  label: ${JSON.stringify(row.label)}`);
   lines.push(`  when: ${flow(row.when || {})}`);
   lines.push(`  then: ${flow(row.then || {})}`);
-  if (row.activation) lines.push(`  activation: ${row.activation}`);
-  for (const [k, v] of Object.entries(row)) if (!['id', 'label', 'when', 'then', 'activation'].includes(k)) lines.push(`  ${k}: ${flow(v)}`);
+  if (rowFrequency(row)) lines.push(`  frequency: ${rowFrequency(row)}`);
+  for (const [k, v] of Object.entries(row)) if (!['id', 'label', 'when', 'then', 'activation', 'frequency'].includes(k)) lines.push(`  ${k}: ${flow(v)}`);
   return lines.join('\n');
 }
 

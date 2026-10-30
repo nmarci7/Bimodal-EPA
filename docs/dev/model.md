@@ -80,10 +80,15 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | `_entries` | A use case as `[{port, token}]` with `sys.` stripped; reads `entries`, or an older single `entry`/`token` pair. | — |
 | `_is_asis` | True for an emission that adds nothing: None, `{}`, or `"as it is"`/`"as-is"`/`"asis"` (case-insensitive). | — |
 | `_absorbed_modes` | The modes of an `absorbs` entry (`modes`, else `mode`); `"all"` gives every field. | — |
-| `_parse_op` | An emit operator → `(op, k)`: an int is `const` (clamped 0–10); `keep` and `max` have k = 0; `+k` is `plus` (not clamped); `const k` is clamped; anything else raises ValueError. | — |
+| `_frequency` | A row's `frequency`, or `activation`, its old name. | — |
+| `_taint_level` | A taint level as a number: 0..3, a name of `TAINT_LEVELS`, or the old booleans (true is `open`); None if it is none of these. | — |
+| `_magnitude` | A threshold or magnitude: `present` is 1, else a whole number. | — |
+| `_component_taint` | The level a component adds: its `taint`, else what `trusted` says, else `internal` for llm, external and user and `clean` otherwise. | load._taint_level |
+| `_tolerated_taint` | The highest level a point accepts: `tolerate_taint`, or 0 for the old `taint: reject`, else None. | load._taint_level |
+| `_parse_op` | An emit operator → `(op, k)`: `present` is `const 1`; an int is `const` (clamped 0–10); `keep` and `max` have k = 0; `+k` is `plus` (not clamped); `const k` is clamped; anything else raises ValueError. | — |
 | `_parse_when` | `when` → `{port: {"any": True}}` for `any`/None/True, else `{port: {"modes": {mode: threshold}}}`; None gives `{}`. | — |
 | `normalise` | Builds the `Model` from a valid document (4a): fields, lattices, components, edge segments split by guard chains, guard components, observation points, use-case entries, analyst rows, absorb decisions, generated rows, cycle flags. | load._mode_list, load._absorbed_modes, load._parse_ref, load._guard_edge, load._entries, load._token, load._is_asis, load._parse_op, load._parse_when, defaults.add_worst_case_defaults, defaults.add_guard_rows, load._mark_cycles |
-| `_token` | A use-case token → `{"b": {field: magnitude}, "c": conf index, "a": auth index, "t": taint}`; fields default to 0, `c` to the bottom, `a` to the top, `t` to false. | — |
+| `_token` | A use-case token → `{"b": {field: magnitude}, "c": conf index, "a": auth index, "t": taint level}`; fields default to 0, `c` to the bottom, `a` to the top, `t` to 0. | — |
 | `_mark_cycles` | Sets `on_cycle` on every component that can reach itself (DFS over the component graph, ignoring `sys`). | — |
 
 ### epa/model/defaults.py
@@ -111,9 +116,11 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | `Cell.id` | `"{field}@{obs}"`, e.g. `oom@o_statement`. | — |
 | `Cell.parse` | The inverse of `id`: the field `taint`, `conf` or `auth` is also the kind, otherwise the kind is `mode`. | — |
 | `Cone` | Dataclass for the sub-model one TLC run explores, covering cells of one observation point. | — |
-| `Cone.key` | The cache key: SHA-256 (16 hex) over the semantics version, the rows (`to_json`), the component signatures, the edges, the use cases' entries and the fields. | load.Row.to_json, cone._comp_sig |
-| `_comp_sig` | The component attributes that affect runs: kind, flow, passes, trusted, authority, raises, targets (without `row`), learned, closed_output, fp_omission, on_cycle. | — |
-| `cells` | The cells, point by point: one mode cell per tolerated field (in `m.fields` order), then `taint` (if `taint: reject`), `conf` (if a clearance resolved), `auth` (if a requirement resolved); `only` filters by id. | — |
+| `default_schedule` | The firing semantics when nobody names one: `fifo`, unless `EPA_SCHEDULE` says otherwise. | — |
+| `schedule_of` | The model's schedule (set by `Engine`), else the default. | cone.default_schedule |
+| `Cone.key` | The cache key: SHA-256 (16 hex) over the semantics version, the schedule, the kinds of the cells, the rows (`to_json`), the component signatures, the edges, the use cases' entries and the fields. | load.Row.to_json, cone._comp_sig |
+| `_comp_sig` | The component attributes that affect runs: kind, flow, passes, trusted, taint, authority, raises, targets (without `row`), learned, closed_output, fp_omission, on_cycle. | — |
+| `cells` | The cells, point by point: one mode cell per tolerated field (in `m.fields` order), then `taint` (if the point has a tolerated taint level), `conf` (if a clearance resolved), `auth` (if a requirement resolved); `only` filters by id. | — |
 | `upstream` | The components from which a message can reach an edge (backward DFS over the component graph, ignoring `sys`, including the source). | — |
 | `_when_ports` | The input ports a row reads (every input for `"*"`). | — |
 | `forwarding` | Every way a component forwards a message: each `flow` pair `([p], q, None, "all")`, and each non-N `fwd`/`row` row with as-is outputs (join `any` for `"*"`, `all` otherwise). | load.Model.comp_rows |
@@ -123,6 +130,15 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 | `_creates_message` | Whether, in some use case where the row's trigger is possible, the edges leaving the port are not all normal (the row would create a message); caches `normal_edges`/`possible` on the model. | cone.normal_edges, cone.possible, cone._trigger_possible |
 | `downstream_guards` | The guards reachable forwards from the edges leaving a port (every output port of each visited component is followed). | load.Model.edges_from, load.Component.is_guard |
 | `_trigger_fields` | The union of the families of the modes named in a row's `when`. | load.Model.family |
+| `_carries_alone` | Under fifo: the row sends on a sub-network edge from an input port that does not forward there. | cone.forwarding, cone._when_ports |
+| `_guards_met` | The targets of guards off a cycle that a token sent by this row alone can trigger on its way to the point. | cone._carries_alone, cone.downstream_guards |
+| `_level` | A token's level in one provenance dimension. | — |
+| `_sent` | What a firing of a component sends in one provenance dimension, given the levels of its heads. | — |
+| `_provenance_bound` | The worst level of a dimension each edge can carry in a use case, without some rows. | cone.forwarding, cone._when_ports, cone._level, cone._sent |
+| `_provenance_bound.put(q_edges, v)` (nested) | Raises the bound on these edges. | — |
+| `_provenance_carriers` | The rows a provenance cell needs under fifo: they can send something worse than the output gets without them. | cone._carries_alone, cone._provenance_bound, cone._sent |
+| `report_components` | The components that count for completeness and correctness: those with a row kept in the cell's cone. | — |
+| `mentions` | Whether a component's table names a failure on a port, by a row's pattern or a declared absorption. | load.Model.children, load.Model.comp_rows |
 | `cone_of_cell` | The path-sensitive cone of one cell (4b). | cone.upstream, cone.forwarding, cone._creates_message, cone.downstream_guards, cone.normal_edges, cone.possible |
 | `cones` | One cone per cell, grouped by point and merged greedily (largest first) while the union of rows has at most `merge_limit` (10) members or one is a subset of the other. | cone.cone_of_cell |
 | `exact_points` | The observation points on a cone's edges whose fields the cone's runs compute exactly. | cone.upstream, cone._creates_message |
@@ -148,14 +164,14 @@ and `dst` (`(component, port)` or `("sys", name)`), `label`, `origin` (the docum
 
 **ObsPoint**: `id`; `edge` (the last segment of the document edge: what the receiver gets after every
 guard); `doc_edge`; `label`, `log`; `tolerate` (field → the lowest magnitude no longer accepted);
-`taint` (accept | reject); `clearance`, `requires` (indices or None).
+`tolerate_taint` (the highest level accepted, None: taint is not judged); `clearance`, `requires` (indices or None).
 
 **UseCase**: `id`, `label`, `entries` (`[(edge id, token)]`, one per edge leaving `sys.<port>`).
 
 **Model**: `name`, `description`, `top_modes`, `fields` (each top mode then its sub-kinds), `parent`,
 `conf_levels`, `auth_levels`, `components` (guards included), `edges` (segments), `rows` (analyst and
 generated), `obs`, `use_cases`, `claims`, `decisions` (the document's plus generated `absorb`,
-`calibrate-default`, `drop-default` records), `doc`, `warnings` (always empty). `_normal_edges` and
+`calibrate-default`, `drop-default` records), `doc`, `warnings` (always empty), `severity` (mode → weight in the ranking), `schedule` (set by `Engine`). `_normal_edges` and
 `_possible` are attached at runtime by cone.py, to_tla.py and the coordinator.
 
 **Cell** (frozen): `kind` (mode, taint, conf, auth), `field`, `obs`.
@@ -163,7 +179,7 @@ generated), `obs`, `use_cases`, `claims`, `decisions` (the document's plus gener
 **Cone**: `cells`, `obs`, `components` (the upstream components, sorted), `edges` (the sub-edges),
 `use_cases`, `rows` (rows whose activation varies: open or fixed S), `always` (rows fixed A), `fields`,
 `cell_rows`, `cell_fields`, `rel` (the `(edge, field)` pairs the runs compute exactly), `cell_rel`,
-`scope_ucs` (the use cases in which the observed segment can carry a message; for the scope rule).
+`cell_always` (a cell's own always rows), `scope_ucs` (the use cases in which the observed segment can carry a message; for the scope rule).
 
 ## 4. Algorithms
 
@@ -189,7 +205,7 @@ generated), `obs`, `use_cases`, `claims`, `decisions` (the document's plus gener
    6. **Use cases**: every edge leaving `sys.<port>` gets the token (`_token`).
    7. **Analyst rows**: as-is ports get `{}`; emissions are parsed by `_parse_op`; `when` by
       `_parse_when`. The kind is `sink` with no `then`; `fwd` with only `any` patterns, a non-empty
-      `when` and every output as-is; `row` otherwise. The activation defaults to `always` for `fwd`
+      `when` and every output as-is; `row` otherwise. The frequency defaults to `always` for `fwd`
       and open otherwise; `fixed` maps always/sometimes/never to A/S/N.
    8. **Model**, with an `absorb` decision per declared absorption.
    9. **Generated rows**: `add_worst_case_defaults`, then `add_guard_rows` (c).
@@ -228,12 +244,12 @@ other.
 ### (c) Generated rows
 
 * **LLM worst case**: for each LLM output port and top mode, a replacing analyst row (same trigger, same
-  mode, same port) wins and a magnitude below 10 is recorded as a calibration; otherwise a dropped
+  mode, same port) wins and a magnitude other than present is recorded as a calibration; otherwise a dropped
   default is recorded with its reason; otherwise `default.<cid>.<port>.<mode>` is added. Every other
   analyst row stays beside the default.
 * **Guards**: one leak row per target (`leak.<gid>.<key>`: when it fires, the target gets through;
-  otherwise the target is caught: mode fields capped at threshold − 1, conf or auth set to the level,
-  taint cleared, and a non-normal message dropped unless the guard is on a cycle); a learned guard's
+  otherwise the target is caught: mode fields removed (rounds: capped at threshold − 1), conf or auth set
+  to the level, taint lowered to k − 1, and a non-normal message dropped unless the guard is on a cycle); a learned guard's
   `fp.<gid>` emits omission.
 
 ### (d) The rules of `validate`

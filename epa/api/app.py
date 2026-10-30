@@ -440,7 +440,7 @@ def cell_trace(aid: str, cell: str):
         return {"cell": cell, "story": [], "note": "no run reaches the point in a remaining candidate"}
     ex = res["example_run"]
     with RUN_LOCK:
-        tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]))
+        tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]), ex.get("variant", 0))
     cone_fields = res.get("fields", [])
     return {"cell": cell, "run": ex, "story": explain.trace_story(st["model"], tr, cone_fields)}
 

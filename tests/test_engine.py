@@ -50,7 +50,7 @@ def test_certificate_prunes_before_running(running, tmp_path):
     eng = Engine(running, str(tmp_path))
     rep = eng.analyse({"certificates": [CERT]}, rank=False)
     first = rep["tlc_calls"][0]
-    assert first["vectors"] == 2          # leak row pinned to never: half of the firing choices
+    assert first["vectors"] == 2          # leak row pinned to never: half of the switch vectors
     assert cell(rep, "oom@o")["reasons"]["certificates"] == ["c_m1"]
 
 

@@ -1,15 +1,16 @@
 """The coordinator: Figure 2's loop.
 
 For every cone (one observation point, or a part of one):
-  1. generate  - the epistemic layer fixes which rows certificates in force pin; only the firing
-                 choices those pins allow are needed, so the rest is never explored;
+  1. generate  - the epistemic layer fixes which rows certificates in force pin; only the switch
+                 vectors those pins allow are needed, so the rest is never explored;
   2. run       - the cone is translated to TLA+ and TLC explores the needed runs (cached by the
                  cone's behaviour hash, so repeated questions cost nothing);
   3. reconcile - for each cell, clingo grounds the candidates against the runs and the evidence and
                  reads off the statuses the remaining candidates give the failure;
   4. conflict  - if nothing remains, the remaining runs are explored, the minimal conflict sets are
                  found, their certificates suspended, and the cell is reconciled again;
-  5. derive    - verdict, advice, reasons, root causes, candidate counts.
+  5. derive    - verdict, advice (with order dependence), reasons, root causes, candidate counts, and
+                 whether the model is consistent, complete and correct for the cell.
 Then the certify-next ranking, the claims, the re-verify list and the unmatched failures.
 """
 from __future__ import annotations
@@ -35,7 +36,9 @@ COUNT_CAP = 5000   # remaining candidates are counted up to this many
 
 
 class Engine:
-    def __init__(self, model, workroot, schedule="rounds", on_event=None, cache=None):
+    def __init__(self, model, workroot, schedule=None, on_event=None, cache=None):
+        schedule = schedule or C.default_schedule()
+        model.schedule = schedule
         self.m = model
         self.workroot = workroot
         os.makedirs(workroot, exist_ok=True)
@@ -71,7 +74,7 @@ class Engine:
 
     # ------------------------------------------------------------------ runs
     def ensure(self, cone, want):
-        """Make sure every firing choice consistent with some pin set in `want` has been explored."""
+        """Make sure every switch vector consistent with some pin set in `want` has been explored."""
         key = cone.key(self.m)
         missing = [w for w in want if not self.cache.covered(key, w)]
         if not missing:
@@ -79,21 +82,21 @@ class Engine:
         done = [c for c, _ in self.cache.coverage(key)]
         module, cfg = to_tla.module_for(self.m, cone, want=missing, done=done, schedule=self.schedule)
         n_vec = _count_vectors(cone.rows, missing, done)
-        self.emit("tlc", f"TLC explores {n_vec} firing choice(s) x {len(cone.use_cases)} use case(s) "
+        self.emit("tlc", f"TLC explores {n_vec} switch vector(s) x {len(cone.use_cases)} use case(s) "
                          f"for {cone.obs} ({len(cone.rows)} open rows)", cone=key, obs=cone.obs,
                   vectors=n_vec, rows=cone.rows)
         dump, stats = tlc_runner.run(module, cfg, self.workroot)
-        runs = R.runs_from_dump(dump, cone.edges)
+        heads = {}
+        runs = R.runs_from_dump(dump, cone.edges, heads)
         info = {k: stats.get(k) for k in ("hash", "generated", "distinct", "depth", "seconds", "cached", "tlc_version")}
         info["runs"] = len(runs)
         info["vectors"] = n_vec
-        self.tlc_calls.append({"cone": key, "obs": cone.obs, **info})
+        info["heads"] = {c: sorted(v) for c, v in heads.items()}
+        self.tlc_calls.append({"cone": key, "obs": cone.obs, **{k: v for k, v in info.items() if k != "heads"}})
         self.cache.add(key, missing, runs, info)
-        bad = [r for r in runs.values() if r.terminal_variants > 1]
         self.emit("tlc-done", f"{stats.get('distinct', '?')} distinct states, depth {stats.get('depth', '?')}, "
                               f"{len(runs)} runs" + (" (cached)" if stats.get("cached") else f", {stats.get('seconds')} s"),
-                  cone=key, module=stats["hash"], **{k: v for k, v in info.items() if k != "hash"},
-                  nonconfluent=len(bad))
+                  cone=key, module=stats["hash"], **{k: v for k, v in info.items() if k not in ("hash", "heads")})
         return stats["hash"]
 
     # ------------------------------------------------------------------ evidence across cells
@@ -252,21 +255,19 @@ class Engine:
         wruns = {wid: (set(wc.rows), self.witness_runs(w, wc)) for wid, (w, wc) in linked.items()}
         extra_rows = sorted(reach - set(rows))
         proj = {wid: (w["at"], w.get("use_case")) for wid, (w, _) in linked.items()}
+        # Runs that differ only in what this cell cannot see are one run for it. Different firing orders of
+        # one use case and switch vector stay apart as soon as the cell's outcome differs.
         grouped = {}
         for r in allruns.values():
-            k = (r.uc, frozenset(r.fire & set(rows)))
-            out = (R.used(m, cell, r), R.reaches(m, cell, r), frozenset())
-            g = grouped.setdefault(k, {"out": out, "fired": set(), "sev": 0, "example": r, "agree": True})
-            if g["out"] != out:
-                g["agree"] = False
-            g["fired"] |= set(r.fired & set(rows))
+            uses, reaches = R.used(m, cell, r), R.reaches(m, cell, r)
+            k = (r.uc, frozenset(r.fire & set(rows)), uses, reaches, frozenset(r.fired & set(rows)))
+            g = grouped.setdefault(k, {"sev": 0, "example": r})
             g["sev"] = max(g["sev"], R.severity(m, cell, r))
         runs = []
-        for i, ((uc, F), g) in enumerate(sorted(grouped.items(), key=lambda kv: (kv[0][0], sorted(kv[0][1]))), start=1):
-            uses, reaches, matched = g["out"]
-            runs.append({"id": i, "uc": uc, "fires": set(F), "uses": uses, "reaches": reaches,
-                         "matches": set(matched), "fired": g["fired"], "sev": g["sev"], "example": g["example"],
-                         "agree": g["agree"]})
+        order = lambda kv: (kv[0][0], sorted(kv[0][1]), kv[0][2], kv[0][3], sorted(kv[0][4]))  # noqa: E731
+        for i, ((uc, F, uses, reaches, fired), g) in enumerate(sorted(grouped.items(), key=order), start=1):
+            runs.append({"id": i, "uc": uc, "fires": set(F), "uses": uses, "reaches": reaches, "matches": set(),
+                         "fired": set(fired), "sev": g["sev"], "example": g["example"]})
         cert_list = [(c["id"], c["resolved"]) for c in certs if set(c["resolved"]) & reach]
         cert_list += list(extra_certs)
         prob = CellProblem(m, rows, runs, cert_list, list(proj), extra_rows=extra_rows, wruns=wruns)
@@ -290,7 +291,7 @@ class Engine:
         b = None if lacks_path else prob.brave(on, won)
         if b is None and not lacks_path:
             # not expected once the global suspension is applied; kept as a safety net: explore every
-            # firing choice, then blame the witnesses or find this cell's own conflict sets
+            # switch vector, then blame the witnesses or find this cell's own conflict sets
             self.ensure(cone, [{}])
             prob, runs, proj = self.problem(cone, cell, in_force, witnesses)
             if not prob.satisfiable(set(), won):
@@ -340,13 +341,80 @@ class Engine:
             minimal = set(minimal)
             ex = next((r for r in runs if r["reaches"] and r["id"] in b["admits"]
                        and frozenset(r["fired"]) in minimal), None)
-            res["example_run"] = {"uc": ex["uc"], "fire": sorted(ex["example"].fire)} if ex else None
+            res["example_run"] = ({"uc": ex["uc"], "fire": sorted(ex["example"].fire), "variant": ex["example"].variant}
+                                  if ex else None)
         else:
             res["root_causes"], res["example_run"] = [], None
         # reasons
         res["reasons"] = self.reasons(cone, cell, prob, runs, on, won, verdict, register)
-        res["nonconfluent"] = sum(1 for r in runs if not r["agree"])
+        if b:
+            self.mark_order_dependence(res, cone, cell, runs, b["admits"])
+        res["fidelity"] = self.fidelity(cone, cell, res, register)
         return res
+
+    def mark_order_dependence(self, res, cone, cell, runs, admits):
+        """A cell is order dependent when two runs some remaining candidate admits, of one use case and
+        switch vector, differ in whether the failure reaches, the point being used in both. That is said
+        in the advice and nowhere in the token or the ASP: the status stays what the runs give, sometimes."""
+        m = self.m
+        rows = set(cone.cell_rows[cell.id])
+        kept = {(r["uc"], frozenset(r["fires"]), r["reaches"]) for r in runs if r["id"] in admits}
+        pairs = [(a, b) for a, b in R.races(m, cell, self.cache.runs(cone.key(m)).values())
+                 if (a.uc, a.fire & rows, True) in kept and (b.uc, b.fire & rows, False) in kept]
+        res["order_dependent"] = None
+        if not pairs:
+            return
+        at = next(filter(None, (R.race_at(m, a, b) for a, b in pairs)), None)
+        comp, ports = at or (None, [])
+        res["order_dependent"] = {"component": comp, "ports": ports, "use_cases": sorted({a.uc for a, _ in pairs})}
+        text = V.order_advice(comp, ports)
+        res["advice"] = text if res["verdict"] == "hope" or not res["advice"] else f"{text}; {res['advice']}"
+
+    def table_in_force(self, cert, comp, cone):
+        """A confirmed table counts for a cell if it is in force, not suspended, and its scope covers
+        every use case in which the cell's point carries a message and the component gets one."""
+        if cert.get("table") != "confirmed" or cert.get("component") != comp or cert["state"] != "in force":
+            return False
+        if cert["id"] in self.gsusp["suspended"]:
+            return False
+        scope = cert.get("scope")
+        if not scope:
+            return True
+        m = self.m
+        into = [e.id for p in m.components[comp].ins for e in m.edges_into(comp, p)]
+        ucs = cone.scope_ucs if cone.scope_ucs is not None else cone.use_cases
+        return not any(e in m._possible[u] for u in set(ucs) - set(scope) for e in into)
+
+    def fidelity(self, cone, cell, res, register):
+        """Consistent: the evidence leaves a candidate. Complete: every head combination the runs reach
+        at a component of the cone is mentioned by its table. Correct: every component of the cone that
+        is not an LLM has a confirmed table in force, and no witness contradicts the model."""
+        m = self.m
+        comps = C.report_components(m, cone, cell)
+        fields = set(cone.cell_fields.get(cell.id, cone.fields))
+        uncovered = []
+        for comp, combos in self.reached_heads(cone).items():
+            if comp not in comps or m.components[comp].llm or m.components[comp].is_guard:
+                continue
+            for combo in combos:
+                missing = {port: [f for f in failures if f in fields and not C.mentions(m, comp, port, f)]
+                           for port, failures in combo}
+                missing = {p: fs for p, fs in missing.items() if fs}
+                if missing and {"component": comp, "heads": missing} not in uncovered:
+                    uncovered.append({"component": comp, "heads": missing})
+        needs = [c for c in comps if not m.components[c].llm and not m.components[c].learned]
+        unconfirmed = [c for c in needs if not any(self.table_in_force(k, c, cone) for k in register["certificates"])]
+        return {"consistent": res["verdict"] != "conflict", "complete": not uncovered,
+                "correct": not unconfirmed and not res["lacks_path"], "uncovered": uncovered,
+                "unconfirmed": unconfirmed, "components": comps}
+
+    def reached_heads(self, cone):
+        """Per component, the head combinations of every state explored for this cone."""
+        out = {}
+        for _, info in self.cache.coverage(cone.key(self.m)):
+            for comp, combos in (info.get("heads") or {}).items():
+                out.setdefault(comp, []).extend(c for c in combos if c not in out[comp])
+        return out
 
     def reasons(self, cone, cell, prob, runs, on, won, verdict, register):
         m = self.m
@@ -425,7 +493,7 @@ class Engine:
                 want = [pins] if pins is not None else [{}]
                 pruned = _count_vectors(all_rows, [{}], []) - _count_vectors(all_rows, want, [])
                 self.emit("cone", f"cone at {cone.obs}: {len(cone.cells)} cell(s), rows {', '.join(all_rows) or '(none)'}"
-                                  + (f"; certificates prune {pruned} firing choice(s) before any run" if pruned else ""),
+                                  + (f"; certificates prune {pruned} switch vector(s) before any run" if pruned else ""),
                           obs=cone.obs, cells=[c.id for c in cone.cells], rows=all_rows, fields=cone.fields,
                           components=cone.components, key=cone.key(m))
                 self.ensure(cone, want)
@@ -604,15 +672,17 @@ class Engine:
         return {"cell": cell_id, "rows": rows, "candidates": out, "runs": len(runs), "space": space,
                 "suspended": sorted(suspended)}
 
-    def trace_of(self, cell_id, uc, fire):
+    def trace_of(self, cell_id, uc, fire, variant=0):
         m = self.m
         cone = next(k for k in C.cones(m, C.cells(m)) if cell_id in k.cell_rows)
         key = cone.key(m)
         cov = self.cache.coverage(key)
+        run = self.cache.runs(key).get((uc, frozenset(fire), variant))
+        sources = {e: to_tla.port_key(m.edges[e].src[0], "").rsplit("__", 1)[0] for e in cone.edges}
         for _, info in cov:
             d = os.path.join(self.workroot, "tlc", info["hash"], "states.dump")
             if os.path.exists(d):
-                steps = R.trace(d, uc, fire, cone.edges)
+                steps = R.trace(d, uc, fire, cone.edges, run.labels if run else None, sources)
                 if steps:
                     return {"cell": cell_id, "uc": uc, "fire": sorted(fire), "steps": steps}
         return None

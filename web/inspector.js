@@ -5,7 +5,7 @@
 // rows, a port, an edge, a guardrail with its targets, an observation point with its toleration, a
 // system port with the use cases it starts.
 import { h, clear, add } from './lib.js';
-import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection, details, edgeName } from './state.js';
+import { S, on, comp, edge, parseRef, modeFields, topModes, sysPorts, emit, portEdges, targetText, useCasesAt, removeSelection, details, edgeName, judgesTaint } from './state.js';
 import { button, confirmDialog } from './dialog.js';
 import { rowSentence } from './rows.js';
 import { openRowDialog } from './rowdialog.js';
@@ -260,7 +260,7 @@ export class Inspector {
         ['Observes', e ? `what ${e.to} receives${details() ? ` on ${e.id}` : ''}${guards.length ? `, after ${guards.join(', ')}` : ''}` : 'an edge that no longer exists'],
         o.log ? ['Log', o.log] : null,
         ['Judges', tol.length ? h('div', { class: 'chips' }, tol.map(([m, th]) => h('span', { class: 'tag plain' }, `${m} ≥ ${th}`))) : 'no failure mode'],
-        ['Provenance', [o.taint === 'reject' ? 'flags taint' : null, o.clearance ? `confidentiality above ${o.clearance === 'receiver' && recv ? `${recv.id}'s clearance` : o.clearance}` : null,
+        ['Provenance', [judgesTaint(o) ? 'flags taint' : null, o.clearance ? `confidentiality above ${o.clearance === 'receiver' && recv ? `${recv.id}'s clearance` : o.clearance}` : null,
           o.requires ? `authority below ${o.requires === 'receiver' && recv ? `what ${recv.id} requires` : o.requires}` : null].filter(Boolean).join('; ') || 'not judged']]));
   }
 
@@ -284,7 +284,7 @@ export class Inspector {
 
 export function judgesText(o) {
   const parts = Object.entries(o.tolerate || {}).map(([m, v]) => `${m} ≥ ${v}`);
-  if (o.taint === 'reject') parts.push('taint');
+  if (judgesTaint(o)) parts.push('taint');
   if (o.clearance) parts.push('confidentiality');
   if (o.requires) parts.push('authority');
   return parts.length ? `judges ${parts.join(', ')}` : 'judges nothing yet';

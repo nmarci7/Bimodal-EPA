@@ -28,7 +28,7 @@ export function openRowDialog(cid, rowId, opts = {}) {
   else {
     draft = R.toDraft(null);
     draft.when = [{ port: c0.in.length === 1 ? c0.in[0] : (c0.in[0] || '*'), any: true, mode: '', threshold: 1 }];
-    draft.then = c0.out[0] ? [{ port: c0.out[0], asis: false, mode: fields[0], op: 'const', k: 5 }] : [];
+    draft.then = c0.out[0] ? [{ port: c0.out[0], asis: false, mode: fields[0], op: 'present', k: 1 }] : [];
     draft.id = R.freshRowId(cid, taken);
     if (!c0.in.length) draft = R.setKind(draft, 'internal', c0, fields);
     if (opts.preset) draft = { ...draft, ...opts.preset };
@@ -94,7 +94,7 @@ export function openRowDialog(cid, rowId, opts = {}) {
     const matched = d.kind !== 'internal' && d.when.some((c) => !c.any);
     d.then.forEach((em, i) => {
       const what = em.asis ? '__asis' : em.mode;
-      const opOpts = Object.entries(R.OPS).map(([k, o]) => [k, o.label, d.kind === 'internal' ? k !== 'const' : o.needsMatch && !matched]);
+      const opOpts = Object.entries(R.OPS).map(([k, o]) => [k, o.label, d.kind === 'internal' ? !['present', 'const'].includes(k) : o.needsMatch && !matched]);
       box.appendChild(h('div', { class: 'edit-line' },
         field('Output port', selectInput(c0.out.map((q) => [q, q]), em.port, (v) => { em.port = v; ctx.update(); })),
         field('Sends', selectInput([...fields.map((f) => [f, f]), ...(d.kind === 'internal' ? [] : [['__asis', 'the message as it is']])], what,
@@ -105,7 +105,7 @@ export function openRowDialog(cid, rowId, opts = {}) {
         button('Remove', () => { d.then.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true, title: 'remove this emission' })));
     });
     box.appendChild(h('div', { class: 'inline' },
-      button('+ Add an emission', () => { const q = c0.out[0]; const f = fields.find((x) => !d.then.some((e) => e.port === q && e.mode === x)) || fields[0]; d.then.push({ port: q, asis: false, mode: f, op: 'const', k: 5 }); ctx.rerender(); }, { small: true, disabled: !c0.out.length })));
+      button('+ Add an emission', () => { const q = c0.out[0]; const f = fields.find((x) => !d.then.some((e) => e.port === q && e.mode === x)) || fields[0]; d.then.push({ port: q, asis: false, mode: f, op: 'present', k: 1 }); ctx.rerender(); }, { small: true, disabled: !c0.out.length })));
     box.appendChild(h('p', { class: 'hint' }, matched
       ? 'The matched magnitude is the magnitude of the failure the condition matched (the largest, if it matches several). A magnitude runs from 0 to 10.'
       : d.kind === 'internal' ? 'An internal fault starts its failures at a fixed magnitude, from 0 to 10.'

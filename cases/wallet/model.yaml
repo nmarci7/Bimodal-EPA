@@ -12,6 +12,7 @@ modes:
   - commission: [oom, dup, over, revoked]   # out of mandate, duplicate, over the limit, under a revoked mandate
   - late
   - value
+severity: {oom: 9, dup: 9, over: 7, revoked: 9, late: 6}   # what the ranking weighs; modes are present or absent
 lattices:
   confidentiality: [public, pseudonymous, personal]
   authority: [none, agent, principal]
@@ -30,15 +31,15 @@ components:
       - id: p_offmandate
         label: pays an account the mandate does not cover
         when: {invoice: any}
-        then: {request: {oom: const 9}}
+        then: {request: {oom: present}}
       - id: p_dup
         label: re-plans on a stale account view and pays the invoice again
-        when: {view: {late: 3}}
-        then: {request: {dup: const 9}}
+        when: {view: {late: present}}
+        then: {request: {dup: present}}
       - id: p_over
         label: pays more than the mandate's per-payment limit
         when: {invoice: any}
-        then: {request: {over: const 7}}
+        then: {request: {over: present}}
     drop_defaults:
       - {port: request, mode: omission, reason: "the agent always emits a request on the happy path; a missing payment is the invoice's dunning problem, not a hazard"}
       - {port: request, mode: commission, reason: "the agent's commissions in this model are named: out of mandate, duplicate, over the limit"}
@@ -57,7 +58,7 @@ components:
       - id: m_stale
         label: the stored mandate lags behind a revocation
         when: {grant: any}
-        then: {record: {late: const 6}}
+        then: {record: {late: present}}
     pos: {x: 430, y: 64}
 
   - id: wallet
@@ -73,15 +74,15 @@ components:
     rows:
       - id: w_revoked
         label: signs under a mandate whose revocation it has not seen
-        when: {mandate: {late: 1}}
-        then: {instruction: {revoked: const 9}}
+        when: {mandate: {late: present}}
+        then: {instruction: {revoked: present}}
     pos: {x: 430, y: 320}
 
   - id: bank
     kind: external
     label: executes
     version: bank-api-2026
-    trusted: true
+    taint: clean
     in: [instruction]
     out: [transfer, update]
     clearance: personal
@@ -89,7 +90,7 @@ components:
       - id: b_slow
         label: confirms a payment slowly
         when: {instruction: any}
-        then: {update: {late: const 4}}
+        then: {update: {late: present}}
     pos: {x: 860, y: 320}
 
   - id: feed
@@ -103,15 +104,15 @@ components:
 
 guards:
   - {id: gr, label: rev. sync, edge: e_mandate, version: revsync-1,
-     targets: [{mode: late, threshold: 1, decidable: true}]}
+     targets: [{mode: late, decidable: true}]}
   - {id: gm, label: mandate, edge: e_instruction, version: mandate-v2,
-     targets: [{mode: oom, threshold: 1, decidable: true}]}
+     targets: [{mode: oom, decidable: true}]}
   - {id: gd, label: dedup, edge: e_instruction, version: dedup-v3,
-     targets: [{mode: dup, threshold: 1, decidable: true}]}
+     targets: [{mode: dup, decidable: true}]}
   - {id: ga, label: amount, edge: e_instruction, version: amount-v1,
-     targets: [{mode: over, threshold: 1, decidable: true}]}
+     targets: [{mode: over, decidable: true}]}
   - {id: gc, label: cap, edge: e_transfer, version: bank-cap-2026,
-     targets: [{mode: over, threshold: 1, decidable: true}]}
+     targets: [{mode: over, decidable: true}]}
   - {id: gx, label: disclosure, edge: e_presentation, version: disclosure-v1,
      targets: [{conf: pseudonymous, decidable: true}]}
 
@@ -130,15 +131,16 @@ use_cases:
   - id: pay
     label: pay an incoming invoice under the mandate
     entries:
-      - {port: invoice, token: {taint: true, auth: none, conf: personal}}
-      - {port: principal, token: {auth: principal, conf: personal}}
+      - {port: invoice, token: {taint: open, auth: none, conf: personal}}
+      - {port: principal, token: {taint: identified, auth: principal, conf: personal}}
 
 observation_points:
   - id: o_statement
     edge: e_transfer
     label: bank statement
     log: the customer's bank statement (CSV export)
-    tolerate: {commission: 1, oom: 1, dup: 1, over: 1, revoked: 1, late: 5, value: 3, omission: 5}
+    tolerate: {commission: 1, oom: 1, dup: 1, over: 1, revoked: 1, late: 1, value: 1, omission: 1}
+    tolerate_taint: identified      # the customer's own instruction is fine; text anyone could have written is not
     requires: principal
   - id: o_presentation
     edge: e_presentation

@@ -30,7 +30,7 @@ class CellProblem:
         certs: list of (id, {row: 'N'|'S'|'A'}); witnesses: list of ids;
         extra_rows: rows only the cones of linked witnesses bring (candidates range over them too, and
         counts are projected onto the cell's rows); wruns: witness id -> (rows of its cone,
-        [(use case, firing choice, matches)]) - the runs of each linked witness's own cone."""
+        [(use case, switch vector, matches)]) - the runs of each linked witness's own cone."""
         self.m = m
         self.rows = [r for r in cell_rows if m.rows[r].open]
         self.extra = [r for r in extra_rows if m.rows[r].open and r not in self.rows]

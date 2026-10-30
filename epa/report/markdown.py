@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from .explain import NEUTRAL, reason_line
+from .explain import NEUTRAL, fidelity_line, reason_line
 
 
 def report(rep):
@@ -35,6 +35,8 @@ def report(rep):
             L.append(line)
             if c.get("root_causes") and c["verdict"] != "guarantee":
                 L.append("  - root causes: " + "; ".join("{" + ", ".join(s) + "}" for s in c["root_causes"]))
+            if fidelity_line(c):
+                L.append(f"  - model: {fidelity_line(c)}")
         L.append("")
     reg = rep["register"]
     L.append("## Evidence register")

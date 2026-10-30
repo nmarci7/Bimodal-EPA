@@ -11,6 +11,9 @@ NEUTRAL = {  # the regulator-facing labels of the CRA export
 }
 
 
+TAINT_WORDS = ("clean", "internal", "external, identified", "external, open")
+
+
 def reason_line(cell):
     r = cell.get("reasons") or {}
     parts = []
@@ -25,10 +28,27 @@ def reason_line(cell):
     return "; ".join(parts)
 
 
+def fidelity_line(cell):
+    """Consistent, complete, correct in words, with what stands in the way."""
+    f = cell.get("fidelity")
+    if not f:
+        return ""
+    parts = [("consistent" if f["consistent"] else "not consistent"),
+             ("complete" if f["complete"] else "not complete"), ("correct" if f["correct"] else "not correct")]
+    gaps = [f"{u['component']}: " + ", ".join(f"{', '.join(fs)} on {p}" for p, fs in u["heads"].items())
+            for u in f["uncovered"]]
+    line = ", ".join(parts)
+    if gaps:
+        line += "; uncovered " + "; ".join(gaps)
+    if f["unconfirmed"]:
+        line += "; no confirmed table on " + ", ".join(f["unconfirmed"])
+    return line
+
+
 def _tok(m, k, fields):
     parts = [f"{f} {k['b'][f]}" for f in fields if k["b"].get(f)]
     if k.get("t"):
-        parts.append("tainted")
+        parts.append(f"taint {TAINT_WORDS[k['t']]}")
     if k.get("c"):
         parts.append(m.conf_levels[k["c"]])
     if k.get("a", m.auth_top) < m.auth_top:
@@ -37,7 +57,7 @@ def _tok(m, k, fields):
 
 
 def trace_story(m, trace, fields):
-    """Round by round, the edges whose label changed, with the rows that fired."""
+    """Step by step (firings, or rounds), the edges whose label changed, with the rows that applied."""
     if not trace:
         return []
     lines, prev = [], None
@@ -56,7 +76,8 @@ def trace_story(m, trace, fields):
                 src = e.src[1] if e.src[0] == "sys" else e.src[0]
                 dst = e.dst[1] if e.dst[0] == "sys" else e.dst[0]
                 what.append(f"{src} → {dst}: {_tok(m, lab['k'], fields)}")
-            head = "start" if prev is None else f"round {st['round']}"
+            comp = st.get("component")
+            head = "start" if prev is None else (f"firing {st['round']}: {comp}" if comp else f"round {st['round']}")
             lines.append({"step": head, "edges": what, "fired": st.get("fired", [])})
         prev = st
     return lines

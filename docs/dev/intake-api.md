@@ -52,7 +52,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 
 ### epa/report/explain.py
 - This module produces human-readable lines.
-- `reason_line` gives one line explaining why a cell's verdict holds. `trace_story` tells a reaching run round by round.
+- `reason_line` gives one line explaining why a cell's verdict holds, `fidelity_line` one saying whether the model is consistent, complete and correct for it. `trace_story` tells a reaching run firing by firing (rounds schedule: round by round).
 - `NEUTRAL` maps engine verdicts to the regulator-facing labels used in the CRA export.
 - Callers:
   - `epa/cli.py` `_print` (`reason_line`)
@@ -145,6 +145,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/intake/cert_im
 | Definition | What it does | Calls |
 |---|---|---|
 | `NEUTRAL` (constant) | Maps verdicts to labels: guarantee → "ruled out (model-relative)", hope → "possible, mitigated, monitored", exposed → "occurs whenever exercised", unchecked → "undetermined", not exercised → "not exercised by the modelled use cases", conflict → "evidence in conflict". | — |
+| `fidelity_line(cell)` | Consistent, complete and correct in words, with the uncovered head combinations and the components with no confirmed table. | — |
 | `reason_line(cell)` | Builds a `"; "`-joined line from `cell.reasons` and `cell.suspended`:<br>- `structural` gives "structural: no row can change it"<br>- `certificates` gives "rests on a, b"<br>- each decision gives `default dropped on <component> (<port>/<mode>): "<reason>"`<br>- `suspended` gives "suspended: …" | — |
 | `_tok(m, k, fields)` | Describes a token `k`:<br>- `"<field> <magnitude>"` for each field in `fields` with a non-zero `k.b[field]`<br>- "tainted" if `k.t`<br>- the confidentiality level name if `k.c` is non-zero<br>- "authority <level>" if `k.a` < `m.auth_top`<br>Returns "clean" if none apply. | — |
 | `trace_story(m, trace, fields)` | `None` or empty input gives `[]`. Otherwise returns one entry per step in which some edge label changed: `{step: "start" or "round N", edges: ["src → dst: <token>"], fired}`. The first step lists edges whose label has `u` set; later steps list edges whose label differs from the previous step. A `sys` endpoint is shown by its port name. | explain._tok |
@@ -350,6 +351,7 @@ Checks run in order:
  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"}, "evidence": "ci://…"}
 ```
 - Either `targets` (guard target keys) or `rows` (`{row id or short key: activation}`) states the rows, or both.
+- `"table": "confirmed"` says instead, or as well, that a fault injection campaign confirmed the component's table. It changes no verdict: `Engine.fidelity` reads it for correctness.
 - Activations may be `never/sometimes/always`, `n/s/a` or `N/S/A`.
 - A file may contain one record, a list, or `{certificates: [...]}` (`load`).
 - What reads which field:
@@ -368,7 +370,7 @@ Checks run in order:
 **`classify(cert, m, withdrawn=())`**: the first matching rule wins.
 1. `id` is in `withdrawn` → **withdrawn**, "withdrawn by a recorded decision". The set comes from `Engine.register`: decisions with `kind: withdraw-cert`.
 2. The component is not in `m.components` → **rejected**, "unknown component".
-3. No rows were resolved → **rejected**, "states no row".
+3. `table` is neither absent nor `confirmed`, or it is on an LLM component or a learned guard → **rejected**. No rows were resolved and there is no `table` → **rejected**, "states no row".
 4. For each resolved row:
    - not in `m.rows` → **rejected**, "unknown row r"
    - `row.comp` differs from the component → **rejected**, "row r belongs to X, not Y"

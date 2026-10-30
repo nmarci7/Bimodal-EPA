@@ -36,7 +36,7 @@ DOCS = os.path.join(ROOT, "docs")
 INSTRUCTIONS = """Bimodal Agentic System Reasoner: bimodal error propagation analysis of agentic systems.
 A model has components (LLM, deterministic, tool, store, external, user) with input and output ports,
 edges between ports, rows (what a component does with failures), guards on edges, observation points
-on edges where a log exists, and use cases (where messages enter). The analysis runs every firing choice
+on edges where a log exists, and use cases (where messages enter). The analysis runs every switch vector
 of the rows that matter through TLA+/TLC and keeps, with clingo, the candidates the evidence allows;
 each observation point and judged failure (a cell, written mode@point) gets a verdict: guarantee, hope,
 exposed, unchecked, not exercised or conflict.
@@ -228,7 +228,7 @@ class Workbench:
             "guards": [{"id": g["id"], "label": g.get("label", ""), "edge": g.get("edge"), "targets": g.get("targets", []),
                         **({"learned": True} if g.get("learned") else {}), **({"version": g["version"]} if g.get("version") else {})} for g in doc.get("guards", [])],
             "observation_points": [{"id": o["id"], "edge": o.get("edge"), "label": o.get("label", ""), "tolerate": o.get("tolerate", {}),
-                                    **{k: o[k] for k in ("taint", "clearance", "requires", "log") if o.get(k)}} for o in doc.get("observation_points", [])],
+                                    **{k: o[k] for k in ("taint", "tolerate_taint", "clearance", "requires", "log") if k in o}} for o in doc.get("observation_points", [])],
             "use_cases": doc.get("use_cases", []), "claims": doc.get("claims", []),
         }
 
@@ -410,7 +410,8 @@ class Workbench:
         if c is None:
             raise ToolError(f"no cell {cell!r}; cells: {', '.join(x['cell'] for x in rep['cells'])}")
         keep = ("cell", "verdict", "statuses", "per_uc", "advice", "reasons", "conflicts", "suspended", "lacks_path", "candidates",
-                "rows", "root_causes", "severity", "certs_used", "witnesses_used", "scope_withheld", "example_run")
+                "rows", "root_causes", "severity", "certs_used", "witnesses_used", "scope_withheld", "example_run",
+                "order_dependent", "fidelity")
         return {k: c.get(k) for k in keep if k in c}
 
     def explain_cell(self, cell, candidates=False):
@@ -420,10 +421,10 @@ class Workbench:
             raise ToolError(f"no cell {cell!r}")
         m = self._model(ws)
         eng = Engine(m, self.work, cache=self.cache)
-        out = {"cell": cell, "verdict": c["verdict"], "advice": c.get("advice")}
+        out = {"cell": cell, "verdict": c["verdict"], "advice": c.get("advice"), "fidelity": c.get("fidelity")}
         ex = c.get("example_run")
         if ex:
-            tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]))
+            tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]), ex.get("variant", 0))
             out["reaching_run"] = {"use_case": ex["uc"], "rows_firing": ex["fire"], "story": explain.trace_story(m, tr, c.get("fields", []))}
         else:
             out["reaching_run"] = None
@@ -610,10 +611,10 @@ def build_server(bench=None):
     def put_component(id: str, kind: str | None = None, label: str | None = None, version: str | None = None,  # noqa: A002
                       inputs: list[str] | None = None, outputs: list[str] | None = None, flow: dict[str, list[str]] | None = None,
                       authority: str | None = None, clearance: str | None = None, requires: str | None = None,
-                      trusted: bool | None = None, raises: bool | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
+                      trusted: bool | None = None, taint: str | None = None, raises: bool | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
         """Create a component (kind: llm, deterministic, tool, store, external, user) or change the fields given. inputs/outputs add ports; flow maps each input port to the outputs it sends to; new_id renames it (edges follow)."""
         return wrap(lambda: b.put_component(force=force, id=id, kind=kind, label=label, version=version, inputs=inputs, outputs=outputs,
-                                            flow=flow, authority=authority, clearance=clearance, requires=requires, trusted=trusted,
+                                            flow=flow, authority=authority, clearance=clearance, requires=requires, trusted=trusted, taint=taint,
                                             raises=raises, new_id=new_id))
 
     @srv.tool(annotations=gone)
@@ -633,7 +634,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def put_row(component: str, row: dict[str, Any], replace: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Add a row to a component, or replace the row with the same id (or the row named by replace). A row: {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: "const k" | "keep" | "+k" | "max"}}, activation?: always | sometimes | never}. No when: an internal fault; no then: a sink; only "any" and "as it is": forwarding."""
+        """Add a row to a component, or replace the row with the same id (or the row named by replace). A row: {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: "present", or on a refined scale "const k" | "keep" | "+k" | "max"}}, frequency?: always | sometimes | never}. No when: an internal fault; no then: a sink; only "any" and "as it is": forwarding."""
         return wrap(lambda: b.put_row(component, row, replace, force))
 
     @srv.tool(annotations=gone)
@@ -671,10 +672,10 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def put_observation_point(id: str | None = None, edge: str | None = None, label: str | None = None, log: str | None = None,  # noqa: A002
-                              tolerate: dict[str, int] | None = None, taint: str | None = None, clearance: str | None = None,
-                              requires: str | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Create an observation point on an edge (one per edge; it judges every top-level mode at 1 unless tolerate says otherwise), or change the fields given. tolerate: {mode: lowest magnitude that counts}; taint: reject; clearance/requires: a level or receiver."""
-        return wrap(lambda: b.put_observation_point(force=force, id=id, edge=edge, label=label, log=log, tolerate=tolerate, taint=taint,
+                              tolerate: dict[str, int] | None = None, taint: str | None = None, tolerate_taint: str | None = None,
+                              clearance: str | None = None, requires: str | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
+        """Create an observation point on an edge (one per edge; it judges every top-level mode at 1 unless tolerate says otherwise), or change the fields given. tolerate: {mode: 1, or on a refined scale the lowest magnitude that counts}; tolerate_taint: the highest taint level accepted (clean, internal, identified, open); taint: reject is the old spelling of clean; clearance/requires: a level or receiver."""
+        return wrap(lambda: b.put_observation_point(force=force, id=id, edge=edge, label=label, log=log, tolerate=tolerate, taint=taint, tolerate_taint=tolerate_taint,
                                                     clearance=clearance, requires=requires, new_id=new_id))
 
     @srv.tool(annotations=gone)
@@ -684,7 +685,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def put_use_case(id: str, entries: list[dict[str, Any]], label: str = "", force: bool = False) -> dict[str, Any]:  # noqa: A002
-        """Create or replace a use case: entries [{port: system input name, token: {taint: bool, conf: level, auth: level, modes: {mode: magnitude}}}]."""
+        """Create or replace a use case: entries [{port: system input name, token: {taint: clean | internal | identified | open, conf: level, auth: level, modes: {mode: magnitude}}}]."""
         return wrap(lambda: b.put_use_case(id, entries, label, force))
 
     @srv.tool(annotations=gone)

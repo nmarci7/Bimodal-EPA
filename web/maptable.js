@@ -16,7 +16,7 @@
 //     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
 import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc, edgeName } from './state.js';
-import { rowSentence, rowKind, KINDS, defaultStatus, hasDefaults } from './rows.js';
+import { rowSentence, rowKind, rowFrequency, KINDS, defaultStatus, hasDefaults } from './rows.js';
 import { openRowDialog, deleteRow } from './rowdialog.js';
 import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
 import { button } from './dialog.js';
@@ -200,9 +200,9 @@ export class MapTable {
 
 function actShort(r, c) {
   const kind = rowKind(r);
-  const act = r.activation || (kind === 'forwarding' ? 'always' : 'open');
+  const act = rowFrequency(r) || (kind === 'forwarding' ? 'always' : 'open');
   if (act === 'open') return h('span', {}, c.kind === 'llm' && kind !== 'forwarding' && kind !== 'sink' ? 'open: S | A' : 'open: N | S | A', h('div', { class: 'muted' }, 'the evidence decides'));
-  return h('span', {}, act, h('div', { class: 'muted' }, r.activation ? 'fixed in the model' : 'forwarding default'));
+  return h('span', {}, act, h('div', { class: 'muted' }, rowFrequency(r) ? 'fixed in the model' : 'forwarding default'));
 }
 
 function restoreDefault(cid, q, m) {

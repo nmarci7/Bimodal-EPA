@@ -82,6 +82,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/epistemic/asp/
 |---|---|---|
 | `verdict_of(seen)` | `None` → "conflict". A subset of `{"x"}` → "not exercised". Otherwise maps `x` to `N`; then `{N}` → "guarantee", `{S}` → "hope", `{A}` → "exposed", anything else → "unchecked". | — |
 | `statuses_for_display(seen)` | `None`, or only `x`, → `[]`. Otherwise maps `x` to `N` and returns the letters present, in N, S, A order. | — |
+| `order_advice(comp, ports)` | The advice for an order-dependent cell: the outcome depends on the order in which the component processes these ports; synchronise them. | — |
 | `advice(verdict, seen)` | Returns a fixed sentence per verdict. For "unchecked" it depends on the display statuses: {N,S} → certify the guard; {S,A} → collect a clean run; otherwise both. "guarantee" gives `""`. | verdicts.statuses_for_display |
 
 (`WORDS`, a module constant, lists the six verdict words.)
@@ -91,10 +92,10 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/epistemic/asp/
 | Definition | What it does | Calls |
 |---|---|---|
 | `class Engine` | The coordinator. State: `m`, `workroot`, `cache`, `schedule`, `on_event`, `events`, `tlc_calls`, `t0`. Set lazily: `gsusp`, `extra_susp`, `_wcones`. | — |
-| `Engine.__init__(model, workroot, schedule="rounds", on_event=None, cache=None)` | Creates `workroot`, uses the given cache or a new `RunCache(workroot/runs.sqlite)`, and initialises the event list, the TLC call list and the start time. | cache.RunCache |
+| `Engine.__init__(model, workroot, schedule=None, on_event=None, cache=None)` | Picks the schedule (given, else `cone.default_schedule`: `fifo`) and sets it on the model. Creates `workroot`, uses the given cache or a new `RunCache(workroot/runs.sqlite)`, and initialises the event list, the TLC call list and the start time. | cache.RunCache |
 | `Engine.emit(step, msg, **data)` | Builds `{"t": seconds since engine creation (3 decimals), "step", "msg", **data}`, appends it to `self.events` and passes it to `on_event`. | — |
 | `Engine.register(evidence)` | Collects the withdrawn certificates (`withdraw-cert` decisions) and the rejected witnesses (`reject-witness` decisions with a `second_reviewer`). Each certificate gets `state`, `reason`, `resolved` (row → N/S/A) and `reverify`; each witness gets `state` and `reason`. Returns `{"certificates", "witnesses", "decisions"}`. Emits nothing. | cert_import.classify, cert_import.reverify, log_import.classify_witness |
-| `Engine.ensure(cone, want)` | Finds the pin sets in `want` the cache does not cover; returns `None` if there are none. Otherwise it generates a TLA+ module whose firing choices fit some missing pin set and no covered one, emits "tlc", runs TLC, parses the runs, records the call in `tlc_calls`, stores runs and coverage in the cache, emits "tlc-done" (including the count of nonconfluent runs) and returns the module hash. | cone.Cone.key, cache.RunCache.covered, cache.RunCache.coverage, to_tla.module_for, coordinator._count_vectors, Engine.emit, tlc_runner.run, runs.runs_from_dump, cache.RunCache.add |
+| `Engine.ensure(cone, want)` | Finds the pin sets in `want` the cache does not cover; returns `None` if there are none. Otherwise it generates a TLA+ module whose firing choices fit some missing pin set and no covered one, emits "tlc", runs TLC, parses the runs, records the call in `tlc_calls`, stores runs, coverage and the head combinations of every state in the cache, emits "tlc-done" and returns the module hash. | cone.Cone.key, cache.RunCache.covered, cache.RunCache.coverage, to_tla.module_for, coordinator._count_vectors, Engine.emit, tlc_runner.run, runs.runs_from_dump, cache.RunCache.add |
 | `Engine.applies(cert, cone)` | The scope rule. With no `scope`, True. Otherwise True iff, for every use case in `cone.scope_ucs` (or `cone.use_cases` when that is `None`) outside the scope, every row the certificate states is `inert` there. | Engine.inert |
 | `Engine.inert(rid, u)` | True if no run of use case u can make row `rid` fire; this is an over-approximation. It uses `C.possible` (cached on the model as `m._possible` / `m._normal_edges`). Unknown row → False. Leak or fp row: True if nothing can arrive on `in`; a leak with a mode target is also True if no field of that mode's family can be non-zero there. Other rows: `not _trigger_possible`. | cone.normal_edges, cone.possible, cone._trigger_possible, load.Model.edges_into, load.Model.family |
 | `Engine.witness_cone(w)` | Builds one cone covering everything a witness logs. For each logged point it takes the cones of the logged mode fields and provenance kinds, or of `m.top_modes[0]` when only `used` is logged. It returns their union (components, edges, use cases, rows, always rows, rel, fields in model order) as a `Cone` with `obs` set to the first part's point. | cone.Cell, cone.cone_of_cell, cone.Cone |
@@ -103,15 +104,19 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/epistemic/asp/
 | `Engine.vacuous(w)` | True for a witness whose use case reaches none of the points it logs (it is not among the witness cone's use cases) and which logs them unused and clean (no `used: true`, no mode range above 0). Every run of that use case shows exactly that, so the witness constrains no candidate. Without this the witness cone has no run of its use case and the witness would wrongly make every cell a conflict ("the model lacks a path"); a witness of such a use case that logs a message or a failure there still lacks a path. Found by the differential test (seed 220 of 400). | Engine.wcone |
 | `Engine.witnesses_on(reg)` | The witnesses in force that bear on the analysis: all but the `vacuous` ones. `suspension`, `decide`, `reasons`, `possibilities` and `rank` take their witnesses from it. | Engine.vacuous |
 | `Engine.witness_runs(w, cone)` | Explores the witness cone fully, then returns the distinct triples `(uc, frozenset(fire), matches-everything-logged)` over its cached runs. | Engine.ensure, cone.Cone.key, cache.RunCache.runs, runs.matches |
-| `Engine.problem(cone, cell, certs, witnesses, extra_certs=())` | Builds the `CellProblem` for one cell: (1) keeps the certificates that `applies`; (2) links witnesses by fixpoint (a witness whose cone shares rows with the reach joins it, and its cone rows grow the reach); (3) collects each linked witness's runs; (4) groups the cone's cached runs by `(uc, fire ∩ cell rows)`, recording used/reaches (from the first run), fired rows, maximal severity, an example run and whether the group agrees; (5) passes the certificates touching the reach plus `extra_certs`. Returns `(prob, runs, proj)`, where `proj` maps each witness id to `(w["at"], use_case)`. | Engine.applies, cone.Cone.key, cache.RunCache.runs, Engine.wcone, Engine.witness_runs, runs.used, runs.reaches, runs.severity, reason.CellProblem |
-| `Engine.decide(cone, cell, certs_on, wits_on, register)` | Decides one cell. It builds the problem, intersects it with the global suspension, and runs brave reasoning unless some witness lacks a path. A safety net handles an unsatisfiable result (full exploration, then "lacks a path" or this cell's own minimal conflict sets, which go into `extra_susp`, with a "conflict" event). It then derives verdict, statuses, advice, candidate counts, severity, root causes, example run, reasons and the nonconfluent count. Returns the per-cell result dict (§4). | Engine.problem, CellProblem.brave, Engine.ensure, CellProblem.satisfiable, CellProblem.minimal_conflicts, Engine.emit, verdicts.verdict_of, verdicts.statuses_for_display, verdicts.advice, Engine.applies, Engine.inert, cone.Cone.key, reason.candidate_space, CellProblem.count, coordinator._minimal, Engine.reasons |
+| `Engine.problem(cone, cell, certs, witnesses, extra_certs=())` | Builds the `CellProblem` for one cell: (1) keeps the certificates that `applies`; (2) links witnesses by fixpoint (a witness whose cone shares rows with the reach joins it, and its cone rows grow the reach); (3) collects each linked witness's runs; (4) groups the cone's cached runs by `(uc, fire ∩ cell rows, used, reaches, fired ∩ cell rows)`, so firing orders with different outcomes stay separate runs, recording the maximal severity and an example run; (5) passes the certificates touching the reach plus `extra_certs`. Returns `(prob, runs, proj)`, where `proj` maps each witness id to `(w["at"], use_case)`. | Engine.applies, cone.Cone.key, cache.RunCache.runs, Engine.wcone, Engine.witness_runs, runs.used, runs.reaches, runs.severity, reason.CellProblem |
+| `Engine.decide(cone, cell, certs_on, wits_on, register)` | Decides one cell. It builds the problem, intersects it with the global suspension, and runs brave reasoning unless some witness lacks a path. A safety net handles an unsatisfiable result (full exploration, then "lacks a path" or this cell's own minimal conflict sets, which go into `extra_susp`, with a "conflict" event). It then derives verdict, statuses, advice, candidate counts, severity, root causes, example run, reasons, order dependence and fidelity. Returns the per-cell result dict (§4). | Engine.problem, CellProblem.brave, Engine.ensure, CellProblem.satisfiable, CellProblem.minimal_conflicts, Engine.emit, verdicts.verdict_of, verdicts.statuses_for_display, verdicts.advice, Engine.applies, Engine.inert, cone.Cone.key, reason.candidate_space, CellProblem.count, coordinator._minimal, Engine.reasons |
+| `Engine.mark_order_dependence(res, cone, cell, runs, admits)` | If two runs some remaining candidate admits, of one use case and switch vector, both use the point and differ in whether the failure reaches, adds `order_dependent` (`{component, ports, use_cases}`) and puts the synchronise advice in `advice`. Nothing goes into the token or the ASP. | runs.races, runs.race_at, verdicts.order_advice |
+| `Engine.table_in_force(cert, comp, cone)` | A confirmed table counts if it is in force, not suspended, and its scope covers every use case in which the point carries a message and the component gets one. | — |
+| `Engine.fidelity(cone, cell, res, register)` | `{consistent, complete, correct, uncovered, unconfirmed, components}` for a cell, on `cone.report_components`. | cone.report_components, cone.mentions, Engine.reached_heads, Engine.table_in_force |
+| `Engine.reached_heads(cone)` | Per component, the head combinations of every state explored for this cone. | cache.RunCache.coverage |
 | `Engine.reasons(cone, cell, prob, runs, on, won, verdict, register)` | What a guarantee or an exposed verdict rests on; other verdicts return empty reasons. "structural": the cell has no open rows, or every grouped run agrees with the verdict and the cone is fully explored. "certificates": each certificate whose removal changes the verdict; this re-ensures the pins of the others (possible TLC call) and rebuilds the problem. "decisions": `drop-default` decisions on cone components whose (edge, mode) is in the cell's `cell_rel`. `structural` is cleared when either of the other two lists is non-empty. | cache.RunCache.covered, cone.Cone.key, Engine.pins, Engine.ensure, Engine.problem, CellProblem.brave, verdicts.verdict_of, load.Model.edges_from |
 | `Engine.pins(register, cert_ids, rows)` | The pin set `{row: N or A}` that the named certificates impose on `rows`. S statements are ignored. Returns `None` if two certificates pin one row differently. | — |
 | `Engine.analyse(evidence=None, only_cells=None, rank=True)` | The whole analysis (step by step in §4). Returns the report dict and emits model, evidence, cells, cone, verdict, ranking and done (plus tlc, tlc-done and conflict from the methods it calls). | Engine.emit, Engine.register, cone.cells, cone.cones, Engine.suspension, Engine.applies, Engine.pins, coordinator._count_vectors, cone.Cone.key, Engine.ensure, Engine.decide, load.Model.summary, wellformed.absorbed, coordinator.judge_claims, Engine.rank |
 | `Engine.rank(cone_list, reg, certs_on, wits_on, by_cell)` | Certify-next. Each guard not already certified becomes a hypothetical certificate `hyp:<gid>` (N on its decidable targets); learned guards and guards with no decidable target get key 0 with a note. For every single guard and pair it counts the non-guarantee cells that turn into guarantee; the key is the highest severity among them. Pairs are dropped unless they move more cells than each guard alone. Sorted by (−key, −moved, size, ids). Emits "ranking". | Engine.emit, Engine.problem, CellProblem.brave, verdicts.verdict_of |
 | `Engine.possibilities(cell_id, evidence, cap=729)` | Builds the display table of one cell's candidates (details in §6b). It registers the evidence, finds the merged cone among all cells' cones, explores it fully, builds the problem and recomputes the suspension. If the space exceeds `cap`, clingo lists up to 240 remaining candidates (`remaining_only: True`). Otherwise Python enumerates every candidate with its status and `struck_by` (certificates and linked witnesses). | Engine.register, cone.Cell.parse, cone.cones, cone.cells, Engine.ensure, Engine.problem, reason.candidate_space, Engine.suspension, CellProblem.listing, Engine.applies, Engine.witness_runs, Engine.wcone, allows |
 | `allows(act, fire)` (nested in `possibilities`) | True iff firing choice `fire` respects every N/A in `act` and in the out-of-cell pins `pinsx`. | — |
-| `Engine.trace_of(cell_id, uc, fire)` | Finds the cell's merged cone. For each coverage entry of its key, reads `workroot/tlc/<hash>/states.dump` if it exists. Returns the first non-empty `R.trace` as `{"cell", "uc", "fire", "steps"}`, else `None`. | cone.cones, cone.cells, cone.Cone.key, cache.RunCache.coverage, runs.trace |
+| `Engine.trace_of(cell_id, uc, fire, variant)` | Finds the cell's merged cone and the run of this outcome. For each coverage entry of its key, reads `workroot/tlc/<hash>/states.dump` if it exists. Returns the first non-empty `R.trace` as `{"cell", "uc", "fire", "steps"}`, else `None`. | cone.cones, cone.cells, cone.Cone.key, cache.RunCache.coverage, runs.trace |
 | `_minimal(sets)` | The subset-minimal sets among `sets` (deduplicated, sorted by size, each kept if no kept set is its subset). | — |
 | `_count_vectors(rows, want, done)` | Number of firing choices over `rows` that fit some pin set in `want` and none in `done`, by brute force over 2^n. Returns −1 when there are more than 16 rows. | ok |
 | `ok(p)` (nested in `_count_vectors`) | True iff the current firing choice F has every A-row of p in F and no N-row of p in F (only rows in `rows` count). | — |
@@ -127,7 +132,7 @@ Part of the [developer guide](../developer-guide.md). Files: `epa/epistemic/asp/
 | `RunCache.coverage(cone_key)` | Under the lock, returns `[(pins dict, tlc info dict)]` for the cone. | — |
 | `RunCache.covered(cone_key, want)` | True iff some single stored pin set `covers` `want`. | cache.covers, RunCache.coverage |
 | `RunCache.add(cone_key, pin_sets, runs, tlc_info)` | Under the lock, does `INSERT OR REPLACE` for every run and for every pin set (with `tlc_info`), commits, and drops the cone from `mem`. | — |
-| `RunCache.runs(cone_key)` | Returns `{(uc, fire): Run}` for the cone, memoised in `mem` until the next `add` for that cone. | runs.Run, runs.Run.key |
+| `RunCache.runs(cone_key)` | Returns `{(uc, fire, variant): Run}` for the cone, memoised in `mem` until the next `add` for that cone. | runs.Run, runs.Run.key |
 
 ### epa/engine/scenario.py
 
@@ -241,7 +246,7 @@ Every event is `{t, step, msg, ...}`. The UI groups them in `web/analysis.js`: I
 | `evidence` | analyse | `certificates` {id: state}, `witnesses` {id: state} |
 | `cells` | analyse | `cells` [ids] |
 | `tlc` | ensure | `cone` (key), `obs`, `vectors`, `rows` |
-| `tlc-done` | ensure | `cone`, `module` (hash), `generated`, `distinct`, `depth`, `seconds`, `cached`, `tlc_version`, `runs`, `vectors`, `nonconfluent` |
+| `tlc-done` | ensure | `cone`, `module` (hash), `generated`, `distinct`, `depth`, `seconds`, `cached`, `tlc_version`, `runs`, `vectors` |
 | `conflict` | suspension | `witness`; plus `certificates` for a conflict set (none for "model lacks a path") |
 | `conflict` | decide (safety net) | `cell`; plus `conflicts` for conflict sets |
 | `cone` | analyse | `obs`, `cells`, `rows`, `fields`, `components`, `key` |
@@ -301,14 +306,14 @@ Witnesses go through `log_import.classify_witness(w, m, rejected)`:
   2. `to_tla.module_for(m, cone, want=missing, done=<cached pin sets>, schedule)` generates a module whose `Vectors == {F ∈ SUBSET VecRows : Want(F) ∧ ¬Done(F)}`.
   3. Emits `tlc`.
   4. `tlc_runner.run` runs it (cached on disk under `workroot/tlc/<module hash>`).
-  5. `runs.runs_from_dump(dump, cone.edges)` gives one `Run` per (uc, fire), with `terminal_variants` > 1 if interleavings disagree.
+  5. `runs.runs_from_dump(dump, cone.edges, heads)` gives one `Run` per distinct outcome of each (uc, fire).
   6. Appends to `tlc_calls`, writes runs and coverage to the cache, emits `tlc-done`.
 - **For each cell of the cone, `decide(...)`:**
   - **Problem building (`problem`):**
     1. Certificates are filtered by `applies`.
     2. Linked witnesses are found by fixpoint: a witness whose cone's rows meet the reach (initially the cell's rows) joins, and its rows extend the reach.
     3. Each linked witness brings `witness_runs` (its cone explored fully; triples `(uc, fire, matches)`).
-    4. The cone's cached runs are grouped by `(uc, fire ∩ cell rows)`. Each group records `uses`/`reaches` (from the first run), `fired` (cell rows that fired), `sev` (max severity), `example` (first run) and `agree` (all runs in the group give the same uses/reaches).
+    4. The cone's cached runs are grouped by `(uc, fire ∩ cell rows, uses, reaches, fired ∩ cell rows)`. Each group records `sev` (max severity) and `example` (first run).
     5. Certificates whose resolved rows meet the reach go into `CellProblem(m, rows, runs, certs, linked ids, extra_rows=reach − rows, wruns)`.
   - **ASP solving:**
     - `suspended` = global suspension ∩ the problem's certificates;
@@ -329,7 +334,8 @@ Witnesses go through `log_import.classify_witness(w, m, rejected)`:
     - `certificates`: each k in `on` such that, with `others = on − {k}`, `pins(others)` is consistent; then `ensure(cone, [pins])` (possibly a TLC call), the problem is rebuilt, and `brave(others, won)` gives a different verdict.
     - `decisions`: model decisions of kind `drop-default` (from `drop_defaults`) on a cone component where some edge from that port, paired with the dropped mode, is in the cell's `cell_rel`.
     - `structural` becomes False if either list is non-empty.
-  - `nonconfluent` = the number of grouped runs with `agree == False`.
+  - **Order dependence:** `mark_order_dependence` compares the raw runs of each (uc, fire).
+  - **Fidelity:** consistent, complete and correct (`Engine.fidelity`).
   - Emits `verdict`.
 - After the pass: if `extra_susp` contains certificates not yet in `gsusp["suspended"]`, they are added and the loop runs a second time; otherwise it stops.
 
@@ -383,7 +389,8 @@ Per cell (`decide`):
 | `root_causes` | list of minimal fired row sets |
 | `example_run` | `{uc, fire}` or `None` |
 | `reasons` | `{structural, certificates, decisions}` |
-| `nonconfluent` | number of grouped runs that disagree |
+| `order_dependent` | `{component, ports, use_cases}` if the outcome differs between firing orders of one use case and switch vector, else `None` |
+| `fidelity` | `{consistent, complete, correct, uncovered: [{component, heads: {port: [failures]}}], unconfirmed: [components], components}` |
 
 ---
 
@@ -392,8 +399,8 @@ Per cell (`decide`):
 ### RunCache (`epa/engine/cache.py`)
 
 ```sql
-CREATE TABLE IF NOT EXISTS runs(cone TEXT, uc TEXT, fire TEXT, fired TEXT, labels TEXT,
-                                rounds INTEGER, variants INTEGER, PRIMARY KEY(cone, uc, fire));
+CREATE TABLE IF NOT EXISTS outcomes(cone TEXT, uc TEXT, fire TEXT, variant INTEGER, fired TEXT, labels TEXT,
+                                    rounds INTEGER, variants INTEGER, PRIMARY KEY(cone, uc, fire, variant));
 CREATE TABLE IF NOT EXISTS coverage(cone TEXT, pins TEXT, tlc TEXT, PRIMARY KEY(cone, pins));
 ```
 
@@ -401,15 +408,15 @@ CREATE TABLE IF NOT EXISTS coverage(cone TEXT, pins TEXT, tlc TEXT, PRIMARY KEY(
   - `cone` is `Cone.key(m)`: a 16-hex SHA-256 over the semantics version, rows (`to_json` of rows and always rows), component signatures, edge endpoints, use-case entries and tracked fields. Version strings are not part of it.
   - `fire` and `fired` are JSON sorted lists.
   - `labels` is JSON edge → `{u, n, k}`.
-  - `variants` is `Run.terminal_variants`.
+  - `variant` tells the outcomes of one (uc, fire) apart; `variants` is `Run.terminal_variants`, how many there are.
   - `pins` is JSON (`sort_keys=True`) of a pin set.
-  - `tlc` is the JSON TLC info (hash, generated, distinct, depth, seconds, cached, tlc_version, runs, vectors).
+  - `tlc` is the JSON TLC info (hash, generated, distinct, depth, seconds, cached, tlc_version, runs, vectors) and `heads`, the head combinations per component.
 - **`coverage(key)`** returns `[(pins, info)]` for the cone.
 - **`covered(key, want)`** asks whether any one stored pin set `covers` `want` (every pin it has, `want` has with the same value). Full exploration is stored as `{}`, which covers everything.
 - **`add(key, pin_sets, runs, info)`** upserts every run and every pin set of the call (all with the same info), commits, and invalidates `mem[key]`.
   - Runs accumulate across calls, because each TLC call explores only Want ∧ ¬Done.
   - `trace_of` therefore looks through every coverage entry's dump.
-- **`runs(key)`** rebuilds `Run` objects keyed `(uc, fire)` and memoises them.
+- **`runs(key)`** rebuilds `Run` objects keyed `(uc, fire, variant)` and memoises them.
 - The API shares one `RunCache` across threads and engines, guarded by its lock (and by `RUN_LOCK` in `app.py`).
 
 ### Scenario (`epa/engine/scenario.py`)
@@ -502,7 +509,6 @@ I grepped `epa/`, `tests/`, `bench/`, `tools/` and `web/` for each of these.
 ### Surprising behaviour
 - **The "conflict" verdict comes almost only from a missing path.** A witness that contradicts certificates leads to suspension and an ordinary verdict, with `conflicts` / `suspended` filled in. The README's verdict table reads as if conflicting evidence gives "conflict". On top of that, `lacks_path` is global: one witness that matches no run makes every cell "conflict", even cells it has no rows in common with.
 - **Safety-net conflict sets are lost.** Sets found in `decide`'s safety net go only into `extra_susp`. They are never added to `gsusp["conflicts"]`, so `report.suspension.conflicts` never lists them. In the second pass the cell has them suspended but no longer lists them in `conflicts`. Also, the loop runs at most twice: if pass 2 finds new conflicts, they are added to the reported suspension, but no cell is decided again with them.
-- **"nonconfluent" means two different things.** In `tlc-done` it counts TLC runs whose interleavings reached different fixpoints (`terminal_variants > 1`). In a cell result it counts grouped runs whose outcome differs once the firing choice is projected onto the cell's rows (`agree == False`).
 - **Firing-choice counts for large cones.** `_count_vectors` returns −1 for cones with more than 16 rows. The `tlc` event then says "TLC explores -1 firing choice(s)", `vectors` is −1, and the pruning note is never shown.
 - **`covered` only checks single pin sets.** Explored pin sets that together cover a request (for example `{r: N}` and `{r: A}` against `{}`) are not recognised, so `ensure` still calls TLC, with no firing choices left to explore.
 - **Two scope rules.** `applies` uses the use cases in which the point can carry a message, together with `inert`. `suspension` uses a different filter: the witness's use case must be in the certificate's scope. Also, certificates already suspended for contradicting each other stay in the witness checks, so the same pair can be reported again as a witness conflict set for every witness whose cone holds that row.
