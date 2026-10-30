@@ -339,6 +339,16 @@ def test_a_run_is_told_step_by_step(work):
     assert any(s["step"].endswith(": a") and any("bad present" in e for e in s["edges"]) for s in story)
 
 
+def test_the_listing_of_the_paper_gives_the_verdicts_of_the_paper(work):
+    m = load_model(os.path.join(ROOT, "tests", "models", "paper_listing.yaml"))
+    rep = Engine(m, work).analyse({}, rank=True)
+    cells = {c["cell"]: c for c in rep["cells"]}
+    assert (cells["commission@o"]["statuses"], cells["commission@o"]["candidates"]["remaining"]) == (["S", "A"], 12)
+    assert (cells["oom@o"]["statuses"], cells["oom@o"]["candidates"]["remaining"]) == (["N", "S", "A"], 6)
+    assert cells["taint@o"]["verdict"] == "exposed"
+    assert [(a["action"], a["key"]) for a in rep["ranking"]] == [(["M"], 9)]
+
+
 def test_the_rounds_translator_stays_selectable(tmp_path):
     m = load_model(os.path.join(ROOT, "tests", "models", "running_example.yaml"))
     rep = Engine(m, str(tmp_path), schedule="rounds").analyse({}, rank=False)

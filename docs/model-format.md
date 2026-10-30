@@ -2,7 +2,8 @@
 
 A model is one YAML (or JSON) document. The reasoner reads and writes the same document as the
 command line; `Export YAML` gives it back with the canvas positions. `cases/*/model.yaml` are
-complete examples, and `tests/models/running_example.yaml` is the running example of the paper.
+complete examples, `tests/models/paper_listing.yaml` is the running example as the paper prints it, and
+`tests/models/running_example.yaml` is its one-port form, which the reference implementation can read.
 
 ```yaml
 name: wallet-agent
