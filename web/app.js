@@ -235,7 +235,7 @@ function helpDialog() {
     h('ol', { class: 'story' },
       step('1', 'Model', 'Draw the system: drag components from Add, wire output ports to input ports, drop guards and observation points onto edges. Select anything to read it in the inspector; Edit… or a double-click opens its dialog. A component\'s rows (what it does with failures) are under the canvas: Add row… walks you through one.'),
       step('2', 'Evidence', 'Drop logs (a recogniser turns their lines into witnesses) and certificates, or write either by hand with New witness… and New certificate…. The register says which are in force, rejected or stale, and why.'),
-      step('3', 'Analysis', 'Run analysis: every firing choice of the rows that matter goes through TLA+/TLC, then clingo keeps the candidates the evidence allows.'),
+      step('3', 'Analysis', 'Run analysis: every switch vector of the rows that matter, in every firing order, goes through TLA+/TLC, then clingo keeps the candidates the evidence allows.'),
       step('4', 'Verdicts', 'Each observation point and failure gets guarantee, hope, exposed, unchecked, not exercised or conflict, with the reasons, a reaching run, and which guard to certify next.')),
     h('p', {}, 'The strip under the top bar shows the four steps and where each stands; 3 Analysis is how the verdicts are computed, 4 Verdicts is the answer. Assistant → Connect an assistant… lets Claude Code or Claude Desktop work on a model with you.'),
     h('span', { class: 'section-title' }, 'Shortcuts'),

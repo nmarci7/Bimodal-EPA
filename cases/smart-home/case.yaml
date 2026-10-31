@@ -2,7 +2,9 @@ title: Smart-home hub
 order: 1
 summary: >
   A cloud LLM planner drives a home hub: lock, alarm and heating, a state report to the household,
-  third-party skills, and standing instructions in memory. Seven guards, two of them learned.
+  third-party skills, and standing instructions in memory. Seven guards, two of them learned. The hub
+  also reads sensors, so some commands race with a reading: whether the heating goes on with the window
+  open depends on the order in which the hub processes the two.
   The scenario certifies the deterministic guards, reads a week of logs, and then changes the design
   where the verdicts say only a redesign helps.
 figure: figure.svg
@@ -13,7 +15,11 @@ lookup_files: [data/*.csv, data/*.json]
 stages:
   - id: S0
     label: Design time
-    note: No evidence. Presence data reaches the cloud in every run; the ranking puts the interlock first.
+    note: >
+      No evidence. Presence data reaches the cloud in every run; the ranking puts the interlock first.
+      The heating with the window open and the door unlocked with the alarm armed are sometimes: only the
+      order in which the hub processes the command and the reading decides, so the advice is to
+      synchronise them.
   - id: S1
     label: The firmware team certifies the interlock, watchdog, freshness check and failover
     note: >

@@ -3,7 +3,7 @@
 // claim, and the model's own settings. Each edits a copy of the model and commits it on Save, after
 // the server's model check (state.saveChecked); Cancel leaves the model untouched.
 import { h, toast } from './lib.js';
-import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText, details, edgeName } from './state.js';
+import { S, comp, edge, parseRef, modeFields, topModes, sysPorts, cloneDoc, commitDoc, saveChecked, ops, portEdges, uniqueId, targetText, details, edgeName, judgesTaint, TAINT_LEVELS, taintOptions, taintName, componentTaint, targetTaint, toleratedTaint, modeAt } from './state.js';
 import { wizard, field, textInput, numberInput, selectInput, checkInput, button, confirmDialog, openDialog } from './dialog.js';
 import { openRowDialog } from './rowdialog.js';
 import { defaultStatus, hasDefaults } from './rows.js';
@@ -19,6 +19,7 @@ function idProblem(v, taken, what = 'The id') {
   return null;
 }
 const levelOpts = (levels) => levels.map((l) => [l, l]);
+const isPresent = (k) => k === 'present' || Number(k) === 1;
 
 // ---------------------------------------------------------------- component
 export function openComponentDialog(cid, { startAt } = {}) {
@@ -40,8 +41,8 @@ export function openComponentDialog(cid, { startAt } = {}) {
     field('Own authority', selectInput(levelOpts(auth), c.authority || auth.at(-1), (v) => { c.authority = v; ctx.update(); }), null, { detail: true }),
     field('Clearance', selectInput(levelOpts(conf), c.clearance || conf.at(-1), (v) => { c.clearance = v; ctx.update(); }), 'The most confidential data it may receive.', { detail: true }),
     field('Requires', selectInput(levelOpts(auth), c.requires || auth[0], (v) => { c.requires = v; ctx.update(); }), 'The authority a message needs before it acts.', { detail: true }),
+    field('Taint it adds', selectInput(taintOptions(), componentTaint(c), (v) => { c.taint = v; delete c.trusted; ctx.update(); }), 'What it sends carries the worse of this level and the taint of the tokens it took.', { wide: true, detail: true }),
     h('div', { class: 'f wide detail' },
-      checkInput('Trusted', c.trusted !== undefined ? c.trusted : !['external', 'user'].includes(c.kind), (v) => { c.trusted = v; ctx.update(); }, 'An untrusted component taints what it touches.'),
       checkInput('Raises authority', c.raises, (v) => { c.raises = v; ctx.update(); }, 'It acts on its own authority (signs, approves).')));
 
   const ports = (ctx) => {
@@ -107,14 +108,14 @@ export function openComponentDialog(cid, { startAt } = {}) {
 
   const defaults = (ctx) => {
     c.drop_defaults = c.drop_defaults || [];
-    const box = h('div', { class: 'block' }, h('p', { class: 'hint' }, `Each output starts with one worst-case row per failure mode: any message in, that failure at 10 out. A row of yours with the same trigger replaces it; dropping one needs a structural reason, printed wherever a verdict rests on it.${isLlm() ? '' : ' A certificate may also say one never fires (not so for an LLM).'}`));
+    const box = h('div', { class: 'block' }, h('p', { class: 'hint' }, `Each output starts with one worst-case row per failure mode: any message in, that failure out. A row of yours with the same trigger replaces it; dropping one needs a structural reason, printed wherever a verdict rests on it.${isLlm() ? '' : ' A certificate may also say one never applies (not so for an LLM).'}`));
     if (!c.out.length) box.appendChild(h('p', { class: 'hint' }, 'No output port yet.'));
     for (const q of c.out) {
       box.appendChild(h('b', { class: 'mono' }, q));
       for (const m of tops) {
         const st = defaultStatus(c, q, m);
         box.appendChild(h('div', { class: 'edit-line' },
-          h('span', { class: 'mono small w8' }, `${m} at 10`),
+          h('span', { class: 'mono small w8' }, m),
           st.status === 'refined' ? h('span', { class: 'small muted grow' }, `replaced by your row ${st.refinedBy.join(', ')}`)
             : checkInput('drop it', !!st.drop, (v) => { if (v) c.drop_defaults.push({ port: q, mode: m, reason: '' }); else c.drop_defaults = c.drop_defaults.filter((x) => !(x.port === q && x.mode === m)); ctx.rerender(); }),
           st.drop ? textInput(st.drop.reason, (v) => { st.drop.reason = v; ctx.update(); }, { placeholder: 'the structural reason (required)', class: 'grow' }) : h('span', { class: 'grow' })));
@@ -191,8 +192,8 @@ export function openDropDefaultDialog(cid, port, mode) {
     toast(`Default ${mode} on ${port} dropped.`);
   }, { primary: true, disabled: true });
   d.setBody(h('div', { class: 'block' }, field('The structural reason', reason, null, { wide: true }),
-    h('p', { class: 'hint' }, comp(S.doc, cid).kind === 'llm' ? 'To lower the magnitude instead, refine the default with a row of your own.'
-      : 'To lower the magnitude instead, refine the default with a row of your own. If a test or a review shows it never happens, a certificate that says so keeps the record with the evidence.')));
+    h('p', { class: 'hint' }, comp(S.doc, cid).kind === 'llm' ? 'To say more exactly when it happens, refine the default with a row of your own.'
+      : 'To say more exactly when it happens, refine the default with a row of your own. If a test or a review shows it never happens, a certificate that says so keeps the record with the evidence.')));
   d.setActions([button('Cancel', () => d.close()), h('span', { class: 'spacer' }),
     button('Refine with a row instead', () => { d.close(); openRowDialog(cid, null, { preset: refinePreset(cid, port, mode), startAt: 'effect' }); }), drop]);
 }
@@ -203,7 +204,7 @@ export function refinePreset(cid, port, mode) {
   const taken = new Set(S.doc.components.flatMap((x) => (x.rows || []).map((r) => r.id)));
   let id = `${cid}_${port}_${mode}`; let i = 2;
   while (taken.has(id)) id = `${cid}_${port}_${mode}${i++}`;
-  return { id, kind: 'failure', when: [{ port: c.in.length === 1 ? c.in[0] : '*', any: true, mode: '', threshold: 1 }], then: [{ port, asis: false, mode, op: 'const', k: 10 }] };
+  return { id, kind: 'failure', when: [{ port: c.in.length === 1 ? c.in[0] : '*', any: true, mode: '', threshold: 1 }], then: [{ port, asis: false, mode, op: 'present', k: 1 }] };
 }
 
 // ---------------------------------------------------------------- guard
@@ -232,7 +233,7 @@ export function openGuardDialog(gid, { edge: edgeId, startAt } = {}) {
       h('div', { class: 'f wide' },
         checkInput('Learned (a classifier or an LLM judge)', g.learned, (v) => { g.learned = v || undefined; if (v) g.targets.forEach((t) => { t.decidable = false; }); ctx.rerender(); }, 'No certificate can say a learned guard never leaks; it gets a false-positive row too.'),
         details() ? checkInput('Closed output', g.closed_output, (v) => { g.closed_output = v || undefined; ctx.rerender(); }, 'It emits only from a closed set (enumerations), so it may wash taint.') : null),
-      g.learned ? field('A false positive emits omission at', numberInput(g.fp_omission ?? 10, (v) => { g.fp_omission = v; ctx.update(); }, { min: 0, max: 10 })) : null),
+      g.learned && (details() || g.fp_omission !== undefined) ? field('Refined scale: a false positive emits omission at', numberInput(g.fp_omission ?? 1, (v) => { g.fp_omission = v; ctx.update(); }, { min: 0, max: 10 })) : null),
     onEdge.length > 1 ? h('div', { class: 'inline' }, h('span', { class: 'small muted' }, `Position ${idx + 1} of ${onEdge.length} on ${g.edge}, in the order the guards cut it.`),
       button('Earlier', () => swap(onEdge[idx - 1]), { small: true, disabled: idx === 0 }), button('Later', () => swap(onEdge[idx + 1]), { small: true, disabled: idx === onEdge.length - 1 })) : null);
   };
@@ -243,8 +244,8 @@ export function openGuardDialog(gid, { edge: edgeId, startAt } = {}) {
       const k = kindOf(t);
       const setKind = (nk) => {
         for (const x of ['mode', 'threshold', 'taint', 'conf', 'auth']) delete t[x];
-        if (nk === 'mode') Object.assign(t, { mode: fields[0], threshold: 1 });
-        if (nk === 'taint') t.taint = true;
+        if (nk === 'mode') t.mode = fields[0];
+        if (nk === 'taint') t.taint = 'internal';
         if (nk === 'conf') t.conf = conf[0];
         if (nk === 'auth') t.auth = auth.at(-1);
         ctx.rerender();
@@ -252,32 +253,33 @@ export function openGuardDialog(gid, { edge: edgeId, startAt } = {}) {
       const decidable = !g.learned && t.decidable;
       box.appendChild(h('div', { class: 'card' },
         h('div', { class: 'edit-line' },
-          field('Catches', selectInput([['mode', 'a failure mode'], ['taint', 'taint'], ['conf', 'confidentiality above'], ['auth', 'authority below']], k, setKind)),
+          field('Catches', selectInput([['mode', 'a failure mode'], ['taint', 'taint at least'], ['conf', 'confidentiality above'], ['auth', 'authority below']], k, setKind)),
           k === 'mode' ? field('Mode', selectInput(fields.map((f) => [f, f]), t.mode, (v) => { t.mode = v; ctx.update(); })) : null,
-          k === 'mode' ? field('From magnitude', numberInput(t.threshold || 1, (v) => { t.threshold = v; ctx.update(); }, { min: 1, max: 10 })) : null,
+          k === 'mode' && (details() || (t.threshold || 1) !== 1) ? field('Refined scale: from', numberInput(t.threshold || 1, (v) => { t.threshold = v; ctx.update(); }, { min: 1, max: 10 })) : null,
+          k === 'taint' ? field('Level', selectInput(TAINT_LEVELS.slice(1).map((l) => [l, l]), targetTaint(t), (v) => { t.taint = v; ctx.rerender(); })) : null,
           k === 'conf' ? field('Level', selectInput(levelOpts(conf), t.conf, (v) => { t.conf = v; ctx.update(); })) : null,
           k === 'auth' ? field('Level', selectInput(levelOpts(auth), t.auth, (v) => { t.auth = v; ctx.update(); })) : null,
           h('span', { class: 'spacer' }), button('Remove', () => { g.targets.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true })),
         g.learned ? h('span', { class: 'small muted' }, 'A learned guard: its leak row is sometimes or always, never "never".')
-          : checkInput('Decidable from the data on the edge', t.decidable, (v) => { t.decidable = v; ctx.rerender(); }, decidable ? 'A certificate may say its leak row never fires.' : 'Its leak row can only be sometimes or always.'),
+          : checkInput('Decidable from the data on the edge', t.decidable, (v) => { t.decidable = v; ctx.rerender(); }, decidable ? 'A certificate may say its leak row never applies.' : 'Its leak row can only be sometimes or always.'),
         h('span', { class: 'small' }, catchSentence(t))));
     });
-    box.appendChild(h('div', {}, button('+ Add a target', () => { g.targets.push({ mode: fields[0], threshold: 1, decidable: !g.learned }); ctx.rerender(); }, { small: true })));
-    box.appendChild(h('p', { class: 'hint' }, 'Each target gets a leak row, "the target gets through", whose activation is the guard\'s quality. Everything the guard does not target passes unchanged.'));
+    box.appendChild(h('div', {}, button('+ Add a target', () => { g.targets.push({ mode: fields[0], decidable: !g.learned }); ctx.rerender(); }, { small: true })));
+    box.appendChild(h('p', { class: 'hint' }, 'Each target gets a leak row, "the target gets through", whose frequency is the guard\'s quality. Everything the guard does not target passes unchanged.'));
     return box;
   };
 
   wizard({
     title: mode === 'add' ? 'New guard' : `Edit guard ${g.label || g.id}`, mode, size: 'lg', startAt,
-    subtitle: mode === 'add' ? `On ${g.edge}: a guard cuts the edge in two and catches its targets unless its leak row fires.` : `cuts ${g.edge}`,
+    subtitle: mode === 'add' ? `On ${g.edge}: a guard cuts the edge in two and catches its targets unless its leak row applies.` : `cuts ${g.edge}`,
     saveLabel: mode === 'add' ? 'Add guard' : 'Save guard',
     steps: [
       { id: 'what', title: 'The guard', render: what, problems: () => [idProblem(data.newId, taken), g.edge ? null : 'Choose the edge it cuts.'].filter(Boolean) },
       { id: 'targets', title: 'What it catches', render: targets,
         problems: () => [
           g.targets.length ? null : 'Add at least one target: a guard that checks for nothing changes no verdict.',
-          ...g.targets.filter((t) => 'taint' in t && !g.closed_output).map(() => 'Only a guard with a closed output can wash taint: tick "Closed output", or remove the taint target.'),
-          ...g.targets.filter((t) => 'mode' in t && !(t.threshold >= 1 && t.threshold <= 10)).map(() => 'A threshold is a magnitude from 1 to 10.'),
+          ...g.targets.filter((t) => 'taint' in t && !g.closed_output).map(() => 'Only a guard with a closed output can wash taint: tick "Closed output" (Help → Show all details), or remove the taint target.'),
+          ...g.targets.filter((t) => 'mode' in t && !((t.threshold ?? 1) >= 1 && (t.threshold ?? 1) <= 10)).map(() => 'A threshold is a magnitude from 1 to 10.'),
         ].filter(Boolean) },
     ],
     preview: () => h('div', { class: 'preview' }, h('span', { class: 'section-title' }, 'What it does'),
@@ -293,8 +295,15 @@ export function openGuardDialog(gid, { edge: edgeId, startAt } = {}) {
 
 /** What catching a target does, in the words of Definition (Guardrail). */
 export function catchSentence(t) {
-  if ('mode' in t) { const th = t.threshold || 1; return `When it catches ${t.mode} ≥ ${th}, the message goes on with ${t.mode} capped at ${th - 1}; a message that exists only because a failure row created it is dropped, unless the guard lies on a cycle.`; }
-  if ('taint' in t) return 'When it catches taint, the message goes on clean (its output is a closed set).';
+  if ('mode' in t) {
+    const th = t.threshold || 1;
+    const goesOn = th === 1 ? `without ${t.mode}` : `with ${t.mode} capped at ${th - 1}`;
+    return `When it catches ${modeAt(t.mode, th)}, the message goes on ${goesOn}; a message that exists only because a failure row created it is dropped, unless the guard lies on a cycle.`;
+  }
+  if ('taint' in t) {
+    const level = targetTaint(t);
+    return `When it catches taint at least ${level}, the message goes on at taint ${TAINT_LEVELS[TAINT_LEVELS.indexOf(level) - 1]} (its output is a closed set).`;
+  }
   if ('conf' in t) return `When it catches confidentiality above ${t.conf}, the message goes on at ${t.conf} (redacted).`;
   return `When it catches authority below ${t.auth}, the message goes on with ${t.auth} (approved).`;
 }
@@ -321,8 +330,8 @@ export function openObsDialog(oid, { edge: edgeId, startAt } = {}) {
   const point = (ctx) => h('div', { class: 'fields2' },
     field('Name', textInput(o.label, (v) => { o.label = v; ctx.update(); }, { placeholder: 'e.g. bank statement' })),
     field('Id', textInput(data.newId, (v) => { data.newId = v.trim(); ctx.update(); }, { class: 'mono', spellcheck: 'false' }), 'Witnesses and verdict cells name the point by its id.', { detail: true }),
-    field('Observes the edge', selectInput(doc.edges.map((x) => [x.id, edgeName(x), doc.observation_points.some((y) => y !== o && y.edge === x.id)]), o.edge, (v) => { o.edge = v; ctx.rerender(); }),
-      'It judges what the receiver gets, after every guard on the edge. One point per edge.', { wide: true }),
+    field('Observes the edge', selectInput(doc.edges.map((x) => [x.id, edgeName(x)]), o.edge, (v) => { o.edge = v; ctx.rerender(); }),
+      'It judges what the receiver gets, after every guard on the edge. An edge may have several points, one per log.', { wide: true }),
     field('Where the log comes from', textInput(o.log, (v) => { o.log = v || undefined; ctx.update(); }, { placeholder: 'e.g. the bank statement (CSV export)' }), null, { wide: true }));
 
   const judges = (ctx) => {
@@ -332,35 +341,36 @@ export function openObsDialog(oid, { edge: edgeId, startAt } = {}) {
       const th = o.tolerate[f.name];
       grid.append(
         h('label', { class: `inline${f.parent ? ' sub' : ''}` }, h('input', { type: 'checkbox', checked: judged, onchange: (ev) => { if (ev.target.checked) o.tolerate[f.name] = 1; else delete o.tolerate[f.name]; ctx.rerender(); } }), h('span', { class: 'mono' }, f.name)),
-        judged ? h('span', { class: 'inline small' }, 'reached from', numberInput(th, (v) => { o.tolerate[f.name] = v; ctx.update(); }, { min: 1, max: 10, 'aria-label': `${f.name} threshold` })) : h('span', { class: 'small muted' }, 'not judged'),
-        h('span', { class: 'small muted' }, judged ? (th <= 1 ? 'accepts none' : `accepts up to ${th - 1}`) : ''));
+        !judged ? h('span', { class: 'small muted' }, 'not judged')
+          : details() || !isPresent(th) ? h('span', { class: 'inline small' }, 'refined scale: reached from', numberInput(isPresent(th) ? 1 : th, (v) => { o.tolerate[f.name] = v; ctx.update(); }, { min: 1, max: 10, 'aria-label': `${f.name} threshold` }))
+            : h('span', { class: 'small muted' }, 'judged'),
+        h('span', { class: 'small muted' }, judged ? (isPresent(th) ? 'accepts none' : `accepts up to ${th - 1}`) : ''));
     }
-    return h('div', { class: 'block' }, h('p', { class: 'hint' }, 'Tick each failure this point judges, and the magnitude from which it counts as reaching the point. 1 accepts none. Each ticked mode is a cell of the verdict table.'), grid);
+    return h('div', { class: 'block' }, h('p', { class: 'hint' }, 'Tick each failure this point judges: present at this point, it counts as reaching it. Each ticked mode is a cell of the verdict table.'), grid);
   };
 
   const prov = (ctx) => {
     const r = receiver();
     const opts = (levels, mine, what) => [['', 'not judged'], ...(r ? [['receiver', `the receiver's ${what} (${mine})`]] : []), ...levels.map((l) => [l, l])];
     return h('div', { class: 'block' },
-      checkInput('Flags any tainted message', o.taint === 'reject', (v) => { if (v) o.taint = 'reject'; else delete o.taint; ctx.update(); }, 'The receiver tolerates no text from outside the system.'),
       h('div', { class: 'fields2' },
+        field('The highest taint it accepts', selectInput([['', 'taint is not judged'], ...taintOptions()], toleratedTaint(o) || '', (v) => { delete o.taint; if (v) o.tolerate_taint = v; else delete o.tolerate_taint; ctx.update(); }), 'A message of a worse level reaches this point.', { wide: true }),
         field('Confidentiality above', selectInput(opts(conf, r && (r.clearance || conf.at(-1)), 'clearance'), o.clearance || '', (v) => { if (v) o.clearance = v; else delete o.clearance; ctx.update(); })),
         field('Authority below', selectInput(opts(auth, r && (r.requires || auth[0]), 'required authority'), o.requires || '', (v) => { if (v) o.requires = v; else delete o.requires; ctx.update(); }))),
       h('p', { class: 'hint' }, r ? `Judged against its receiver ${r.id}: a message more confidential than the clearance, or with less authority than required, reaches this point.` : 'The receiver is outside the model, so name the levels it demands.'));
   };
 
-  const judgesNothing = () => !Object.keys(o.tolerate).length && o.taint !== 'reject' && !o.clearance && !o.requires;
+  const judgesNothing = () => !Object.keys(o.tolerate).length && !judgesTaint(o) && !o.clearance && !o.requires;
   wizard({
     title: mode === 'add' ? 'New observation point' : `Edit ${o.label || o.id}`, mode, size: 'lg', startAt,
     subtitle: 'An observation point is an edge where a log exists; it judges what the receiver gets.',
     saveLabel: mode === 'add' ? 'Add observation point' : 'Save',
     steps: [
       { id: 'point', title: 'The point', render: point,
-        problems: () => [(() => { const t = new Set(doc.observation_points.filter((x) => x !== o).map((x) => x.id)); return idProblem(data.newId, t); })(),
-          doc.observation_points.some((x) => x !== o && x.edge === o.edge) ? `${o.edge} already has an observation point.` : null].filter(Boolean) },
+        problems: () => [(() => { const t = new Set(doc.observation_points.filter((x) => x !== o).map((x) => x.id)); return idProblem(data.newId, t); })()].filter(Boolean) },
       { id: 'judges', title: 'Failures it judges', render: judges,
         problems: () => [judgesNothing() ? 'It judges nothing yet: tick a failure here or a provenance check in the next step.' : null,
-          ...Object.entries(o.tolerate).filter(([, v]) => !(v >= 1 && v <= 10)).map(([k]) => `The threshold of ${k} is a magnitude from 1 to 10.`)].filter(Boolean) },
+          ...Object.entries(o.tolerate).filter(([, v]) => !(isPresent(v) || (v >= 1 && v <= 10))).map(([k]) => `The threshold of ${k} is a magnitude from 1 to 10.`)].filter(Boolean) },
       { id: 'prov', title: 'Provenance', render: prov, skip: () => !details() },
     ],
     onSave: async (ctx, { force } = {}) => {
@@ -432,18 +442,20 @@ export function openUseCaseDialog(ucId, { port } = {}) {
       box.appendChild(h('div', { class: 'card' },
         h('div', { class: 'edit-line' },
           field('Enters at', selectInput(ins.map((p) => [p, `sys.${p}`]), en.port, (v) => { en.port = v; ctx.update(); })),
+          field('Taint', selectInput(levelOpts(TAINT_LEVELS), taintName(t.taint), (v) => { if (v === 'clean') delete t.taint; else t.taint = v; ctx.update(); })),
           field('Confidentiality', selectInput(levelOpts(conf), t.conf || conf[0], (v) => { t.conf = v; ctx.update(); })),
           field('Authority', selectInput(levelOpts(auth), t.auth || auth.at(-1), (v) => { t.auth = v; ctx.update(); })),
           h('span', { class: 'spacer' }), u.entries.length > 1 ? button('Remove', () => { u.entries.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true }) : null),
-        checkInput('Tainted (text from outside the system)', t.taint, (v) => { t.taint = v || undefined; ctx.update(); }),
         h('span', { class: 'f-label' }, 'Failures it already carries'),
         ...carries.map(([m, k]) => h('div', { class: 'edit-line' },
           selectInput(fields.map((f) => [f, f]), m, (v) => { const val = t.modes[m]; delete t.modes[m]; t.modes[v] = val; ctx.rerender(); }),
-          h('span', { class: 'small muted' }, 'at'), numberInput(k, (v) => { t.modes[m] = v; ctx.update(); }, { min: 1, max: 10 }),
+          details() || !isPresent(k) ? h('span', { class: 'small muted' }, 'refined scale: at') : h('span', { class: 'small muted' }, 'present'),
+          details() || !isPresent(k) ? numberInput(isPresent(k) ? 1 : k, (v) => { t.modes[m] = v; ctx.update(); }, { min: 1, max: 10 }) : null,
           button('Remove', () => { delete t.modes[m]; if (!Object.keys(t.modes).length) delete t.modes; ctx.rerender(); }, { small: true, ghost: true }))),
-        h('div', {}, button('+ A failure it already carries', () => { t.modes = t.modes || {}; const f = fields.find((x) => !(x in t.modes)); if (f) t.modes[f] = 1; ctx.rerender(); }, { small: true }))));
+        h('div', {}, button('+ A failure it already carries', () => { t.modes = t.modes || {}; const f = fields.find((x) => !(x in t.modes)); if (f) t.modes[f] = 'present'; ctx.rerender(); }, { small: true }))));
     });
     box.appendChild(h('div', {}, button('+ Another input in the same use case', () => { u.entries.push({ port: ins[0], token: {} }); ctx.rerender(); }, { small: true, disabled: !ins.length })));
+    box.appendChild(h('p', { class: 'hint' }, `Taint says who could have written the content. ${taintOptions().map(([, t]) => t).join('; ')}.`));
     return box;
   };
 
@@ -460,7 +472,7 @@ export function openUseCaseDialog(ucId, { port } = {}) {
         problems: () => [!ins.length ? 'The model has no system input yet: add one from the palette and wire it.' : null,
           !u.entries.length ? 'A use case enters at least one input.' : null,
           ...u.entries.filter((en) => !ins.includes(en.port)).map((en) => `sys.${en.port} is not a system input.`),
-          ...u.entries.flatMap((en) => Object.entries((en.token || {}).modes || {}).filter(([, k]) => !(k >= 1 && k <= 10)).map(([m]) => `The magnitude of ${m} is from 1 to 10.`))].filter(Boolean) },
+          ...u.entries.flatMap((en) => Object.entries((en.token || {}).modes || {}).filter(([, k]) => !(isPresent(k) || (k >= 1 && k <= 10))).map(([m]) => `The magnitude of ${m} is from 1 to 10.`))].filter(Boolean) },
     ],
     onSave: async (ctx, { force } = {}) => {
       // certificate scopes and recognisers name use cases; rename them in the model's claims only
@@ -511,6 +523,7 @@ export function openModelDialog({ startAt } = {}) {
     modes: (doc.modes || []).map((m) => (typeof m === 'string' ? { name: m, subs: '' }
       : m.name ? { name: m.name, subs: (m.subkinds || []).join(', ') } : { name: Object.keys(m)[0], subs: (Object.values(m)[0] || []).join(', ') })),
     conf: doc.lattices.confidentiality.join('\n'), auth: doc.lattices.authority.join('\n'),
+    severity: { ...(doc.severity || {}) },
   };
   const lines = (s) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
   const modeProblems = () => {
@@ -522,6 +535,8 @@ export function openModelDialog({ startAt } = {}) {
     if (dup.length) p.push(`${[...new Set(dup)].join(', ')} appear(s) twice.`);
     return [...new Set(p)];
   };
+  const modeNames = () => data.modes.flatMap((m) => [m.name.trim(), ...lines(m.subs)]).filter(Boolean);
+  const sevProblems = () => Object.entries(data.severity).filter(([m, v]) => modeNames().includes(m) && !Number.isInteger(v)).map(([m]) => `The severity of ${m} is a whole number.`);
   const latProblems = () => [['Confidentiality', data.conf], ['Authority', data.auth]].flatMap(([n, s]) => {
     const l = lines(s);
     return [l.length ? null : `${n} needs at least one level.`, new Set(l).size === l.length ? null : `${n} lists a level twice.`];
@@ -533,7 +548,7 @@ export function openModelDialog({ startAt } = {}) {
         field('Name', textInput(doc.name, (v) => { doc.name = v; ctx.update(); }), null, { wide: true }),
         field('Description', textInput(doc.description, (v) => { doc.description = v; ctx.update(); }, { multiline: true, rows: 5 }), null, { wide: true }),
         field('Worst-case defaults', checkInput('for every component (FPTC style)', doc.worst_case_defaults === 'all', (v) => { if (v) doc.worst_case_defaults = 'all'; else delete doc.worst_case_defaults; ctx.update(); }),
-          'On: every component starts with one open row per output and failure mode (any message in, that failure at 10 out), so a component nobody modelled is never a guarantee; a certificate, a row of yours or a dropped default with a reason earns one. Off: only LLM components get them.', { wide: true })) },
+          'On: every component starts with one open row per output and failure mode (any message in, that failure out), so a component nobody modelled is never a guarantee; a certificate, a row of yours or a dropped default with a reason earns one. Off: only LLM components get them.', { wide: true })) },
       { id: 'modes', title: 'Failure modes', problems: modeProblems,
         hint: 'The behavioural failure modes. A mode may have sub-kinds (a failure of the parent mode): a guard that catches the parent catches them too. Renaming or removing a mode does not rename it in rows, guards or points: the check lists what then needs fixing.',
         render: (ctx) => h('div', { class: 'block' },
@@ -542,6 +557,10 @@ export function openModelDialog({ startAt } = {}) {
             field('Sub-kinds (comma separated)', textInput(m.subs, (v) => { m.subs = v; ctx.update(); }, { class: 'mono', placeholder: 'e.g. oom, dup' }), null, { inline: true }),
             h('span', { class: 'spacer' }), button('Remove', () => { data.modes.splice(i, 1); ctx.rerender(); }, { small: true, ghost: true }))),
           h('div', {}, button('+ Add a mode', () => { data.modes.push({ name: '', subs: '' }); ctx.rerender(); }, { small: true }))) },
+      { id: 'severity', title: 'Severity', problems: sevProblems,
+        hint: 'How much a failure weighs in the certify-next ranking, when a guard would turn it into a guarantee. It changes no verdict. Empty means 1.',
+        render: (ctx) => h('div', { class: 'tolgrid' }, modeNames().flatMap((m) => [h('span', { class: 'mono' }, m),
+          numberInput(data.severity[m], (v) => { if (Number.isNaN(v)) delete data.severity[m]; else data.severity[m] = v; ctx.update(); }, { min: 0, max: 100, placeholder: '1', 'aria-label': `severity of ${m}` }), h('span')])) },
       { id: 'lattices', title: 'Levels', problems: latProblems, skip: () => !details(), hint: 'One level per line, from the lowest to the highest.',
         render: (ctx) => h('div', { class: 'fields2' },
           field('Confidentiality', textInput(data.conf, (v) => { data.conf = v; ctx.update(); }, { multiline: true, rows: 5, class: 'mono' })),
@@ -551,6 +570,8 @@ export function openModelDialog({ startAt } = {}) {
       doc.modes = data.modes.map((m) => (lines(m.subs).length ? { [m.name.trim()]: lines(m.subs) } : m.name.trim()));
       doc.lattices.confidentiality = lines(data.conf);
       doc.lattices.authority = lines(data.auth);
+      const severity = Object.fromEntries(Object.entries(data.severity).filter(([m]) => modeNames().includes(m)));
+      if (Object.keys(severity).length) doc.severity = severity; else delete doc.severity;
       return saveChecked(doc, S.selection, force);
     },
   });

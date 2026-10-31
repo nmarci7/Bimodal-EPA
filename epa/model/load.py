@@ -22,6 +22,9 @@ DEFAULT_MODES = ["omission", "commission", "early", "late", "value"]
 DEFAULT_CONF = ["public", "internal", "confidential"]
 DEFAULT_AUTH = ["none", "user", "admin"]
 KINDS = {"llm", "deterministic", "tool", "store", "external", "user", "guard"}
+# who could have written the content, from best to worst
+TAINT_LEVELS = ["clean", "internal", "identified", "open"]
+FREQUENCIES = ("never", "sometimes", "always")
 
 
 class ModelError(Exception):
@@ -40,7 +43,8 @@ class Component:
     flow: dict = field(default_factory=dict)        # in port -> [out ports]
     passes: dict = field(default_factory=dict)      # in port -> mode fields passed unchanged where it forwards
     absorbs: list = field(default_factory=list)     # [{port, modes, reason}] declared absorptions
-    trusted: bool = True
+    trusted: bool = True                            # the old boolean, read only by the rounds translator
+    taint: int = 0                                  # the taint level the component adds to what it sends
     authority: int = 0
     raises: bool = False
     clearance: int = 0
@@ -50,7 +54,7 @@ class Component:
     targets: list = field(default_factory=list)
     learned: bool = False
     closed_output: bool = False
-    fp_omission: int = 0
+    fp_omission: int | None = None                  # None: not declared
     on_edge: str | None = None
     on_cycle: bool = False
     pos: dict | None = None
@@ -117,7 +121,7 @@ class ObsPoint:
     label: str = ""
     log: str = ""
     tolerate: dict = field(default_factory=dict)   # field -> lowest magnitude not accepted
-    taint: str = "accept"                          # accept | reject
+    tolerate_taint: int | None = None              # the highest taint level accepted; None: taint is not judged
     clearance: int | None = None
     requires: int | None = None
 
@@ -147,6 +151,9 @@ class Model:
     decisions: list
     doc: dict
     warnings: list = field(default_factory=list)
+    severity: dict = field(default_factory=dict)  # mode -> how much it weighs in the ranking (default 1)
+    schedule: str | None = None                   # the firing semantics the engine reads this model under
+    loop_bound: int = 2                           # k: how many times an edge carries one token value in a run
 
     # ---- lattice helpers -------------------------------------------------
     @property
@@ -185,7 +192,7 @@ class Model:
                       for e in self.edges.values()},
             "rows": {r.id: r.to_json() for r in self.rows.values()},
             "obs": {o.id: {"edge": o.edge, "doc_edge": o.doc_edge, "label": o.label, "log": o.log,
-                           "tolerate": o.tolerate, "taint": o.taint,
+                           "tolerate": o.tolerate, "tolerate_taint": o.tolerate_taint,
                            "clearance": None if o.clearance is None else self.conf_levels[o.clearance],
                            "requires": None if o.requires is None else self.auth_levels[o.requires]}
                     for o in self.obs.values()},
@@ -265,12 +272,20 @@ def validate(doc) -> list:
         return p
     top, parent = _mode_list(doc)
     fields = set(top) | set(parent)
+    k = doc.get("loop_bound", defaults.LOOP_BOUND)
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1:
+        p.append(f"loop_bound must be a whole number of at least 1, not {k!r}")
     if doc.get("worst_case_defaults", "llm") not in defaults.WORST_CASE:
         p.append(f"worst_case_defaults must be one of {', '.join(defaults.WORST_CASE)}, "
                  f"not {doc.get('worst_case_defaults')!r}")
     lat = doc.get("lattices", {})
     conf = lat.get("confidentiality", DEFAULT_CONF)
     auth = lat.get("authority", DEFAULT_AUTH)
+    for mname, v in (doc.get("severity") or {}).items():
+        if mname not in fields:
+            p.append(f"severity: unknown mode {mname!r}")
+        if not isinstance(v, int) or isinstance(v, bool):
+            p.append(f"severity of {mname}: a whole number, not {v!r}")
     comps = {}
     for c in doc["components"]:
         cid = c.get("id")
@@ -285,6 +300,8 @@ def validate(doc) -> list:
         for key, levels in (("authority", auth), ("requires", auth), ("clearance", conf)):
             if key in c and c[key] not in levels:
                 p.append(f"component {cid}: {key} {c[key]!r} is not a level of its lattice")
+        if "taint" in c and _taint_level(c["taint"]) is None:
+            p.append(f"component {cid}: taint {c['taint']!r} is not one of {', '.join(TAINT_LEVELS)} or 0..3")
         if "pass" in c:
             p.append(f"component {cid}: 'pass' is gone - every failure now passes through where the component "
                      f"forwards; declare what it absorbs with 'absorbs: [{{port, modes, reason}}]'")
@@ -337,6 +354,11 @@ def validate(doc) -> list:
                         p.append(f"row {rid}: {e}")
             failure_in = any(isinstance(pat, dict) for pat in when.values())
             failure_out = any(not _is_asis(e) and e for e in then.values())
+            freq = _frequency(r)
+            if freq is not None and freq not in FREQUENCIES:
+                p.append(f"row {rid}: frequency must be never, sometimes or always, not {freq!r}")
+            if "frequency" in r and "activation" in r and r["frequency"] != r["activation"]:
+                p.append(f"row {rid}: frequency and its old name activation disagree")
             if not then and c.get("kind") == "llm":
                 p.append(f"row {rid}: an LLM component passes nothing through, so a sink row has nothing to absorb")
             if not then and not failure_in:
@@ -344,7 +366,7 @@ def validate(doc) -> list:
                          f"(e.g. when: {{port: {{late: 3}}}})")
             if not when and not failure_out:
                 p.append(f"row {rid}: an internal fault (no condition) must emit a failure")
-            if c.get("kind") == "llm" and failure_out and r.get("activation") == "never":
+            if c.get("kind") == "llm" and failure_out and freq == "never":
                 p.append(f"row {rid}: an LLM row that emits a failure is never 'never' (the LLM rule); "
                          f"remove the row, or drop the default with a structural reason")
         for d in c.get("drop_defaults", []):
@@ -380,6 +402,8 @@ def validate(doc) -> list:
         for t in g.get("targets", []):
             if "mode" in t and t["mode"] not in fields:
                 p.append(f"guard {gid}: unknown target mode {t['mode']!r}")
+            if "taint" in t and not _taint_level(t["taint"]):
+                p.append(f"guard {gid}: a taint target names a level above clean, not {t['taint']!r}")
             if "conf" in t and t["conf"] not in conf:
                 p.append(f"guard {gid}: unknown confidentiality level {t['conf']!r}")
             if "auth" in t and t["auth"] not in auth:
@@ -390,6 +414,9 @@ def validate(doc) -> list:
         for mname in (o.get("tolerate") or {}):
             if mname not in fields:
                 p.append(f"observation point {o.get('id')}: unknown mode {mname!r}")
+        if "tolerate_taint" in o and _taint_level(o["tolerate_taint"]) is None:
+            p.append(f"observation point {o.get('id')}: tolerate_taint must name a taint level, "
+                     f"not {o['tolerate_taint']!r}")
         into = next((e.get("to") for e in doc["edges"] if e.get("id") == o.get("edge")), None)
         receiver = _parse_ref(into)[0] if _parse_ref(into) else None
         for key, levels, what in (("clearance", conf, "clearance"), ("requires", auth, "authority")):
@@ -407,6 +434,8 @@ def validate(doc) -> list:
         for ent in _entries(u):
             if ent["port"] not in sys_inputs:
                 p.append(f"use case {u.get('id')}: no edge leaves sys.{ent['port']}")
+            if _taint_level(ent["token"].get("taint", 0)) is None:
+                p.append(f"use case {u.get('id')}: taint {ent['token']['taint']!r} is not a taint level")
     if not doc.get("use_cases"):
         p.append("at least one use case is needed")
     return p
@@ -443,11 +472,28 @@ def _absorbed_modes(a, fields):
     return [ms] if isinstance(ms, str) else list(ms or [])
 
 
+def _frequency(r):
+    """How often a row applies: `frequency`, or `activation`, its old name."""
+    return r.get("frequency", r.get("activation"))
+
+
+def _taint_level(v):
+    """A taint level as a number: 0..3, a name of TAINT_LEVELS, or the old booleans (true is the worst
+    level, as it said only that the text came from outside). None if it is none of these."""
+    if isinstance(v, bool):
+        return len(TAINT_LEVELS) - 1 if v else 0
+    if isinstance(v, int) and 0 <= v < len(TAINT_LEVELS):
+        return v
+    return TAINT_LEVELS.index(v) if v in TAINT_LEVELS else None
+
+
 def _parse_op(op):
-    """'const 9' | 9 | 'keep' | '+2' | 'max'  ->  (op, k)"""
+    """'present' | 'const 9' | 9 | 'keep' | '+2' | 'max'  ->  (op, k)"""
     if isinstance(op, int):
         return ("const", max(0, min(10, op)))
     s = str(op).strip()
+    if s == "present":
+        return ("const", 1)
     if s == "keep":
         return ("keep", 0)
     if s == "max":
@@ -456,7 +502,12 @@ def _parse_op(op):
         return ("plus", int(s[1:]))
     if s.startswith("const"):
         return ("const", max(0, min(10, int(s.split()[1]))))
-    raise ValueError(f"unknown emit operator {op!r} (use const k, keep, +k or max)")
+    raise ValueError(f"unknown emit operator {op!r} (use present, or on a refined scale const k, keep, +k or max)")
+
+
+def _magnitude(v):
+    """A threshold or a magnitude: `present` is 1, the default scale; a number is a refined scale."""
+    return 1 if v == "present" else int(v)
 
 
 def _parse_when(when):
@@ -465,7 +516,7 @@ def _parse_when(when):
         if pat in ("any", None, True):
             out[port] = {"any": True}
         else:
-            out[port] = {"modes": {m: int(v) for m, v in pat.items()}}
+            out[port] = {"modes": {m: _magnitude(v) for m, v in pat.items()}}
     return out
 
 
@@ -507,6 +558,7 @@ def normalise(doc) -> Model:
             id=c["id"], kind=kind, label=c.get("label", ""), ins=ins, outs=outs,
             flow={p: list(v) for p, v in flow.items()}, passes=passes, absorbs=absorbs,
             trusted=c.get("trusted", kind not in ("external", "user")),
+            taint=_component_taint(c, kind),
             authority=auth.index(c.get("authority", auth[-1])),
             raises=bool(c.get("raises", False)),
             clearance=conf.index(c.get("clearance", conf[-1])),
@@ -535,7 +587,8 @@ def normalise(doc) -> Model:
                 if "mode" in t:
                     tt.update(kind="mode", mode=t["mode"], threshold=int(t.get("threshold", 1)))
                 elif "taint" in t:
-                    tt.update(kind="taint")
+                    # `taint: true`, the old spelling, is any taint at all
+                    tt.update(kind="taint", level=1 if t["taint"] is True else _taint_level(t["taint"]))
                 elif "conf" in t:
                     tt.update(kind="conf", level=conf.index(t["conf"]))
                 elif "auth" in t:
@@ -546,7 +599,7 @@ def normalise(doc) -> Model:
                 flow={"in": ["out"]}, passes={"in": list(fields)}, trusted=True, authority=len(auth) - 1, raises=False,
                 clearance=len(conf) - 1, requires=0, version=g.get("version"), targets=targets,
                 learned=bool(g.get("learned", False)), closed_output=bool(g.get("closed_output", False)),
-                fp_omission=int(g.get("fp_omission", 10 if g.get("learned") else 0)),
+                fp_omission=None if g.get("fp_omission") is None else _magnitude(g["fp_omission"]),
                 on_edge=eid, pos=g.get("pos"))
             seg = Edge(id=f"{eid}__{g['id']}", src=(g["id"], "out"), dst=final_dst, label=e.label, origin=eid)
             edges[seg.id] = seg
@@ -556,7 +609,7 @@ def normalise(doc) -> Model:
     obs = {}
     doc_edges = {e["id"]: e for e in doc["edges"]}
     for o in doc.get("observation_points", []):
-        tol = {m: int(v) for m, v in (o.get("tolerate") or {}).items()}
+        tol = {m: _magnitude(v) for m, v in (o.get("tolerate") or {}).items()}
         # 'receiver': judge against the receiving component's own clearance / required authority. A point
         # that names neither is judged against a receiving component whose levels can be violated at all.
         recv = comps.get(_parse_ref(doc_edges[o["edge"]]["to"])[0])
@@ -569,7 +622,7 @@ def normalise(doc) -> Model:
                 req = "receiver"
         obs[o["id"]] = ObsPoint(
             id=o["id"], edge=seg_of.get(o["edge"], o["edge"]), doc_edge=o["edge"], label=o.get("label", ""),
-            log=o.get("log", ""), tolerate=tol, taint=o.get("taint", "accept"),
+            log=o.get("log", ""), tolerate=tol, tolerate_taint=_tolerated_taint(o),
             clearance=None if clr is None else (recv.clearance if clr == "receiver" else conf.index(clr)),
             requires=None if req is None else (recv.requires if req == "receiver" else auth.index(req)))
 
@@ -599,7 +652,7 @@ def normalise(doc) -> Model:
                 kind = "fwd"            # plain forwarding: the message goes on, nothing is added
             else:
                 kind = "row"            # a failure row (an internal fault when `when` is empty)
-            act = r.get("activation", "always" if kind == "fwd" else "open")
+            act = _frequency(r) or ("always" if kind == "fwd" else "open")
             fixed = {"always": "A", "sometimes": "S", "never": "N"}.get(act)
             rows[r["id"]] = Row(id=r["id"], comp=c["id"], kind=kind, when=when, then=then, asis=asis,
                                 open=fixed is None, llm=comp.llm and any(then.get(p) for p in then), fixed=fixed,
@@ -608,7 +661,8 @@ def normalise(doc) -> Model:
     m = Model(name=doc.get("name", "model"), description=doc.get("description", ""), top_modes=top,
               fields=fields, parent=parent, conf_levels=conf, auth_levels=auth, components=comps,
               edges=edges, rows=rows, obs=obs, use_cases=ucs, claims=list(doc.get("claims", [])),
-              decisions=list(doc.get("decisions", [])), doc=doc)
+              decisions=list(doc.get("decisions", [])), doc=doc, severity=dict(doc.get("severity") or {}),
+              loop_bound=doc.get("loop_bound", defaults.LOOP_BOUND))
     for c in comps.values():
         for a in c.absorbs:
             m.decisions.append({"kind": "absorb", "component": c.id, "port": a["port"], "modes": a["modes"],
@@ -619,13 +673,31 @@ def normalise(doc) -> Model:
     return m
 
 
+def _component_taint(c, kind):
+    """The taint level a component adds: its `taint`, else what `trusted` says, else an LLM, an external
+    component and a user add `internal` and the rest adds nothing."""
+    if "taint" in c:
+        return _taint_level(c["taint"])
+    if "trusted" in c:
+        return 0 if c["trusted"] else 1
+    return 1 if kind in ("llm", "external", "user") else 0
+
+
+def _tolerated_taint(o):
+    """The highest taint level a point accepts, or None if it does not judge taint. The old
+    `taint: reject` tolerates nothing."""
+    if "tolerate_taint" in o:
+        return _taint_level(o["tolerate_taint"])
+    return 0 if o.get("taint") == "reject" else None
+
+
 def _token(tok, fields, conf, auth):
     b = {f: 0 for f in fields}
     for mname, v in (tok.get("modes") or {}).items():
-        b[mname] = int(v)
+        b[mname] = _magnitude(v)
     return {"b": b, "c": conf.index(tok["conf"]) if "conf" in tok else 0,
             "a": auth.index(tok["auth"]) if "auth" in tok else len(auth) - 1,
-            "t": bool(tok.get("taint", False))}
+            "t": _taint_level(tok.get("taint", 0))}
 
 
 def _mark_cycles(m):

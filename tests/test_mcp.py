@@ -50,6 +50,46 @@ def test_edits_build_a_model_the_engine_loads():
     assert not d["guards"] and not d["observation_points"] and all("api." not in e["from"] + e["to"] for e in d["edges"])
 
 
+def test_edits_take_the_fields_of_the_model_format():
+    d = E.blank("tiny")
+    E.put_component(d, {"id": "agent", "kind": "llm"})
+    E.put_component(d, {"id": "tool", "kind": "tool", "taint": "identified"})
+    E.put_component(d, {"id": "old", "kind": "tool", "trusted": False})
+    E.put_component(d, {"id": "old", "taint": 2})
+    assert d["components"][2]["taint"] == 2 and "trusted" not in d["components"][2]
+    E.connect(d, "sys.ask", "agent.ask")
+    E.connect(d, "agent.call", "tool.call")
+    E.connect(d, "tool.result", "sys.out")
+    E.put_use_case(d, {"id": "uc1", "entries": [{"port": "ask", "token": {"taint": "open", "modes": {"late": "present"}}}]})
+    E.put_guard(d, {"id": "gt", "edge": "e_agent_tool", "closed_output": True, "targets": [{"taint": "identified", "decidable": True}]})
+    E.put_row(d, "tool", {"id": "t_slow", "when": {"call": "any"}, "then": {"result": {"late": "present"}}, "frequency": "sometimes"})
+    E.put_observation_point(d, {"id": "o_a", "edge": "e_tool_out", "tolerate_taint": "internal"})
+    E.put_observation_point(d, {"id": "o_b", "edge": "e_tool_out", "taint": "reject"})
+    E.put_observation_point(d, {"id": "o_b", "tolerate_taint": "clean"})
+    assert [o["edge"] for o in d["observation_points"]] == ["e_tool_out", "e_tool_out"]
+    assert "taint" not in d["observation_points"][1]
+    E.set_settings(d, severity={"late": 6})
+    assert validate(d) == []
+    m = load_model(d)
+    assert m.components["tool"].taint == 2 and m.components["old"].taint == 2 and m.components["agent"].taint == 1
+    assert m.obs["o_a"].tolerate_taint == 1 and m.obs["o_b"].tolerate_taint == 0 and m.severity == {"late": 6}
+    assert next(t for t in m.components["gt"].targets)["level"] == 2 and m.rows["t_slow"].fixed == "S"
+    E.set_settings(d, severity={})
+    assert "severity" not in d
+
+
+def test_a_second_point_on_an_edge_of_the_hub(tmp_path):
+    b = Workbench(str(tmp_path / "workspace.json"), str(tmp_path / "work"))
+    b.open_case("smart-home")
+    r = b.put_observation_point(id="o_third", edge="e_command", label="third log", tolerate={"late": 1})
+    assert r["saved"] and r["well_formed"]
+    points = {o["id"] for o in b.ws()["doc"]["observation_points"] if o["edge"] == "e_command"}
+    assert points == {"o_actuator", "o_safety", "o_third"}
+    assert b.set_model_settings(severity={"late": 2})["saved"]
+    s = b.get_model()
+    assert s["severity"] == {"late": 2} and next(c for c in s["components"] if c["id"] == "devices")["taint"] == "clean"
+
+
 def test_edits_refuse_what_can_never_be_right():
     d = E.blank()
     E.put_component(d, {"id": "a", "kind": "deterministic"})

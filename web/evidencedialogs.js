@@ -4,7 +4,8 @@
 // reason recorded, because it is a record someone else made.
 //
 // A certificate (docs/model-format.md, "Evidence") fixes rows of one component: guard targets
-// (targets: {key: never|sometimes|always}) or rows by id. A witness says what one interaction
+// (targets: {key: never|sometimes|always}) or rows by id, or says that a fault injection campaign
+// confirmed the component's table (table: confirmed). A witness says what one interaction
 // delivered at observation points: {at: {point: {modes: {f: [lo, hi]}, taint, conf, auth}}}.
 // The server classifies both against the model before they go in.
 import { h, clear, add, api, toast } from './lib.js';
@@ -31,10 +32,13 @@ function certRows(cid) {
 function rowWords(r, c) {
   if (r.kind === 'leak') return `the guard lets ${r.id.split('.').slice(2).join('.')} through (its leak row)`;
   if (r.kind === 'fp') return 'the guard refuses a harmless message (false positive)';
-  if (r.kind === 'default') { const [, cid, q, m] = r.id.split('.'); return `on any message ${cid} sends ${m} at 10 on ${q} (worst-case default)`; }
+  if (r.kind === 'default') { const [, cid, q, m] = r.id.split('.'); return `on any message ${cid} sends ${m} on ${q} (worst-case default)`; }
   const own = c && (c.rows || []).find((x) => x.id === r.id);
   return own ? rowSentence(own, c) : r.id;
 }
+
+/** Whether a confirmed table can stand for this component (of the model check's summary). */
+const tableAllowed = (c) => c.kind !== 'llm' && !c.learned;
 
 /**
  * Write a certificate step by step, or edit a hand-made one (id).
@@ -45,13 +49,13 @@ export function openCertDialog(certId) {
   const old = certId ? S.evidence.certificates.find((c) => c.id === certId) : null;
   const mode = old ? 'edit' : 'add';
   const sumComps = S.check.summary.components;
-  const certifiable = Object.entries(sumComps).filter(([id]) => certRows(id).length).map(([id, c]) => ({ id, ...c }));
+  const certifiable = Object.entries(sumComps).filter(([id, c]) => certRows(id).length || tableAllowed(c)).map(([id, c]) => ({ id, ...c }));
   const taken = new Set(S.evidence.certificates.map((c) => c.id).filter((x) => x !== certId));
   let n = 1; while (taken.has(`c_manual_${n}`)) n++;
   const data = {
     id: old ? old.id : `c_manual_${n}`,
     component: old ? old.component : (certifiable.find((c) => c.kind === 'guard') || certifiable[0] || {}).id,
-    stated: {}, version: old ? old.version || '' : null, issuer: old ? old.issuer || '' : '', date: old ? old.date || '' : today(),
+    stated: {}, table: !!(old && old.table === 'confirmed'), version: old ? old.version || '' : null, issuer: old ? old.issuer || '' : '', date: old ? old.date || '' : today(),
     method: old ? old.method || '' : '', evidence: old ? old.evidence || '' : '', scope: new Set(old ? old.scope || [] : []), context: { ...(old ? old.context || {} : {}) },
     review: null,
   };
@@ -79,6 +83,7 @@ export function openCertDialog(certId) {
     const c = { id: data.id.trim(), component: data.component };
     if (Object.keys(targets).length) c.targets = targets;
     if (Object.keys(rows).length) c.rows = rows;
+    if (data.table) c.table = 'confirmed';
     if (data.version.trim()) c.version = data.version.trim();
     for (const k of ['issuer', 'date', 'method', 'evidence']) if (data[k] && data[k].trim()) c[k] = data[k].trim();
     if (data.scope.size) c.scope = [...data.scope];
@@ -87,7 +92,7 @@ export function openCertDialog(certId) {
   };
 
   const what = (ctx) => {
-    const sel = h('select', { onchange: (e) => { data.component = e.target.value; data.stated = {}; data.version = compVersion(); data.context = {}; ctx.rerender(); } });
+    const sel = h('select', { onchange: (e) => { data.component = e.target.value; data.stated = {}; data.table = false; data.version = compVersion(); data.context = {}; ctx.rerender(); } });
     const groups = [['Guards', certifiable.filter((c) => c.kind === 'guard')], ['Components', certifiable.filter((c) => c.kind !== 'guard')]];
     for (const [label, list] of groups) {
       if (!list.length) continue;
@@ -95,14 +100,18 @@ export function openCertDialog(certId) {
         details() ? `${c.id}${c.label ? ` — ${c.label}` : ''}${c.version ? ` (${c.version})` : ''}` : (c.label || c.id)))));
     }
     const c = sumComps[data.component] || {};
-    return h('div', { class: 'block' }, field('The guard or component it is about', sel, 'Only what has open rows can be certified: a certificate fixes the activation of some of them.', { wide: true }),
+    return h('div', { class: 'block' }, field('The guard or component it is about', sel, 'A certificate fixes the frequency of open rows, or confirms the table of a component that is not an LLM or a learned guard.', { wide: true }),
       data.component ? h('p', { class: 'hint' }, c.kind === 'guard' ? `${data.component} is a ${c.learned ? 'learned ' : ''}guard on ${c.on_edge || 'an edge'}${c.learned ? ': no certificate can say it never leaks' : ''}.` : `${data.component} is a ${c.kind} component.`) : null);
   };
 
   const statements = (ctx) => {
     const rows = certRows(data.component);
     const c = comp(S.doc, data.component);
-    const box = h('div', { class: 'block' }, h('p', { class: 'hint' }, 'For each row the certificate speaks about, what it establishes: never (it does not happen), sometimes, or always. Leave the others "not stated".'));
+    const allowed = tableAllowed(sumComps[data.component] || {});
+    const box = h('div', { class: 'block' },
+      allowed ? checkInput('Table confirmed', data.table, (v) => { data.table = v; ctx.update(); }, 'A fault injection campaign fed the real component every reachable combination of error tokens, and every output is covered by its table. It changes no verdict: it makes the model correct for this component.')
+        : h('p', { class: 'hint' }, 'No table to confirm: the table of an LLM or a learned guard is the worst case.'),
+      h('p', { class: 'hint' }, 'For each row the certificate speaks about, what it establishes: never (it does not happen), sometimes, or always. Leave the others "not stated".'));
     for (const r of rows) {
       const noNever = r.llm ? 'the LLM rule: never is not allowed for an LLM row or a learned guard' : r.kind === 'leak' && !r.decidable ? 'the target is not decidable from the edge' : '';
       box.appendChild(h('div', { class: 'edit-line' },
@@ -110,7 +119,7 @@ export function openCertDialog(certId) {
         field('States', selectInput([['', 'not stated'], ...WORDS.map(([v, t]) => [v, t, v === 'never' && !!noNever])], data.stated[r.id] || '', (v) => { data.stated[r.id] = v; ctx.update(); })),
         noNever ? h('span', { class: 'small muted w12' }, `never: ${noNever}`) : null));
     }
-    if (!rows.length) box.appendChild(h('p', { class: 'hint warn' }, 'This component has no open row to certify.'));
+    if (!rows.length) box.appendChild(h('p', { class: 'hint' }, 'This component has no open row to state.'));
     return box;
   };
 
@@ -147,10 +156,10 @@ export function openCertDialog(certId) {
 
   wizard({
     title: mode === 'add' ? 'New certificate' : `Edit certificate ${old.id}`, mode, size: 'lg', saveLabel: mode === 'add' ? 'Add to the register' : 'Save',
-    subtitle: 'A certificate fixes rows of one guard or component to never, sometimes or always, for the version it names.',
+    subtitle: 'A certificate fixes rows of one guard or component to never, sometimes or always, or confirms its table, for the version it names.',
     steps: [
-      { id: 'what', title: 'What it certifies', render: what, problems: () => (data.component ? [] : ['Nothing in this model has an open row to certify.']) },
-      { id: 'statements', title: 'What it establishes', render: statements, problems: () => (Object.values(data.stated).some(Boolean) ? [] : ['State at least one row.']) },
+      { id: 'what', title: 'What it certifies', render: what, problems: () => (data.component ? [] : ['Nothing in this model can be certified.']) },
+      { id: 'statements', title: 'What it establishes', render: statements, problems: () => (data.table || Object.values(data.stated).some(Boolean) ? [] : ['State at least one row, or confirm the table.']) },
       { id: 'provenance', title: 'Who, when, how', render: provenance,
         problems: () => [!data.id.trim() ? 'Give the certificate an id.' : null, taken.has(data.id.trim()) ? `${data.id.trim()} is already in the register.` : null].filter(Boolean) },
       { id: 'review', title: 'Review', render: review },
@@ -170,14 +179,16 @@ function word(v) { return { N: 'never', S: 'sometimes', A: 'always', n: 'never',
 /** One certificate in full, with what can be done to it. */
 export function openCertDetails(c, { suspended } = {}) {
   const st = suspended && c.state === 'in force' ? 'suspended' : c.state;
-  const stated = [...Object.entries(c.targets || {}).map(([k, v]) => [`target ${k}`, word(v)]), ...Object.entries(c.rows || {}).map(([k, v]) => [`row ${k}`, word(v)])];
+  const stated = [...Object.entries(c.targets || {}).map(([k, v]) => [`target ${k}`, word(v)]), ...Object.entries(c.rows || {}).map(([k, v]) => [`row ${k}`, word(v)]),
+    ...(c.table ? [['table', c.table]] : [])];
+  const fixes = Object.entries(c.resolved || {});
   const body = h('div', { class: 'block' },
     h('div', { class: 'inline' }, stateChip(st), c.reason ? h('span', { class: 'small' }, c.reason) : null, c.manual ? h('span', { class: 'tag plain' }, 'entered by hand') : null),
     st === 'suspended' ? h('p', { class: 'hint', style: 'color: var(--c-ink)' }, 'In a minimal conflict with a witness in the last analysis: withdraw the certificate, or reject the witness.') : null,
     h('dl', { class: 'kv' },
       h('dt', {}, 'About'), h('dd', { class: 'mono' }, c.component),
       h('dt', {}, 'States'), h('dd', {}, stated.map(([k, v]) => h('div', { class: 'mono small' }, `${k}: ${v}`))),
-      c.resolved ? h('dt', {}, 'Rows it fixes') : null, c.resolved ? h('dd', { class: 'mono small' }, Object.entries(c.resolved).map(([k, v]) => `${k} = ${v}`).join(', ')) : null,
+      fixes.length ? h('dt', {}, 'Rows it fixes') : null, fixes.length ? h('dd', { class: 'mono small' }, fixes.map(([k, v]) => `${k} = ${v}`).join(', ')) : null,
       h('dt', {}, 'Version'), h('dd', { class: 'mono' }, c.version || '—'),
       h('dt', {}, 'Issued'), h('dd', {}, [c.issuer, c.date].filter(Boolean).join(', ') || '—'),
       c.method ? h('dt', {}, 'Method') : null, c.method ? h('dd', {}, c.method) : null,
@@ -229,8 +240,9 @@ export function openWitnessDialog(witId) {
   const points = d0.observation_points;
   const taken = new Set(S.evidence.witnesses.map((w) => w.id).filter((x) => x !== witId));
   let n = 1; while (taken.has(`w_manual_${n}`)) n++;
-  // what was seen at each point: per mode 'nl' (not logged) | 'zero' | 'exact' | 'atleast', with k
-  const fromRange = ([lo, hi]) => (lo === 0 && hi === 0 ? { how: 'zero', k: 1 } : lo === hi ? { how: 'exact', k: lo } : hi === 10 ? { how: 'atleast', k: lo } : { how: 'range', k: lo, k2: hi });
+  // what was seen at each point: per mode 'nl' (not logged) | 'zero' (absent) | 'present', or on a refined
+  // scale 'exact' | 'atleast' | 'range', with k
+  const fromRange = ([lo, hi]) => (lo === 0 && hi === 0 ? { how: 'zero', k: 1 } : lo === 1 && hi === 10 ? { how: 'present', k: 1 } : lo === hi ? { how: 'exact', k: lo } : hi === 10 ? { how: 'atleast', k: lo } : { how: 'range', k: lo, k2: hi });
   const seenOf = (logged = {}) => ({
     modes: Object.fromEntries(Object.entries(logged.modes || {}).map(([f, r]) => [f, fromRange(r)])),
     taint: logged.taint === undefined ? '' : logged.taint ? 'yes' : 'no',
@@ -248,6 +260,7 @@ export function openWitnessDialog(witId) {
       const x = {};
       for (const [f, v] of Object.entries(s.modes)) {
         if (v.how === 'zero') (x.modes = x.modes || {})[f] = [0, 0];
+        if (v.how === 'present') (x.modes = x.modes || {})[f] = [1, 10];
         if (v.how === 'exact') (x.modes = x.modes || {})[f] = [v.k, v.k];
         if (v.how === 'atleast') (x.modes = x.modes || {})[f] = [v.k, 10];
         if (v.how === 'range') (x.modes = x.modes || {})[f] = [v.k, v.k2];
@@ -285,7 +298,8 @@ export function openWitnessDialog(witId) {
         const v = s.modes[f.name] || { how: 'nl', k: 1 };
         card.appendChild(h('div', { class: `edit-line${judged.includes(f.name) ? '' : ' faint'}` },
           h('span', { class: `mono small w8${f.parent ? ' sub' : ''}` }, f.name),
-          selectInput([['nl', 'not logged'], ['zero', 'not there (0)'], ['exact', 'there, magnitude'], ['atleast', 'there, at least'], ['range', 'between']], v.how,
+          selectInput([['nl', 'not logged'], ['zero', 'absent'], ['present', 'present'],
+            ...(details() || ['exact', 'atleast', 'range'].includes(v.how) ? [['exact', 'refined scale: exactly'], ['atleast', 'refined scale: at least'], ['range', 'refined scale: between']] : [])], v.how,
             (x) => { if (x === 'nl') delete s.modes[f.name]; else s.modes[f.name] = { ...v, how: x, k: x === 'zero' ? 0 : Math.max(1, v.k || 1), k2: v.k2 || 10 }; ctx.rerender(); }),
           ['exact', 'atleast', 'range'].includes(v.how) ? numberInput(v.k, (x) => { v.k = x; ctx.update(); }, { min: v.how === 'range' ? 0 : 1, max: 10, 'aria-label': `${f.name} magnitude` }) : null,
           v.how === 'range' ? h('span', { class: 'small muted' }, 'and') : null,
@@ -293,12 +307,12 @@ export function openWitnessDialog(witId) {
           judged.includes(f.name) ? null : h('span', { class: 'small muted' }, 'not judged here')));
       }
       card.appendChild(h('div', { class: 'fields3' },
-        field('Taint', selectInput([['', 'not logged'], ['no', 'clean'], ['yes', 'tainted']], s.taint, (x) => { s.taint = x; ctx.update(); })),
+        field('Taint', selectInput([['', 'not logged'], ['no', 'what the point accepts'], ['yes', 'above what the point accepts']], s.taint, (x) => { s.taint = x; ctx.update(); })),
         field('Confidentiality', selectInput([['', 'not logged'], ...conf.map((l) => [l, l])], s.conf, (x) => { s.conf = x; ctx.update(); })),
         field('Authority', selectInput([['', 'not logged'], ...auth.map((l) => [l, l])], s.auth, (x) => { s.auth = x; ctx.update(); }))));
       box.appendChild(card);
     }
-    box.appendChild(h('p', { class: 'hint' }, '"Not there" is evidence too: a clean statement line says the failure did not reach the point in that run.'));
+    box.appendChild(h('p', { class: 'hint' }, '"Absent" is evidence too: a clean statement line says the failure did not reach the point in that run.'));
     return box;
   };
 
@@ -324,7 +338,7 @@ export function openWitnessDialog(witId) {
       const any = Object.keys(s.modes).length || s.taint || s.conf || s.auth;
       if (!any) p.push(`Say what was seen at ${oid}: a failure (or that it was not there), taint, confidentiality or authority.`);
       for (const [f, v] of Object.entries(s.modes)) {
-        if (v.how !== 'zero' && !(v.k >= (v.how === 'range' ? 0 : 1) && v.k <= 10)) p.push(`The magnitude of ${f} at ${oid} is from 1 to 10.`);
+        if (!['zero', 'present'].includes(v.how) && !(v.k >= (v.how === 'range' ? 0 : 1) && v.k <= 10)) p.push(`The magnitude of ${f} at ${oid} is from 1 to 10.`);
         if (v.how === 'range' && !(v.k2 >= v.k && v.k2 <= 10)) p.push(`The range of ${f} at ${oid} runs from low to high within 0..10.`);
       }
     }

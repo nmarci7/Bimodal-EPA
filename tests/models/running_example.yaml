@@ -5,6 +5,7 @@ modes:
   - commission: [oom]
   - late
   - value
+severity: {oom: 9}
 lattices:
   confidentiality: [public, personal]
   authority: [none, customer]
@@ -17,7 +18,7 @@ components:
     rows:
       - id: p1
         when: {request: any}
-        then: {order: {oom: const 9}}
+        then: {order: {oom: const 1}}
     drop_defaults:
       - {port: order, mode: omission, reason: "the planner always emits an order on the happy path"}
       - {port: order, mode: commission, reason: "the planner's only commission in this model is the out-of-mandate payment"}

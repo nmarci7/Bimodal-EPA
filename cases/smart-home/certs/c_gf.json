@@ -6,6 +6,6 @@
   "issuer": "app team",
   "date": "2026-10-07",
   "method": "property test: every report older than 120 s is marked stale; review",
-  "scope": ["voice", "calendar", "offline"],
+  "scope": ["voice", "calendar", "offline", "heating", "door"],
   "evidence": "ci://app/freshness/property/2026-10-07"
 }

@@ -11,11 +11,11 @@ const models = process.env.EPA_MODELS_JSON ? JSON.parse(fs.readFileSync(process.
 /** A row in one canonical spelling, so that two spellings of the same row compare equal. */
 function canon(r) {
   const when = {};
-  for (const [p, pat] of Object.entries(r.when || {})) when[p] = pat && typeof pat === 'object' ? Object.fromEntries(Object.entries(pat).map(([m, t]) => [m, Number(t)])) : 'any';
+  for (const [p, pat] of Object.entries(r.when || {})) when[p] = pat && typeof pat === 'object' ? Object.fromEntries(Object.entries(pat).map(([m, t]) => [m, t === 'present' ? 1 : Number(t)])) : 'any';
   const then = {};
   for (const [q, em] of Object.entries(r.then || {})) then[q] = R.isAsIs(em) ? 'as it is' : Object.fromEntries(Object.entries(em).map(([m, op]) => [m, R.formatOp(R.parseOp(op))]));
-  const { id, label, activation, when: _w, then: _t, ...rest } = r;
-  return { id, label: label || '', when, then, activation: activation || R.defaultActivation(R.rowKind(r)), ...rest };
+  const { id, label, activation, frequency, when: _w, then: _t, ...rest } = r;
+  return { id, label: label || '', when, then, frequency: frequency || activation || R.defaultActivation(R.rowKind(r)), ...rest };
 }
 
 test('the fixture lists the shipped models', () => {
@@ -80,6 +80,18 @@ test('changing the kind keeps what fits', () => {
   const sink = R.setKind(draft({ when: [{ port: 'request', any: true }] }), 'sink', wallet, fields);
   assert.deepEqual(sink.then, []);
   assert.ok(sink.when.some((c) => !c.any));
+});
+
+test('frequency is what is saved, and a failure is present', () => {
+  const old = { id: 'r', when: { view: { late: 'present' } }, then: { request: { dup: 'present' } }, activation: 'sometimes' };
+  const row = R.fromDraft(R.toDraft(old), old);
+  assert.deepEqual(row, { id: 'r', when: { view: { late: 'present' } }, then: { request: { dup: 'present' } }, frequency: 'sometimes' });
+  assert.deepEqual(R.fromDraft(R.toDraft({ id: 'n', when: { view: { late: 1 } }, then: {} }), null).when, { view: { late: 'present' } });
+  assert.deepEqual(R.fromDraft(R.toDraft({ id: 'n', when: { view: { late: 3 } }, then: {} }), null).when, { view: { late: 3 } });
+  // an emission that stops being "as it is" starts as present
+  assert.equal(R.toDraft({ id: 'f', when: { '*': 'any' }, then: { request: 'as it is' } }).then[0].op, 'present');
+  assert.equal(R.setKind(draft(), 'forwarding', agent, fields).then[0].op, 'present');
+  assert.equal(R.rowSentence(old, agent), 'When a message with late on view arrives, agent sends dup on request.');
 });
 
 test('the sentence says what the row does', () => {

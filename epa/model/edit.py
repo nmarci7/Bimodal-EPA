@@ -16,9 +16,9 @@ import re
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ROW_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 KINDS = ("llm", "deterministic", "tool", "store", "external", "user")
-COMPONENT_FIELDS = ("kind", "label", "version", "authority", "clearance", "requires", "trusted", "raises", "flow")
+COMPONENT_FIELDS = ("kind", "label", "version", "authority", "clearance", "requires", "trusted", "taint", "raises", "flow")
 GUARD_FIELDS = ("label", "edge", "version", "learned", "closed_output", "fp_omission", "targets")
-OBS_FIELDS = ("label", "edge", "log", "tolerate", "taint", "clearance", "requires")
+OBS_FIELDS = ("label", "edge", "log", "tolerate", "taint", "tolerate_taint", "clearance", "requires")
 
 
 class EditError(ValueError):
@@ -129,6 +129,8 @@ def put_component(doc, spec):
                 c.pop(k, None)
             else:
                 c[k] = spec[k]
+    if spec.get("taint") is not None:
+        c.pop("trusted", None)                  # the old boolean would only mislead a reader
     if spec.get("kind"):
         c["kind"] = spec["kind"]
     if spec.get("new_id") and spec["new_id"] != c["id"]:
@@ -330,8 +332,6 @@ def put_observation_point(doc, spec):
         if not spec.get("edge"):
             raise EditError("a new observation point needs the edge it observes")
         e = _edge(doc, spec["edge"])
-        if any(x.get("edge") == e["id"] for x in doc["observation_points"]):
-            raise EditError(f"{e['id']} already has an observation point")
         recv = _split(e["to"])
         oid = oid or fresh(f"o_{recv[1] if recv[0] == 'sys' else recv[0]}", taken)
         if not IDENT.match(oid) or oid in taken:
@@ -347,6 +347,8 @@ def put_observation_point(doc, spec):
                 o.pop(k, None)
             else:
                 o[k] = spec[k]
+    if spec.get("tolerate_taint") is not None:
+        o.pop("taint", None)                    # the old spelling of the same thing
     if spec.get("new_id") and spec["new_id"] != o["id"]:
         new = spec["new_id"]
         if not IDENT.match(new) or new in taken:
@@ -411,7 +413,8 @@ def remove_claim(doc, cell, by=None):
 
 
 def set_settings(doc, name=None, description=None, modes=None, confidentiality=None, authority=None,
-                 worst_case_defaults=None):
+                 worst_case_defaults=None, severity=None, loop_bound=None):
+    """Change the settings given. severity replaces the whole map; an empty map removes it."""
     notes = []
     if name is not None:
         doc["name"] = name
@@ -431,6 +434,15 @@ def set_settings(doc, name=None, description=None, modes=None, confidentiality=N
     if worst_case_defaults is not None:
         doc["worst_case_defaults"] = worst_case_defaults
         notes.append(f"worst-case defaults for {'every component' if worst_case_defaults == 'all' else 'LLM components'}")
+    if loop_bound is not None:
+        doc["loop_bound"] = loop_bound
+        notes.append("loop bound")
+    if severity is not None:
+        if severity:
+            doc["severity"] = dict(severity)
+        else:
+            doc.pop("severity", None)
+        notes.append("severity")
     return "changed " + (", ".join(notes) or "nothing")
 
 

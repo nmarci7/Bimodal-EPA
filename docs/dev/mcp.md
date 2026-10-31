@@ -113,7 +113,7 @@ them.
 | `EditError` | An edit that cannot apply. |
 | `ensure_lists(doc)` | Fills the missing lists of a document. |
 | `component(doc, cid)`, `_edge(doc, eid)`, `ids_in_use(doc)`, `fresh(base, taken)`, `top_modes(doc)`, `sys_ports(doc)`, `_split(ref)` | Look-ups and helpers: a component or an edge (or an `EditError` listing what exists), the ids of components and guards, a fresh identifier, the top-level modes, the system inputs and outputs, `"comp.port"` → `(comp, port)`. |
-| `put_component(doc, spec)` | Creates a component (needs a kind) or changes the fields given; `inputs`/`outputs` add ports; `new_id` renames it (`rename_component`). |
+| `put_component(doc, spec)` | Creates a component (needs a kind) or changes the fields given, `taint` among them (a given `taint` takes the old `trusted` away); `inputs`/`outputs` add ports; `new_id` renames it (`rename_component`). |
 | `rename_component(doc, old, new)` | Renames a component and the edges that name it. |
 | `remove_component(doc, cid)`, `_drop_edges(doc, ids)` | Removes a component, its edges, and the guards and points on them. |
 | `connect(doc, source, target, label, edge_id)` | Adds an edge, creating the ports it names; as in the reasoner, the first wire out of a system input creates the use case `uc1`. |
@@ -121,8 +121,8 @@ them.
 | `put_row(doc, cid, row, replace)`, `remove_row(doc, cid, rid)` | Adds a row, or replaces one by id (row ids are unique in the model). |
 | `set_absorbs`, `drop_default`, `restore_default` | What stops at an input (with the reason); an LLM default dropped (with the reason) or restored. |
 | `put_guard(doc, spec)`, `remove_guard(doc, gid)` | A new guard on an edge, or the fields given changed (rename with `new_id`). |
-| `put_observation_point(doc, spec)`, `remove_observation_point(doc, oid)` | A new point on an edge (judging every top-level mode at 1 unless told; one per edge), or the fields given changed (rename with `new_id`; claims follow). |
-| `put_use_case`, `remove_use_case`, `put_claim`, `remove_claim`, `set_settings` | Use cases, claims, and the name, description, modes, levels and `worst_case_defaults` (`all` or `llm`). |
+| `put_observation_point(doc, spec)`, `remove_observation_point(doc, oid)` | A new point on an edge (judging every top-level mode unless told; an edge may have several), or the fields given changed (rename with `new_id`; claims follow). |
+| `put_use_case`, `remove_use_case`, `put_claim`, `remove_claim`, `set_settings` | Use cases, claims, and the name, description, modes, levels, `loop_bound`, `worst_case_defaults` (`all` or `llm`) and `severity` (the map given replaces the old one, `{}` removes it). |
 | `NEW_MODES`, `blank(name, description)` | A new, empty model (as File → New model): the FPTC failure classes (omission, commission, early, late, value with the sub-kinds coarse and subtle) and `worst_case_defaults: all`. `web/state.js` (`blankDoc`) starts one the same way. |
 
 ## 5. Sequence: an assistant changes the model, the analyst sees it

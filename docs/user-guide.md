@@ -50,8 +50,13 @@ where you were. To keep a model, export it (**File → Export the model as YAML*
 ### 1.1 The tour
 
 **Help → Start the tour** builds a small system with you and uses every part of the reasoner. You do
-each step yourself: the control to use is outlined, and the card notices when the step is done. If you
-are stuck, **Do it for me** does it the same way.
+each step yourself: the control to use is outlined, and the card notices when the step is done.
+
+You can leave the path at any time. **Skip** moves on, and the card says what was skipped; **Do it for
+me** catches up on everything missing, then does the current step. Pressed again it goes on to the next
+step, so you can click it through the whole tour. If you open another model, the tour pauses and
+**Back to the tour** brings its model back. If your model or evidence differs from the story, the card
+says what your verdict means instead.
 
 | chapter | what you do |
 |---|---|
@@ -135,7 +140,7 @@ Drag from **Add** onto the canvas:
 |---|---|
 | LLM component | discretionary: decides by itself. It passes nothing through; it starts with worst-case rows |
 | Deterministic, Tool / API, Store / memory | code: every failure passes through unless you say it is absorbed |
-| External system, User | outside your control; untrusted by default (they taint what they touch) |
+| External system, User | outside your control; what they send is `internal` taint by default, like an LLM's (the component's **Taint it adds**) |
 | System input / System output | where messages enter and leave the system |
 
 **Wiring.** A component has *ports*: inputs are hollow dots, outputs filled. Drag from an output
@@ -147,7 +152,9 @@ system input) to an input (or a system output).
 
 * **Properties**: id, kind, label, version (certificates and witnesses name versions; a change makes
   the old ones stale), own authority, clearance (the most confidential data it may receive), the
-  authority it requires, whether it is trusted and whether it acts on its own authority.
+  authority it requires, the **taint it adds** to what it sends (clean, internal, identified or open;
+  by default internal for an LLM, an external system and a user, clean otherwise) and whether it acts
+  on its own authority. *Help → Show all details* shows these.
 * **Ports**: add, rename (edges and rows follow) and delete ports.
 * **Normal flow**: for each input, which outputs a message goes on to on the happy path.
 * **What it absorbs** (not for an LLM): tick a failure at an input to say it stops there, and give
@@ -161,7 +168,7 @@ A component's **rows** say which failure arriving where makes it send which fail
 failure it starts on its own, or where it forwards a message. They are listed in the rows table
 under the canvas, one sentence each:
 
-> When late ≥ 3 on view arrives, agent sends dup at 9 on request.
+> When a message with late on view arrives, agent sends dup on request.
 
 **Adding a row.** Select the component and press **Add row…** (in the table or the inspector). A
 window walks you through four steps; the sentence at the bottom always says what the row will do,
@@ -170,9 +177,14 @@ and *As YAML* shows the exact text that goes into the model.
 | step | what you choose |
 |---|---|
 | **Kind** | *Failure row* (a condition and a failure sent on), *Internal fault* (a failure started with no message arriving), *Forwarding* (a message goes on to other outputs as it is), *Sink* (a failure that arrives may be absorbed). Kinds that cannot apply are greyed out with the reason (an LLM has no sinks). |
-| **When** | the conditions, all of which must hold: an input port (or *any input*) and *any message* or *a failure of at least* a magnitude (1–10). |
-| **Then** | the emissions: an output port, the failure sent, and how strong: *at a fixed magnitude* (0–10), *at the matched magnitude*, *at the matched magnitude + k*, or *at the largest matched magnitude*. The last three need a failure in the condition. *The message as it is* sends it on unchanged. |
-| **Name and activation** | the row's id and a description, and the activation: **Open** (the evidence decides: never, sometimes or always) or fixed **Always**, **Sometimes**, **Never**. An LLM row that sends a failure can never be *Never* (the LLM rule). |
+| **When** | the conditions, all of which must hold: an input port (or *any input*) and *any message* or *a failure*, which matches when that failure is present. A row with two conditions needs both tokens at the heads of the queues in one firing. |
+| **Then** | the emissions: an output port and the failure sent, present. *The message as it is* sends it on unchanged. |
+| **Name and frequency** | the row's id and a description, and the frequency, saved as `frequency`: **Open** (the evidence decides: never, sometimes or always) or fixed **Always**, **Sometimes**, **Never**. An LLM row that sends a failure can never be *Never* (the LLM rule). |
+
+A failure is present or absent. An engineer who needs ordered levels turns on *Help → Show all details*:
+**When** and **Then** then also offer the refined scale (a magnitude 0–10, the matched magnitude, the
+matched magnitude + k, the largest matched magnitude). The same goes for guards, observation points,
+use cases and witnesses. A row that already uses a refined scale always shows it.
 
 ![Step 3 of the row window: what the component sends](images/row-then.jpg)
 
@@ -185,8 +197,8 @@ the inspector). The same window opens with the steps as tabs, so you can jump st
 you want; **Save row** is always there. *Copy* opens a new row prefilled from this one; *Delete*
 asks first and tells you if a certificate names the row.
 
-Leave a row **Open** unless the model fixes it on purpose: the analysis then keeps every activation
-as a possibility and lets the evidence choose.
+Leave a row **Open** unless the model fixes it on purpose: the analysis then keeps never, sometimes
+and always as candidates and lets the evidence choose.
 
 ### 3.4 The rows the engine adds
 
@@ -195,31 +207,31 @@ Folded under *Rows the engine adds* in the table:
 * **pass-through** (non-LLM components): every failure arriving on an input goes on where that input
   is forwarded. *Absorb…* says that some of them stop there, with a reason.
 * **worst-case defaults** (LLM components): for every output and every failure mode, "on any
-  message, the LLM sends that failure at 10". *Refine…* opens the row window prefilled with the same
-  trigger, to say more precisely what the LLM sends (a lower magnitude, for example); *Drop…*
-  removes the default and asks for the structural reason; *Restore* brings it back.
+  message, the LLM sends that failure". *Refine…* opens the row window prefilled with the same
+  trigger, to say more precisely what the LLM sends; *Drop…* removes the default and asks for the
+  structural reason; *Restore* brings it back.
 * **absorptions**: what you declared absorbed, with the reason. *Edit…* changes it.
 
 For a guard the table shows its fixed behaviour (what catching does), one **leak row** per target
-("the target gets through", whose activation is the guard's quality) and, for a learned guard, a
+("the target gets through", whose frequency is the guard's quality) and, for a learned guard, a
 **false-positive row**.
 
 ### 3.5 Worst-case defaults and the standard failure modes
 
-A component starts with the worst case: on any message it may send any failure at magnitude 10 on
+A component starts with the worst case: on any message it may send any failure on
 every output. These *worst-case defaults* are rows the engine adds, left open, so the evidence decides
-how often they fire. Every LLM component has them. In a new model every other component has them
+how often they apply. Every LLM component has them. In a new model every other component has them
 too (the model setting **Worst-case defaults for every component**, in **Edit…** with nothing
 selected), in the style of FPTC: an analyst who models nothing earns no guarantee. Models made
 before this setting, like the demo cases, keep them on LLM components only.
 
 What earns a guarantee for a component:
 
-* **a certificate** that a default never fires (`rows: {"<port>.<mode>": never}`), for example from a
+* **a certificate** that a default never applies (`rows: {"<port>.<mode>": never}`), for example from a
   test suite or a review. This is not possible for an LLM: the LLM rule says an LLM row is never
   "never";
 * **a row of yours** with the same trigger (any input, any message) that sends the same failure on
-  the same port at a lower magnitude: it replaces the default, and the change is recorded as a
+  the same port: it replaces the default, and on a refined scale the change is recorded as a
   calibration. Any other row is added beside the default;
 * **dropping the default** with a structural reason, printed wherever a verdict rests on it.
 
@@ -253,8 +265,9 @@ Drag **Guard** from Add onto an edge. A window asks what the guard is and what i
   **learned** (a classifier or an LLM judge: no certificate can say it never leaks; it also gets a
   false-positive row) and whether it has a **closed output** (it only emits enumerations, so it may
   wash taint). With several guards on one edge, *Earlier* and *Later* set the order they cut it.
-* **What it catches**: one or more targets: a failure mode from a magnitude, taint, confidentiality
-  above a level, or authority below a level. Tick **decidable from the data on the edge** when a
+* **What it catches**: one or more targets: a failure mode, **taint at least** a level (it lowers
+  taint to just below that level, and needs a closed output), confidentiality above a level, or
+  authority below a level. Tick **decidable from the data on the edge** when a
   certificate could truthfully say the guard never lets it through.
 
 Cancel leaves the model as it was. Edit a guard later with **Edit…** or a double-click on it.
@@ -265,23 +278,26 @@ Drag **Observation point** (the eye) onto the edge whose log you can read. It ju
 receiver gets, after every guard on the edge. In its window:
 
 * **The point**: name, id (witnesses and verdicts name it), the edge, and where the log comes from.
-* **Failures it judges**: tick each failure mode it judges and the magnitude from which it counts
-  (1 accepts none). Every ticked mode is a *cell* of the verdict table.
-* **Provenance**: whether it flags tainted messages, and the confidentiality above which, or the
-  authority below which, a message counts as reaching it (against the receiver's own clearance and
-  required authority, or a level you name).
+  An edge may have several points, one per log.
+* **Failures it judges**: tick each failure mode it judges. Every ticked mode is a *cell* of the
+  verdict table.
+* **Provenance**: the highest taint level it accepts (`tolerate_taint` in the document; clean accepts
+  no taint at all), and the confidentiality above which, or the authority below which, a message
+  counts as reaching it (against the receiver's own clearance and required authority, or a level you
+  name).
 
 ### 3.8 Use cases, claims and the model's settings
 
 With nothing selected, the inspector shows the model.
 
-* **Use cases** (*Add…*): where messages enter and what they already carry: tainted (text from
-  outside), a confidentiality, an authority, failures they bring along. Selecting a system input
-  also lists the use cases that start there.
+* **Use cases** (*Add…*): where messages enter and what they already carry: a taint level (clean,
+  internal, identified or open: who could have written the content), a confidentiality, an authority,
+  failures they bring along. Selecting a system input also lists the use cases that start there.
 * **Claims** (*Add…*): what someone says a cell's verdict is ("the wallet team claims guarantee for
   oom at the bank statement"). The verdicts say whether the evidence supports each claim.
 * **Edit…** opens the model settings: name and description, the **failure modes** (each with
-  optional sub-kinds; a guard that catches a mode catches its sub-kinds too) and the
+  optional sub-kinds; a guard that catches a mode catches its sub-kinds too), the **severity** of each
+  mode (how much it weighs in the certify-next ranking; it changes no verdict) and the
   **confidentiality** and **authority** levels, from lowest to highest. Renaming or removing a mode
   does not rename it elsewhere: the check lists what then needs fixing.
 
@@ -349,10 +365,10 @@ its witnesses; click a witness to see it in full.
 
 1. **Where and when**: the use case (or *not known*), the date (with a manifest, the versions in
    force that day decide whether it is stale) and the observation point(s) it was logged at.
-2. **What was seen**: for each failure mode, *not logged*, *not there (0)*, *there, magnitude k*,
-   *there, at least k*, or *between* two magnitudes; and taint, confidentiality and authority if
-   the log shows them. "Not there" is evidence too: a clean statement line says the failure did not
-   reach the point in that run.
+2. **What was seen**: for each failure mode, *not logged*, *absent* or *present* (on a refined scale
+   also exactly, at least or between magnitudes); and taint, confidentiality and authority if the
+   log shows them. "Absent" is evidence too: a clean statement line says the failure did not reach
+   the point in that run.
 3. **Source**: an id, where it was seen (a ticket, a statement line), a note.
 4. **Review**: the witness exactly as the register will hold it, and its state (*in force*, or
    *stale* with the reason).
@@ -361,7 +377,7 @@ its witnesses; click a witness to see it in full.
 
 Be as exact as the log is: a witness says what happened, so one that no run of the model can
 produce makes every cell a conflict ("the model lacks a path") until the witness or the model is
-fixed. *at least k* is often the honest reading of a log.
+fixed.
 
 A witness you wrote can be edited or deleted (click it). One that came from a log can only be
 **rejected** (a log is what happened; rejecting it takes two people and a reason).
@@ -370,13 +386,16 @@ A witness you wrote can be edited or deleted (click it). One that came from a lo
 
 A **certificate** fixes rows of one guard or component to never, sometimes or always, for the
 version it names: "the mandate check (mandate-v2) never lets an off-mandate payment through, by an
-exhaustive test". Drop certificate files (JSON or YAML) in *Certificates*, or write one with
+exhaustive test". It can also say **table confirmed** (`"table": "confirmed"`): a fault injection
+campaign fed the real component every reachable combination of error tokens, and every output is
+covered by its table. That changes no verdict, it counts for whether the model is *correct*, and it is
+rejected on an LLM or a learned guard, whose tables are the worst case. Drop certificate files (JSON or YAML) in *Certificates*, or write one with
 **New certificate…**:
 
-1. **What it certifies**: the guard or component (only what has open rows can be certified).
-2. **What it establishes**: for each row it speaks about, never, sometimes or always. Choices the
-   rules forbid are greyed out with the reason: never on an LLM row or a learned guard (the LLM
-   rule), never on a target that is not decidable from the edge.
+1. **What it certifies**: the guard or component.
+2. **What it establishes**: *Table confirmed*, and for each row it speaks about, never, sometimes or
+   always. Choices the rules forbid are greyed out with the reason: never on an LLM row or a learned
+   guard (the LLM rule), never on a target that is not decidable from the edge.
 3. **Who, when, how**: id, the version it covers (the model's version is filled in), issuer, date,
    method, a link to the evidence, the **scope** (the use cases it was established for; none ticked
    means all) and the versions of other components it was signed against (a later change there asks
@@ -398,8 +417,8 @@ it happens:
 * **Input**: the model and the evidence the run uses.
 * **Relevance**: the *cells* (one per observation point and judged failure) and the *cones* (the
   rows that can matter for each point).
-* **Alethic (TLA+ / TLC)**: for each cone, TLC runs every firing choice of its open rows for every
-  use case. Runs are cached, so a second run of the same model is fast.
+* **Alethic (TLA+ / TLC)**: for each cone, TLC runs every switch vector of its open rows and every
+  firing order, for every use case. Runs are cached, so a second run of the same model is fast.
 * **Epistemic (ASP / clingo)**: the runs become facts; candidates are assignments of never,
   sometimes or always to the open rows; certificates and witnesses strike the ones they contradict.
 * **Output**: the verdicts and the ranking of what to certify next.
@@ -417,17 +436,27 @@ does not count.
 On the left, every cell grouped by observation point, worst first, with the statuses the remaining
 candidates give it (N never, S sometimes, A always) and a short reason. Click a cell for the detail:
 
-* what the verdict means, the statuses, and **what to do**;
+* what the verdict means, the statuses, and **what to do**. When two runs differ only in the order in
+  which a component took its inputs, the advice says so, and **Depends on the firing order** names the
+  component, its ports and the use cases: the remedy is to synchronise them, which no certificate or
+  mitigation replaces;
+  When the loop bound k cut a delivery in the runs of the cell, the advice says where and how many copies
+  got through: the result holds up to k laps, and deeper interactions were not analysed. Without such a
+  sentence the bound changed nothing for the cell;
+* **The model for this cell**: whether it is *consistent* (the evidence leaves a candidate), *complete*
+  (every combination of tokens that reaches a component is named by its table; what is not is listed
+  as uncovered) and *correct* (every component that is not an LLM or a learned guard has a confirmed
+  table in force; the others are listed);
 * a **conflict** box when the evidence contradicted itself: the minimal conflict sets, and which
   certificates were suspended (in every cell) so the rest could decide;
 * **why**: structural (no candidate can change it), the certificates it rests on, dropped defaults;
 * how many candidates remain, the open rows of the cone, the **root causes** (the smallest sets of
-  rows that must fire for the failure to arrive), severity, the certificates and witnesses used, and
+  rows that must apply for the failure to arrive), severity, the certificates and witnesses used, and
   certificates **not counted here** because their scope does not cover a use case of this point;
 * **Show the candidates**: every remaining assignment as a box (and the struck ones, with what
   struck them, when there are few enough);
-* **Show a reaching run**: one run of the model, round by round, in which the failure reaches the
-  point;
+* **Show a reaching run**: one run of the model, one firing order, in which the failure reaches the
+  point, told firing by firing: which component fired, what it delivered and which rows applied;
 * **ASP program**, and **Show on the canvas**.
 
 Below: **Certify next** (each guard, and each pair, scored by the most severe failure it would turn
@@ -572,14 +601,17 @@ needs Node) shows every tool and lets you call them by hand.
 
 | word | meaning |
 |---|---|
-| failure mode | a kind of behavioural failure (omission, commission, late, value, …), with a magnitude 0–10 |
+| failure mode | a kind of behavioural failure (omission, commission, late, value, …), present or absent; a refined scale uses magnitudes 0–10 |
 | row | one behaviour of a component: when this arrives, it sends that |
-| activation | how often a row fires: never, sometimes, always, or open (a candidate choice) |
-| guard | a check on an edge that catches its targets unless its leak row fires |
+| frequency | how often a row applies: never, sometimes, always, or open (a candidate choice) |
+| switch vector | which rows are switched on for a run |
+| firing | one ready component takes the head of every non-empty input queue and sends; rows apply, components fire |
+| taint | who could have written the content: clean, internal, identified or open |
+| guard | a check on an edge that catches its targets unless its leak row applies |
 | observation point | an edge whose log you can read; it judges what the receiver gets |
 | cell | one observation point and one judged failure (or provenance dimension) |
 | cone | the rows and components that can matter for one observation point |
-| candidate | one assignment of activations to the open rows of a cone |
+| candidate | one assignment of frequencies to the open rows of a cone |
 | witness | what one logged interaction delivered at observation points |
-| certificate | a signed statement fixing the activation of some rows of one component |
+| certificate | a signed statement fixing the frequency of some rows of one component, or confirming its table |
 | the LLM rule | an LLM row that emits a failure is never "never"; neither is a learned guard's leak |

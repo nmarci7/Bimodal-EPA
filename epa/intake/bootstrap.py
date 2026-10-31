@@ -175,7 +175,7 @@ def apply_answers(skel, ans, name):
         tgt = ref(o["into"], "in")
         e = next(e for e in doc_edges if e["to"] == tgt)
         obs.append({"id": o["id"], "edge": e["id"], "label": o.get("label", o["id"]), "log": o.get("log", ""),
-                    **{k: o[k] for k in ("tolerate", "taint", "clearance", "requires") if k in o},
+                    **{k: o[k] for k in ("tolerate", "taint", "tolerate_taint", "clearance", "requires") if k in o},
                     "source": "answers"})
     components = []
     for cid, c in comps.items():

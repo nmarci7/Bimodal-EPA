@@ -4,7 +4,7 @@
 
 B1 open rows in one cone (an LLM and k guards in a chain), B2 use cases, B3a an LLM calling k tools
 that answer it, B3b an LLM handing k tool calls to a deterministic executor, B4 the demo cases
-stage by stage, cold and warm.
+stage by stage, cold and warm, B5 k components ready at once, so more firing orders.
 
 Every data point runs on a fresh work folder, so TLC runs cold; B4 also re-runs warm. The models
 are written so that the same document loads in the engine before and after the draft-4 fixes:
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -85,14 +86,36 @@ def executor(t):
             "observation_points": [{"id": "o_reply", "edge": "e_reply", "tolerate": {"value": 1}}]}
 
 
+def ready(k):
+    """k workers ready at once, each with its own starting token, all feeding one join: the rows are
+    fixed, so only the firing orders grow with k. One guard on the way out, one open row."""
+    ports = [f"p{i}" for i in range(k)]
+    comps = [{"id": "join", "kind": "deterministic", "in": ports, "out": ["out"], "flow": {p: ["out"] for p in ports}}]
+    edges = [{"id": "e_out", "from": "join.out", "to": "sys.bank"}]
+    entries = []
+    for i in range(k):
+        comps.append({"id": f"w{i}", "kind": "deterministic", "in": ["in"], "out": ["out"], "flow": {"in": ["out"]}})
+        edges += [{"id": f"e_s{i}", "from": f"sys.s{i}", "to": f"w{i}.in"},
+                  {"id": f"e_w{i}", "from": f"w{i}.out", "to": f"join.p{i}"}]
+        entries.append({"port": f"s{i}", "token": {"sub": {f"s{i}": 1}}})
+    return {"name": f"ready-{k}", "modes": ["omission", {"commission": [f"s{i}" for i in range(k)]}],
+            "components": comps, "edges": edges,
+            "guards": [{"id": "g", "edge": "e_out", "targets": [{"mode": "s0", "decidable": True}]}],
+            "use_cases": [{"id": "u", "entries": entries}],
+            "observation_points": [{"id": "o", "edge": "e_out", "tolerate": {"commission": 1}}]}
+
+
 def analyse(doc, rank=False, evidence=None, cells=None, work=None):
     from epa.engine.coordinator import Engine
     from epa.model.load import load_model
     m = load_model(doc)
-    eng = Engine(m, work or tempfile.mkdtemp(prefix="epa-bench-"))
+    folder = work or tempfile.mkdtemp(prefix="epa-bench-")
+    eng = Engine(m, folder)
     t0 = time.time()
     rep = eng.analyse(evidence or {}, only_cells=cells, rank=rank)
     total = time.time() - t0
+    if not work:
+        shutil.rmtree(folder, ignore_errors=True)
     tlc = rep["tlc_calls"]
     return {"total_s": round(total, 3),
             "tlc_s": round(sum(c.get("seconds") or 0 for c in tlc), 3),
@@ -122,10 +145,12 @@ def bench_cases(root):
                 out.append({"case": case, "stage": st, "warm": warm, "total_s": round(time.time() - t0, 3),
                             "tlc_s": round(sum(c.get("seconds") or 0 for c in rep["tlc_calls"] if not c.get("cached")), 3),
                             "tlc_calls": sum(1 for c in rep["tlc_calls"] if not c.get("cached")),
+                            "distinct_states": sum(c.get("distinct") or 0 for c in rep["tlc_calls"] if not c.get("cached")),
                             "cells": len(rep["cells"]),
                             "largest_cone_rows": max([len(k["rows"]) for k in rep["cones"]] or [0]),
                             "verdicts": {c["cell"]: c["verdict"] for c in rep["cells"]}})
                 print(f"  B4 {case} {st} {'warm' if warm else 'cold'}: {out[-1]['total_s']} s", flush=True)
+        shutil.rmtree(work, ignore_errors=True)
     return out
 
 
@@ -164,6 +189,8 @@ def main():
         res["B3b_executor"] = series("B3b", range(1, 9), executor, rank=False)
     if "B4" in only:
         res["B4_cases"] = bench_cases(root)
+    if "B5" in only:
+        res["B5_ready"] = series("B5", range(2, 11), ready, cells=["commission@o"])
     res["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
     with open(args.out, "w") as f:
         json.dump(res, f, indent=1)

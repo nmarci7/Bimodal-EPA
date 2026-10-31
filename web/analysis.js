@@ -6,7 +6,7 @@ import { analysisCurrent } from './flow.js';
 const STAGES = [
   { id: 'input', k: 'Input', title: 'Model and evidence', cls: '', steps: ['model', 'evidence'] },
   { id: 'cones', k: 'Relevance', title: 'Cells and cones', cls: '', steps: ['cells', 'cone'] },
-  { id: 'tlc', k: 'Alethic · TLA+ / TLC', title: 'Runs of each firing choice', cls: 'alethic', steps: ['tlc', 'tlc-done'] },
+  { id: 'tlc', k: 'Alethic · TLA+ / TLC', title: 'Runs of each switch vector', cls: 'alethic', steps: ['tlc', 'tlc-done'] },
   { id: 'asp', k: 'Epistemic · ASP / clingo', title: 'Candidates the evidence leaves', cls: 'epistemic', steps: ['verdict', 'conflict'] },
   { id: 'out', k: 'Output', title: 'Verdicts and what to certify next', cls: 'out', steps: ['ranking', 'done'] },
 ];
@@ -112,7 +112,7 @@ export class AnalysisView {
       h('div', { class: 'panel-head' }, h('h2', {}, 'Analysis: how the verdicts are computed'),
         h('span', { class: 'muted' }, this.status === 'running' ? 'running…' : rep ? `last run: ${rep.seconds} s, ${rep.tlc_calls.length} TLC call(s), ${rep.cells.length} cells` : 'not run yet')),
       h('p', { class: 'hint' }, 'This page shows the engine at work; the answer itself is on 4 Verdicts.',
-        h('span', { class: 'detail' }, ' For every observation point and failure the engine takes the rows that can matter (the cone), lets TLC run every firing choice of those rows for every use case, and hands the runs to clingo. Candidates are assignments of never, sometimes or always to the open rows; certificates and witnesses strike the ones they contradict; the statuses the remaining candidates give the failure are the verdict.')),
+        h('span', { class: 'detail' }, ' For every observation point and failure the engine takes the rows that can matter (the cone), lets TLC run every switch vector of those rows in every firing order for every use case, and hands the runs to clingo. Candidates are assignments of never, sometimes or always to the open rows; certificates and witnesses strike the ones they contradict; the statuses the remaining candidates give the failure are the verdict.')),
       done && !analysisCurrent() ? h('div', { class: 'problems' }, 'The model or the evidence changed after this run: the verdicts are out of date until you run it again.') : null,
       h('div', { class: 'inline' },
         h('button', { class: `btn${done && analysisCurrent() ? '' : ' primary'}`, disabled: this.status === 'running' ? true : undefined, onclick: () => this.run() }, this.status === 'running' ? 'Running…' : rep ? 'Run again' : 'Run analysis'),
@@ -146,7 +146,7 @@ export class AnalysisView {
       if (!calls.length) card.appendChild(h('span', { class: 'small', style: 'color: var(--g-ink)' }, 'no TLC call in this analysis: the runs were cached or no row is open'));
       for (const c of calls) {
         card.appendChild(h('div', { class: 'inline small' }, h('span', { class: 'tag' }, `TLC ${c.tlc_version || ''}`.trim()),
-          h('span', {}, `${c.vectors >= 0 ? c.vectors : 'many'} firing choice(s) · ${(c.distinct || 0).toLocaleString()} distinct states · depth ${c.depth} · ${c.runs} runs · ${c.cached ? 'cached' : `${c.seconds} s`}`),
+          h('span', {}, `${c.vectors >= 0 ? c.vectors : 'many'} switch vector(s) · ${(c.distinct || 0).toLocaleString()} distinct states · depth ${c.depth} · ${c.runs} runs · ${c.cached ? 'cached' : `${c.seconds} s`}`),
           h('button', { class: 'btn small', onclick: () => this.showTla(c.hash) }, 'Generated TLA+')));
       }
       card.appendChild(h('div', { class: 'inline' }, k.cells.map((c) => h('button', { class: 'btn small', onclick: () => this.showAsp(c) }, `ASP for ${c.split('@')[0]}`))));
@@ -161,7 +161,7 @@ export class AnalysisView {
       const tabs = { 'Cone.tla': t.module, 'Cone.cfg': t.cfg, 'EpaLib.tla': t.library, 'TLC output': t.stats };
       const pre = h('pre', { class: 'code' }, t.module);
       modal(h('div', { class: 'block' }, h('h2', { style: 'margin:0' }, 'The module TLC checked'),
-        h('p', { class: 'hint' }, 'Generated from the model for this cone. Init chooses a use case and a firing choice; Next applies one synchronous round until nothing changes. TLC dumps every state; the engine reads the terminal ones.'),
+        h('p', { class: 'hint' }, 'Generated from the model for this cone. Init chooses a use case and a switch vector; in each step one ready component fires, and TLC tries every order until no component is ready. TLC dumps every state; the engine reads the terminal ones.'),
         h('div', { class: 'avail' }, Object.keys(tabs).map((k) => h('button', { onclick: () => { pre.textContent = tabs[k]; } }, k))), pre));
     } catch (e) { toast(e.message); }
   }

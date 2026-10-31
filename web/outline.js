@@ -4,7 +4,7 @@
 import { h, clear, add } from './lib.js';
 import { S, on, emit, sysPorts, targetText } from './state.js';
 import { openDialog, button } from './dialog.js';
-import { rowSentence, rowKind, KINDS } from './rows.js';
+import { rowSentence, rowKind, rowFrequency, KINDS } from './rows.js';
 import { openRowDialog } from './rowdialog.js';
 import { openComponentDialog, openGuardDialog, openObsDialog, openUseCaseDialog } from './modeldialogs.js';
 import { judgesText } from './inspector.js';
@@ -87,7 +87,7 @@ export function allRowsDialog() {
           button('Add row…', () => { dlg.close(); openRowDialog(c.id, null); }, { small: true })),
         rows.map((r) => h('div', { class: 'item', role: 'button', tabindex: 0, onclick: () => { dlg.close(); openRowDialog(c.id, r.id); } },
           h('div', { class: 'inline' }, h('b', { class: 'mono small' }, r.id), h('span', { class: 'tag plain' }, KINDS[rowKind(r)].title.toLowerCase()),
-            r.activation ? h('span', { class: 'tag plain' }, r.activation) : null, h('span', { class: 'small muted' }, r.label || '')),
+            rowFrequency(r) ? h('span', { class: 'tag plain' }, rowFrequency(r)) : null, h('span', { class: 'small muted' }, r.label || '')),
           h('span', { class: 'small' }, rowSentence(r, c))))));
     }
     if (!n) host.appendChild(h('p', { class: 'hint' }, q ? 'No row matches.' : 'No component has rows of its own yet. Select a component and use Add row….'));

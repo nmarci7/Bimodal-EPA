@@ -83,7 +83,7 @@ flowchart TB
   the same functions (`load_model`, `Engine.analyse`, `cert_import.classify`, `log_import.recognise_all`,
   `markdown.report`, …).
 * **Caching** has two levels: the SQLite run cache (`engine/cache.py`, keyed by a cone's behaviour hash
-  and the firing choices already explored) and TLC's work folders (`tlc/<hash>/`, keyed by the module
+  and the switch vectors already explored) and TLC's work folders (`tlc/<hash>/`, keyed by the module
   text). A second analysis of an unchanged model starts no Java process.
 
 ## 2. The pipeline: from a model to verdicts
@@ -93,9 +93,9 @@ flowchart LR
   D["model document<br/>(YAML / JSON)"] -->|"load_model<br/>validate · normalise<br/>defaults · wellformed"| M["Model<br/>components, edge segments,<br/>rows (analyst + generated)"]
   M -->|"cone.cells"| C["cells<br/>mode@point"]
   C -->|"cone.cones<br/>(path-sensitive, merged per point)"| K["cones<br/>open rows, edges, use cases"]
-  K -->|"to_tla.module_for"| T["TLA+ module<br/>Init: use case × firing choice<br/>Next: one synchronous round"]
+  K -->|"to_tla.module_for"| T["TLA+ module<br/>Init: use case × switch vector<br/>Next: one ready component fires"]
   T -->|"tlc_runner.run<br/>(java TLC, -dump states)"| S["state dump"]
-  S -->|"runs.runs_from_dump"| R["runs<br/>(uc, firing choice) → labels"]
+  S -->|"runs.runs_from_dump"| R["runs<br/>(uc, switch vector, outcome) → labels"]
   EV["evidence<br/>certificates, witnesses,<br/>decisions"] -->|"Engine.register<br/>classify"| REG["register<br/>in force / rejected / stale / withdrawn"]
   R -->|"Engine.problem"| P["CellProblem<br/>facts + epistemic.lp"]
   REG --> P
@@ -111,11 +111,11 @@ flowchart LR
    *cell*. Its *cone* is the set of rows, edges and fields that can change it, found backwards from the
    point per `(edge, field)`; cones of one point are merged so one TLC run serves several cells.
 3. **Runs, the alethic layer** ([dev/alethic.md](dev/alethic.md)). A cone becomes a TLA+ module whose
-   initial states are every use case × every firing choice of the cone's open rows, and whose steps are
-   synchronous rounds until nothing changes. TLC lists the reachable states; the terminal ones are the
-   runs.
+   initial states are every use case × every switch vector of the cone's open rows, and whose steps fire
+   one ready component each: TLC branches on which, so it walks every firing order. A run ends when no
+   component is ready; the terminal states, one per distinct outcome, are the runs.
 4. **Candidates, the epistemic layer** ([dev/engine.md](dev/engine.md)). A candidate gives each open row
-   an activation (never, sometimes, always). clingo keeps the candidates the evidence allows:
+   a frequency (never, sometimes, always). clingo keeps the candidates the evidence allows:
    certificates fix rows, witnesses need a matching run, the LLM rule forbids "never" on LLM rows. The
    statuses the remaining candidates give the failure are the verdict.
 5. **Report** ([dev/engine.md](dev/engine.md), [dev/intake-api.md](dev/intake-api.md)). Reasons (what
@@ -328,7 +328,7 @@ sequenceDiagram
   E-->>VV: candidates with their status and what struck them
   VV->>API: GET …/cells/{cell}/trace
   API->>E: trace_of(cell, uc, fire) → runs.trace (the dump)
-  API-->>VV: the run round by round (explain.trace_story)
+  API-->>VV: the run step by step (explain.trace_story)
   VV->>API: GET …/cells/{cell}/asp
   API->>E: ensure, problem → CellProblem.program_text
   API-->>VV: the ASP program
@@ -378,7 +378,7 @@ sequenceDiagram
 | certificate | `{id, component, targets \| rows, version, issuer, date, method, scope, context}` | [dev/intake-api.md](dev/intake-api.md#4-certificates) |
 | witness | `{id, use_case, at: {point: {modes: {f: [lo, hi]}, taint, conf, auth, used}}, date, source, recogniser, versions, rule, lines}` | [dev/intake-api.md](dev/intake-api.md#3-recognisers) |
 | decision | `{kind: withdraw-cert, certificate, by, reason}` or `{kind: reject-witness, witness, by, second_reviewer, reason}` | [dev/engine.md](dev/engine.md) |
-| run | `(uc, firing choice) → labels {u, n, k: {b, c, a, t}}` per edge | [dev/alethic.md](dev/alethic.md#5-reading-runs) |
+| run | `(uc, switch vector, variant) → labels {u, n, k: {b, c, a, t}}` per edge | [dev/alethic.md](dev/alethic.md#5-reading-runs-and-why-the-reductions-are-sound) |
 | report | `{model, register, cells, suspension, cones, tlc_calls, absorbed, reverify, claims, engine, ranking, log, seconds}` | [dev/engine.md](dev/engine.md#shape-of-the-returned-report) |
 | events | `{t, step, msg, …}`: model, evidence, cells, cone, tlc, tlc-done, conflict, verdict, ranking, done | [dev/engine.md](dev/engine.md#events-emitted-through-emit) |
 
@@ -388,7 +388,7 @@ sequenceDiagram
 |---|---|---|
 | browser `localStorage` | `epa.doc`, `epa.evidence`, `epa.case` (and small UI preferences) | until the browser's site data is cleared |
 | server memory (`ANALYSES` in `api/app.py`) | running and finished analyses, their events and reports | until the server restarts |
-| `.epa-work/runs.sqlite` | the run cache: runs and the firing choices covered, per cone | kept; safe to delete |
+| `.epa-work/runs.sqlite` | the run cache: runs and the switch vectors covered, per cone | kept; safe to delete |
 | `.epa-work/tlc/<hash>/` | each generated module, its cfg, TLC's output and state dump | kept; safe to delete |
 | `.epa-work/workspace.json` | the shared workspace of the MCP server and the reasoner | kept |
 
@@ -408,6 +408,7 @@ sequenceDiagram
 | `tests/test_api.py`, `tests/test_manual_evidence.py` | the HTTP API; witnesses and certificates written by hand |
 | `tests/test_web.py` (runs `web/tests/*.test.js` under node) | the browser's row logic against every row of the shipped models (skipped without node) |
 | `tests/test_mcp.py` | the model edits, the MCP server through a real client and in raw JSON-RPC, the shared workspace |
+| `tests/test_tutorial.py`, `tests/test_tour_browser.py` (runs `tests/browser/tour_paths.mjs` in headless Chrome) | the tour's story with the engine; the tour off the happy path: skips, Do it for me clicked through, windows left open, another model opened, parts deleted (skipped without Chrome or Node 22+; `EPA_TOUR_FULL=1` skips to every step) |
 | `tests/test_docs.py` | every definition is described in `docs/dev/`, the call graph is current, links resolve |
 
 `bench/bench.py` measures how analysis time grows with open rows and use cases.

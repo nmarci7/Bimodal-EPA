@@ -6,6 +6,6 @@
   "issuer": "hub firmware team",
   "date": "2026-10-28",
   "method": "failover test re-run on firmware 5.2: the cloud cut in 200 scenarios",
-  "scope": ["voice", "calendar"],
+  "scope": ["voice", "calendar", "heating", "door"],
   "evidence": "ci://hub/failover/2026-10-28"
 }

@@ -1,0 +1,28 @@
+# The running example exactly as Listing 4.1 of the paper prints it. tests/models/running_example.yaml is
+# the form the reference implementation can read: one input port on P, and `const 1` instead of `present`.
+name: running-example
+modes: [omission, {commission: [oom]}, early, late, {value: [coarse, subtle]}]
+severity: {oom: 9}
+components:
+  - id: P
+    kind: llm
+    version: gpt-x-2026-05
+    in: [in, reply]
+    out: [order, query]
+    flow: {in: [query], reply: [order]}
+    rows:
+      - {id: p1, when: {reply: any}, then: {order: {oom: present}}}
+    drop_defaults:
+      - {port: order, mode: oom, reason: "the harness writes an order only on the reply"}
+  - {id: T, kind: tool, version: directory-3, in: [q], out: [a], flow: {q: [a]}}
+guards:
+  - {id: M, edge: e_PB, version: mandate-v2, targets: [{mode: oom, decidable: true}]}
+edges:
+  - {id: e_req, from: sys.invoice, to: P.in}
+  - {id: e_PT,  from: P.query,     to: T.q}
+  - {id: e_TP,  from: T.a,         to: P.reply}
+  - {id: e_PB,  from: P.order,     to: sys.bank}
+  - {id: e_PL,  from: P.order,     to: sys.log}
+use_cases:  [{id: pay, entries: [{port: invoice, token: {taint: open}}]}]
+observation_points:
+  - {id: o, edge: e_PB, label: statement, tolerate: {commission: 1, oom: 1}, tolerate_taint: identified}

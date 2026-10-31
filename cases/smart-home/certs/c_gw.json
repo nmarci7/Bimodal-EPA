@@ -6,7 +6,7 @@
   "issuer": "hub firmware team",
   "date": "2026-10-06",
   "method": "TLC model check of Watchdog.tla (debounce window and staleness bound over every interleaving of up to four commands) + review",
-  "scope": ["voice", "calendar", "offline"],
+  "scope": ["voice", "calendar", "offline", "heating", "door"],
   "context": {"hub": "hub-fw-5.1"},
   "evidence": "ci://hub/watchdog/tlc/2026-10-06"
 }

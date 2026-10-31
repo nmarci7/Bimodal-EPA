@@ -4,21 +4,23 @@
 //
 // A row in the document (docs/model-format.md, "Rows"):
 //   {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: op}},
-//    activation?: always | sometimes | never}
-// with op one of "const k", "keep", "+k", "max". Its kind is read off its shape, as epa/model/load.py does.
+//    frequency?: always | sometimes | never}          (`activation` is its old name and still read)
+// with op "present", or on a refined scale "const k", "keep", "+k", "max", and threshold "present", or a
+// number on a refined scale. Its kind is read off its shape, as epa/model/load.py does.
 
 export const KINDS = {
   failure: { title: 'Failure row', text: 'A condition on what arrives, and a failure the component sends on because of it.' },
   internal: { title: 'Internal fault', text: 'The component starts a failure on its own: no message needs to arrive.' },
   forwarding: { title: 'Forwarding', text: 'A message goes on to other output ports as it is, nothing added (a fork or a join).' },
-  sink: { title: 'Sink', text: 'The component may absorb a failure that arrives: nothing goes on when the row fires.' },
+  sink: { title: 'Sink', text: 'The component may absorb a failure that arrives: nothing goes on when the row applies.' },
 };
 
 export const OPS = {
-  const: { label: 'at a fixed magnitude', needsK: true, needsMatch: false },
-  keep: { label: 'at the matched magnitude', needsK: false, needsMatch: true },
-  plus: { label: 'at the matched magnitude + k', needsK: true, needsMatch: true },
-  max: { label: 'at the largest matched magnitude', needsK: false, needsMatch: true },
+  present: { label: 'present', needsK: false, needsMatch: false },
+  const: { label: 'refined scale: a fixed magnitude', needsK: true, needsMatch: false },
+  keep: { label: 'refined scale: the matched magnitude', needsK: false, needsMatch: true },
+  plus: { label: 'refined scale: the matched magnitude + k', needsK: true, needsMatch: true },
+  max: { label: 'refined scale: the largest matched magnitude', needsK: false, needsMatch: true },
 };
 
 export const ACTIVATIONS = ['open', 'always', 'sometimes', 'never'];
@@ -31,10 +33,11 @@ export function isAsIs(em) {
     || (typeof em === 'object' && !Array.isArray(em) && !Object.keys(em).length);
 }
 
-/** "const 9" | 9 | "keep" | "+2" | "max" -> {op, k} (as _parse_op in epa/model/load.py) */
+/** "present" | "const 9" | 9 | "keep" | "+2" | "max" -> {op, k} (as _parse_op in epa/model/load.py) */
 export function parseOp(op) {
   if (typeof op === 'number') return { op: 'const', k: clamp(op, 0, 10) };
   const s = String(op).trim();
+  if (s === 'present') return { op: 'present', k: 1 };
   if (s === 'keep') return { op: 'keep', k: 0 };
   if (s === 'max') return { op: 'max', k: 0 };
   if (s.startsWith('+')) return { op: 'plus', k: Number(s.slice(1)) || 0 };
@@ -76,15 +79,18 @@ export function toDraft(row) {
   });
   const then = [];
   for (const [port, em] of Object.entries(r.then || {})) {
-    if (isAsIs(em)) { then.push({ port, asis: true, mode: '', op: 'const', k: 5 }); continue; }
+    if (isAsIs(em)) { then.push({ port, asis: true, mode: '', op: 'present', k: 1 }); continue; }
     for (const [mode, op] of Object.entries(em)) then.push({ port, asis: false, mode, ...parseOp(op) });
   }
   const kind = row ? rowKind(r) : 'failure';
   return {
-    id: r.id || '', label: r.label || '', activation: r.activation || defaultActivation(kind),
+    id: r.id || '', label: r.label || '', activation: rowFrequency(r) || defaultActivation(kind),
     kind, when, then,
   };
 }
+
+/** How often a row applies, as the document says it: `frequency`, or its old name `activation`. */
+export function rowFrequency(r) { return r.frequency || r.activation; }
 
 /** A forwarding row is always forwarded unless it says otherwise; every other row starts open. */
 export function defaultActivation(kind) { return kind === 'forwarding' ? 'always' : 'open'; }
@@ -93,7 +99,7 @@ export function defaultActivation(kind) { return kind === 'forwarding' ? 'always
 export function fromDraft(draft, original) {
   const when = {};
   if (draft.kind !== 'internal') {
-    for (const c of draft.when) when[c.port] = c.any ? 'any' : { [c.mode]: Number(c.threshold) };
+    for (const c of draft.when) when[c.port] = c.any ? 'any' : { [c.mode]: Number(c.threshold) === 1 ? 'present' : Number(c.threshold) };
   }
   const then = {};
   if (draft.kind !== 'sink') {
@@ -103,15 +109,15 @@ export function fromDraft(draft, original) {
       then[e.port][e.mode] = formatOp(e);
     }
   }
-  // the order the analyst reads: id, label, when, then, activation, then anything the dialog does not edit
+  // the order the analyst reads: id, label, when, then, frequency, then anything the dialog does not edit
   const row = { id: draft.id.trim() };
   if (draft.label && draft.label.trim()) row.label = draft.label.trim();
   row.when = when;
   row.then = then;
   const act = draft.activation || 'open';
-  if (act !== defaultActivation(draft.kind)) row.activation = act;
+  if (act !== defaultActivation(draft.kind)) row.frequency = act;
   for (const [k, v] of Object.entries(original || {})) {
-    if (!['id', 'label', 'when', 'then', 'activation'].includes(k)) row[k] = v;
+    if (!['id', 'label', 'when', 'then', 'activation', 'frequency'].includes(k)) row[k] = v;
   }
   return row;
 }
@@ -119,20 +125,20 @@ export function fromDraft(draft, original) {
 /** Reshape a draft for another kind, keeping what still fits. */
 export function setKind(draft, kind, comp, fields) {
   const d = { ...draft, kind, when: draft.when.map((x) => ({ ...x })), then: draft.then.map((x) => ({ ...x })) };
-  // a forwarding row's activation defaults to always; leaving that kind takes the default with it
+  // a forwarding row's frequency defaults to always; leaving that kind takes the default with it
   if (draft.kind === 'forwarding' && kind !== 'forwarding' && d.activation === 'always') d.activation = 'open';
   const inPort = comp.in[0] || '*';
   const outPort = comp.out[0] || '';
   if (kind === 'internal') {
     d.when = [];
-    d.then = d.then.filter((e) => !e.asis).map((e) => ({ ...e, op: 'const', k: e.op === 'const' ? e.k : 5 }));
-    if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'const', k: 5 }];
+    d.then = d.then.filter((e) => !e.asis).map((e) => (e.op === 'const' ? e : { ...e, op: 'present', k: 1 }));
+    if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'present', k: 1 }];
   } else {
     if (!d.when.length) d.when = [{ port: inPort, any: true, mode: '', threshold: 1 }];
     if (kind === 'forwarding') {
       d.when = d.when.map((c) => ({ ...c, any: true }));
       const ports = [...new Set(d.then.map((e) => e.port))];
-      d.then = (ports.length ? ports : [outPort]).filter(Boolean).map((port) => ({ port, asis: true, mode: '', op: 'const', k: 5 }));
+      d.then = (ports.length ? ports : [outPort]).filter(Boolean).map((port) => ({ port, asis: true, mode: '', op: 'present', k: 1 }));
       if (d.activation === 'open') d.activation = 'always';
     } else if (kind === 'sink') {
       d.then = [];
@@ -141,7 +147,7 @@ export function setKind(draft, kind, comp, fields) {
         d.when = [{ port: c0.port, any: false, mode: fields[0], threshold: 1 }];
       }
     } else if (kind === 'failure') {
-      if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'const', k: 5 }];
+      if (!d.then.length && outPort) d.then = [{ port: outPort, asis: false, mode: fields[0], op: 'present', k: 1 }];
     }
   }
   return d;
@@ -161,12 +167,12 @@ export function draftProblemsByStep(draft, ctx) {
   const k = draft.kind;
   if (!KINDS[k]) P.kind.push('Choose what kind of row this is.');
   if (k === 'sink' && llm) P.kind.push('An LLM component passes nothing through, so a sink row has nothing to absorb.');
-  if (k !== 'internal' && !comp.in.length) P.kind.push(`${comp.id} has no input port yet: only an internal fault can fire without a message.`);
+  if (k !== 'internal' && !comp.in.length) P.kind.push(`${comp.id} has no input port yet: only an internal fault can apply without a message.`);
   if (k !== 'sink' && !comp.out.length) P.kind.push(`${comp.id} has no output port yet: wire it to something first, or make this a sink.`);
 
   if (k !== 'internal') {
     const T = P.trigger;
-    if (!draft.when.length) T.push('Add at least one condition: what has to arrive for the row to fire.');
+    if (!draft.when.length) T.push('Add at least one condition: what has to arrive for the row to apply.');
     const ports = draft.when.map((c) => c.port);
     if (ports.includes('*') && ports.length > 1) T.push('"Any input" stands alone: name the ports instead.');
     if (new Set(ports).size !== ports.length) T.push('Each input port can appear in only one condition.');
@@ -178,7 +184,7 @@ export function draftProblemsByStep(draft, ctx) {
         if (!(c.threshold >= 1 && c.threshold <= 10)) T.push('A threshold is a magnitude from 1 to 10.');
       }
     }
-    if (k === 'sink' && !draft.when.some((c) => !c.any)) T.push('A sink names the failure it absorbs: make one condition "a failure of at least".');
+    if (k === 'sink' && !draft.when.some((c) => !c.any)) T.push('A sink names the failure it absorbs: make one condition "a failure".');
     if (k === 'forwarding' && draft.when.some((c) => !c.any)) T.push('A forwarding row matches any message; a failure condition makes it a failure row.');
   }
 
@@ -203,7 +209,7 @@ export function draftProblemsByStep(draft, ctx) {
       if (!op) E.push(`Unknown operator ${e.op}.`);
       else {
         if (op.needsMatch && !matched) E.push(`"${op.label}" needs a failure in the condition: without one there is no matched magnitude.`);
-        if (k === 'internal' && e.op !== 'const') E.push('An internal fault emits a fixed magnitude.');
+        if (k === 'internal' && !['present', 'const'].includes(e.op)) E.push('An internal fault emits the mode present, or a fixed magnitude.');
         if (e.op === 'const' && !(e.k >= 0 && e.k <= 10)) E.push('A magnitude is from 0 to 10.');
         if (e.op === 'plus' && !(e.k >= 1 && e.k <= 10)) E.push('+k adds 1 to 10.');
       }
@@ -217,7 +223,7 @@ export function draftProblemsByStep(draft, ctx) {
   else if (ctx.takenIds && ctx.takenIds.has(id)) N.push(`Another row is already called ${id}.`);
   const emitsFailure = k !== 'sink' && draft.then.some((e) => !e.asis);
   if (llm && emitsFailure && draft.activation === 'never') N.push('An LLM row that emits a failure is never "never" (the LLM rule): leave it open, or fix it to sometimes or always.');
-  if (!ACTIVATIONS.includes(draft.activation)) N.push('Choose an activation.');
+  if (!ACTIVATIONS.includes(draft.activation)) N.push('Choose a frequency.');
   for (const key of Object.keys(P)) P[key] = [...new Set(P[key])];
   return P;
 }
@@ -227,7 +233,7 @@ export function draftProblems(draft, ctx) {
   return [...P.kind, ...P.trigger, ...P.effect, ...P.name];
 }
 
-/** The activations the dialog offers, with the ones the LLM rule forbids marked. */
+/** The frequencies the dialog offers, with the ones the LLM rule forbids marked. */
 export function activationChoices(draft, comp) {
   const llm = comp.kind === 'llm';
   const emitsFailure = draft.kind !== 'sink' && draft.then.some((e) => !e.asis);
@@ -244,7 +250,7 @@ export function activationText(act, llmRow, kind) {
     return llmRow ? 'open: sometimes or always, the evidence decides (an LLM row is never "never")'
       : 'open: never, sometimes or always, the evidence decides';
   }
-  return { always: 'always: fires whenever its condition holds', sometimes: 'sometimes: may or may not fire', never: 'never: switched off in the model' }[act] || act;
+  return { always: 'always: applies whenever its condition holds', sometimes: 'sometimes: may or may not apply', never: 'never: switched off in the model' }[act] || act;
 }
 
 // ---------------------------------------------------------------- sentences
@@ -253,13 +259,14 @@ function condText(port, pat) {
   const where = port === '*' ? 'any input' : port;
   if (pat && typeof pat === 'object') {
     const [m, th] = Object.entries(pat)[0] || ['?', 1];
-    return `${m} ≥ ${th} on ${where}`;
+    return th === 'present' || Number(th) === 1 ? `a message with ${m} on ${where}` : `${m} ≥ ${th} on ${where}`;
   }
   return `a message on ${where}`;
 }
 
 function emitText(mode, op) {
   const { op: o, k } = parseOp(op);
+  if (o === 'present') return mode;
   if (o === 'const') return `${mode} at ${k}`;
   if (o === 'keep') return `${mode} at the matched magnitude`;
   if (o === 'max') return `${mode} at the largest matched magnitude`;
@@ -298,8 +305,8 @@ export function rowYaml(row) {
   if (row.label) lines.push(`  label: ${JSON.stringify(row.label)}`);
   lines.push(`  when: ${flow(row.when || {})}`);
   lines.push(`  then: ${flow(row.then || {})}`);
-  if (row.activation) lines.push(`  activation: ${row.activation}`);
-  for (const [k, v] of Object.entries(row)) if (!['id', 'label', 'when', 'then', 'activation'].includes(k)) lines.push(`  ${k}: ${flow(v)}`);
+  if (rowFrequency(row)) lines.push(`  frequency: ${rowFrequency(row)}`);
+  for (const [k, v] of Object.entries(row)) if (!['id', 'label', 'when', 'then', 'activation', 'frequency'].includes(k)) lines.push(`  ${k}: ${flow(v)}`);
   return lines.join('\n');
 }
 
@@ -328,7 +335,7 @@ export function hasDefaults(doc, c) {
 
 /**
  * The state of one worst-case default of a component (docs/model-format.md): on output port q,
- * mode m at 10 for any message. Only a row with the same trigger (any input or the only input,
+ * mode m present for any message. Only a row with the same trigger (any input or the only input,
  * any message) that emits m on q replaces it; other rows emitting on q go beside it.
  * -> {status: active | refined | dropped, refinedBy: [row ids], beside: [row ids], drop}
  */

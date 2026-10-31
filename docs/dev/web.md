@@ -32,6 +32,7 @@ restored on load (`restore`). Views never call each other: they talk through a t
 | `report` | an analysis finished | canvas (verdict colours), verdicts view, flow strip, app (the dot on the Verdicts step) |
 | `analysis` | an analysis started (`AnalysisView.run`) | flow strip |
 | `show`, `shown:<view>` | a view is asked for / was shown | app / the view itself |
+| `fit` | the tour changed the model: fit it into view | model view |
 | `run` | "run the analysis" from anywhere (`{quiet: true}` stays on the current page) | app → `AnalysisView.run` |
 | `details` | Help → Show all details was switched | app (re-renders the views) |
 | `maptable:show`, `maptable:toggled` | the rows table is asked for / was toggled | rows table |
@@ -123,7 +124,11 @@ evidence lists). One cell, a wrong value at the log point, goes unchecked → ex
 |---|---|
 | `context(d)` | the parts the tour talks about, found in whatever the user built: the first non-LLM component, the first LLM, the system input and output, the edges between them, the log point on the edge into the output, the guard on the LLM's edge, the component's value default row |
 | `CHAPTERS`, `STEPS` | the chapters; per step: chapter, title, text, `target()` (the controls to outline), `view` (shown when the step starts), and for an action `done()` and `doIt()`; `after` (what it showed); `run: true` for the analysis steps, which also show the followed cell's verdict |
-| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and notices a step done; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window; `isDone()`; `render()`; `stop()` |
+| `Tutorial` | the card. `start()` asks before replacing a model, starts a new one (`blankDoc`, through `loadModel`) and polls every 0.5 s; `go(i)` shows a step (switching the view, scrolling the control into sight); `tick()` re-outlines the controls and redraws when `state()` changes; `light(els)` moves the outline; `place()` keeps the card off the outlined controls and above an open window, and still while the button is being clicked; `stepDone(st)`, `isDone()`; `render()`, `renderPaused()`; `stop()` |
+| `Tutorial.press()` | Do it for me. If the current step has work (`work(i)`), `catchUp(i)`; if not, it goes to the next step and catches up there, so the button can be clicked through the tour. One press at a time. A failure is shown on the card |
+| `Tutorial.catchUp(i)` | brings the model and the evidence to step i: closes any open window (`closeAllDialogs`), restores what the tour relies on (the value mode, `worst_case_defaults: all`), does every action not done yet in the story's order, runs the analysis if the step needs one (`analyse()`, which waits for a run already going instead of starting a second) and opens the step's page. It relies on `done()` staying true once the story has moved past a step |
+| `Tutorial.missing(i)` | the earlier actions that were skipped or undone; the card names them |
+| `Tutorial.resume()` | another model opened during the tour pauses it (`foreign`, set on `loaded` unless the tour itself loads); this brings the tour's model back from `saved` |
 
 #### `web/state.js`
 The state `S`, the event bus, the model helpers, every direct edit, and the check-then-save step of
@@ -146,7 +151,11 @@ the dialogs.
 | `connectPorts(from, to)`, `connect(a, b)` | wire two ends (making new ports where none was given), refusing self-loops, sys-to-sys and duplicates; the first wire out of a system input creates the first use case |
 | `addPort`, `removePort`, `moveEdgeEnd`, `renameComponent`, `renamePort` | direct edits on `S.doc` (each calls the matching `ops` function, then `changed`) |
 | `portEdges(d, cid, side, name)` | the edges at one port |
+| `TAINT_LEVELS`, `taintOptions(levels)`, `taintName(v)` | the four taint levels; `[level, words]` for a select; a level as its name, from a name, 0..3 or the old booleans |
+| `componentTaint(c)`, `targetTaint(t)`, `toleratedTaint(o)` | the level a component adds (`taint`, else `trusted`, else by kind, as `_component_taint` in load.py); the lowest level a guard's taint target catches (`true` is internal); the highest level a point accepts, or null |
+| `modeAt(m, k)` | a failure as a pattern, target or toleration: the mode alone, or `m ≥ k` on a refined scale |
 | `targetText(t)`, `guardSummary(d, g)`, `obsSummary(d, o)` | short texts for a guard target, a guard pill and an eye on the canvas |
+| `judgesTaint(o)`, `taintJudged(o)` | whether a point judges taint (a tolerated level, or the old `taint: reject`); what it judges, in a few words |
 | `useCasesAt(d, port)` | the use cases that enter at a system input |
 | `addGuard(edgeId)`, `addObs(edgeId)` | add a guard or an observation point directly (kept for scripts; the canvas now opens the dialogs instead) |
 | `removeSelection()`, `dropEdges(ids)` | delete the selection with its edges, and the guards and points on them |
@@ -192,24 +201,25 @@ Rows as plain data. No DOM, so node can test it against every row of the shipped
 
 | function | what it does |
 |---|---|
-| `KINDS`, `OPS`, `ACTIVATIONS`, `ID_RE` | the four row kinds with their explanations; the four emit operators; the activations; the id pattern |
+| `KINDS`, `OPS`, `ACTIVATIONS`, `ID_RE` | the four row kinds with their explanations; the emit operators (`present`, and the refined scale's); the frequencies; the id pattern |
 | `isAsIs(em)`, `parseOp(op)`, `formatOp({op,k})`, `clamp` | "as it is" in any spelling; `"const 9"`/`9`/`"keep"`/`"+2"`/`"max"` ↔ `{op, k}` (as `_parse_op` in load.py) |
 | `rowKind(row)` | failure, internal (no `when`), forwarding (only `any` and `as it is`) or sink (no `then`), as load.py reads it |
-| `toDraft(row)`, `fromDraft(draft, original)` | the row ↔ the dialog's editable form (lists of conditions and emissions); fields the dialog does not edit are kept; the activation is written only when it differs from the kind's default |
+| `toDraft(row)`, `fromDraft(draft, original)` | the row ↔ the dialog's editable form (lists of conditions and emissions); fields the dialog does not edit are kept; `frequency` is written only when it differs from the kind's default, and an old `activation` goes; a threshold of 1 is written `present`. The draft's field is still called `activation` |
+| `rowFrequency(r)` | How often a row applies, as the document says it: `frequency`, or its old name `activation`. | — |
 | `defaultActivation(kind)` | `always` for forwarding, `open` otherwise |
 | `setKind(draft, kind, comp, fields)` | reshape a draft for another kind, keeping what still fits |
 | `draftProblemsByStep(draft, ctx)`, `draftProblems(draft, ctx)` | what stands in the way of saving, by wizard step (kind, trigger, effect, name): the rules of `validate` in load.py plus the LLM rule and the operators that need a matched magnitude |
-| `activationChoices(draft, comp)`, `activationText(act, llmRow, kind)` | the activations the dialog offers (never disabled for an LLM row that emits a failure); what each means |
+| `activationChoices(draft, comp)`, `activationText(act, llmRow, kind)` | the frequencies the dialog offers (never disabled for an LLM row that emits a failure); what each means |
 | `rowSentence(row, comp)` (with `condText`, `emitText`, `list`) | what a row does, in one sentence |
 | `rowYaml(row)` | the row in YAML flow style, for the dialog's preview |
 | `freshRowId(cid, taken, base)`, `allRowIds(doc)` | a new row id; every analyst row id of the model |
 | `hasDefaults(doc, c)` | whether a component gets the worst-case defaults: every LLM, and every component when the model says `worst_case_defaults: all` (as `has_defaults` in `epa/model/defaults.py`) |
-| `defaultStatus(c, q, m)` | whether the default "m at 10 on q" of a component stands, is refined (and by which rows) or dropped |
+| `defaultStatus(c, q, m)` | whether the default "m present on q" of a component stands, is refined (and by which rows) or dropped |
 
 #### `web/rowdialog.js`
 | function | what it does |
 |---|---|
-| `openRowDialog(cid, rowId, opts)` | the row wizard (add, or edit with tabs): Kind, When, Then, Name and activation, with the sentence and the YAML under every step; `opts.preset` (refining an LLM default), `opts.from` (copy a row), `opts.startAt`. Save: a copy of the model with the row in place, the server check (and a warning if a certificate names a renamed row), `commitDoc` |
+| `openRowDialog(cid, rowId, opts)` | the row wizard (add, or edit with tabs): Kind, When, Then, Name and frequency, with the sentence and the YAML under every step; a new row emits `present`, and the refined scale's fields show only with all details on or when the row already uses one; `opts.preset` (refining an LLM default), `opts.from` (copy a row), `opts.startAt`. Save: a copy of the model with the row in place, the server check (and a warning if a certificate names a renamed row), `commitDoc` |
 | `deleteRow(cid, rowId)` | asks (naming certificates that state the row), then deletes |
 | `certsNaming(rowId)` | the certificates in the register that name a row by id |
 
@@ -218,26 +228,26 @@ One editing window per kind of model element. Each edits a copy and saves with `
 
 | function | what it does |
 |---|---|
-| `openComponentDialog(cid, {startAt})` | tabs Properties, Ports, Normal flow, What it absorbs (non-LLM), LLM defaults (LLM); renames the component last |
+| `openComponentDialog(cid, {startAt})` | tabs Properties (with the taint level it adds), Ports, Normal flow, What it absorbs (non-LLM), LLM defaults (LLM); renames the component last |
 | `openAbsorbDialog(cid, port)` | which modes stop at one input, and why |
 | `openDropDefaultDialog(cid, port, mode)` | drop one LLM default with a reason, or refine it with a row instead |
-| `refinePreset(cid, port, mode)` | the row draft that refines a default: same trigger, same failure, magnitude 10 |
-| `openGuardDialog(gid, {edge})` | a new guard on an edge (from a drop or *Add guard…*) or an existing one: name, id, version, edge, learned, closed output, order on the edge; then its targets, with what catching each does |
+| `refinePreset(cid, port, mode)` | the row draft that refines a default: same trigger, same failure, present |
+| `openGuardDialog(gid, {edge})` | a new guard on an edge (from a drop or *Add guard…*) or an existing one: name, id, version, edge, learned, closed output, order on the edge; then its targets (a mode, taint at least a level, confidentiality, authority), with what catching each does |
 | `catchSentence(t)` | what catching a target does (Definition: Guardrail) |
-| `openObsDialog(oid, {edge})` | a new or existing observation point: name, id, edge (one point per edge), log; the failures it judges and from which magnitude; provenance (taint, confidentiality, authority) |
+| `openObsDialog(oid, {edge})` | a new or existing observation point: name, id, edge (an edge may have several points), log; the failures it judges (from which magnitude, on a refined scale); provenance (the highest taint level it accepts, confidentiality, authority) |
 | `openEdgeDialog(eid)`, `openSysDialog(name)` | an edge's label and its ports; a system port's name |
-| `openUseCaseDialog(ucId, {port})`, `deleteUseCase(ucId)` | a use case: id, label, and each entry's input and token (taint, confidentiality, authority, failures it already carries) |
+| `openUseCaseDialog(ucId, {port})`, `deleteUseCase(ucId)` | a use case: id, label, and each entry's input and token (taint level, confidentiality, authority, failures it already carries) |
 | `openClaimDialog(index)`, `deleteClaim(index)` | a claim: the cell, the claimed verdict, who claims it |
-| `openModelDialog({startAt})` | name and description; failure modes with sub-kinds; confidentiality and authority levels |
-| `idsIn(doc)`, `idProblem(v, taken)` | ids in use; what is wrong with a proposed id |
+| `openModelDialog({startAt})` | name and description; failure modes with sub-kinds; `severity` per mode; confidentiality and authority levels |
+| `idsIn(doc)`, `idProblem(v, taken)`, `isPresent(k)` | ids in use; what is wrong with a proposed id; whether a magnitude is the default, present |
 
 #### `web/modelview.js`, `web/canvas.js`, `web/maptable.js`, `web/inspector.js`, `web/outline.js` (view 1)
 
 | definition | what it does |
 |---|---|
 | `ModelView` | lays out view 1: the left pane (Add / Outline tabs, remembered in `localStorage`), the canvas bar (badge, model name, Case figure, Fit, the View menu), the canvas, the rows table, the YAML pane, the footer, and the inspector. `status()` draws the badge and the footer from `S.check`; `leftTab`, `refreshYaml`, `toggleYaml`, `figure`; `eyeIcon()` draws the palette's eye |
-| `Canvas` | the SVG canvas. `nodes()` and `ports(byId)` compute geometry (`endPoint` finds where an edge meets a system port; `toWorld` turns mouse coordinates into canvas ones; `applyT` applies the pan and zoom) (each port sits on the border facing what it is wired to, pairs ordered so their edges do not cross); `render()` draws edges (`edgeShape`, with their guard pills and eyes), nodes (`nodeShape`) and ports (`portShape`) (coloured by the worst verdict after an analysis, `verdictsByObs`); `bind()` handles pan, zoom, moving nodes, wiring from ports and from the + handle, drops from the palette (a guard or point opens its dialog), double-click and Enter (`edit`), Delete (asks first); `reveal(sel)` scrolls a selection into view; `fit()` (a canvas with no size yet, its view hidden, sets `needsFit` and is fitted when the model view is next shown); `nearestEdge(w)` (the edge a guard or eye is dropped on); `select()`; `flash(msg)` (a toast); helpers `nodeHeight`, `clip`, `segDist` |
-| `MapTable` | the rows table under the canvas for the selected component, port or guard: the normal flow, the analyst's rows as sentences with Edit / Copy / Delete (rows touching a selected port are marked), and folded *Rows the engine adds* (pass-through with Absorb…, LLM defaults with Refine… / Drop… / Restore, absorptions with Edit…); for a guard its catch, leak and false-positive rows. `target()` finds what the selection's table is; `head` and `table` build the header and a table; `generated` the folded rows. Helpers `actShort` (the activation column) and `restoreDefault` |
+| `Canvas` | the SVG canvas. `nodes()` and `ports(byId)` compute geometry (`endPoint` finds where an edge meets a system port; `toWorld` turns mouse coordinates into canvas ones; `applyT` applies the pan and zoom) (each port sits on the border facing what it is wired to, pairs ordered so their edges do not cross); `render()` draws edges (`edgeShape`, with their guard pills and eyes), nodes (`nodeShape`) and ports (`portShape`) (coloured by the worst verdict after an analysis, `verdictsByObs`); `bind()` handles pan, zoom, moving nodes, wiring from ports and from the + handle, drops from the palette (a guard or point opens its dialog), double-click and Enter (`edit`), Delete (asks first); `reveal(sel)` scrolls a selection into view; `fit()` (a canvas with no size yet, its view hidden, sets `needsFit` and is fitted when the model view is next shown); `nearestEdge(w)` (the edge a guard or eye is dropped on; dropping an eye always opens a new point, and several eyes on one edge sit one behind the other); `select()`; `flash(msg)` (a toast); helpers `nodeHeight`, `clip`, `segDist` |
+| `MapTable` | the rows table under the canvas for the selected component, port or guard: the normal flow, the analyst's rows as sentences with Edit / Copy / Delete (rows touching a selected port are marked), and folded *Rows the engine adds* (pass-through with Absorb…, LLM defaults with Refine… / Drop… / Restore, absorptions with Edit…); for a guard its catch, leak and false-positive rows. `target()` finds what the selection's table is; `head` and `table` build the header and a table; `generated` the folded rows. Helpers `actShort` (the frequency column) and `restoreDefault` |
 | `Inspector` | the right pane: a summary of the selection (`renderModel`, `renderComponent`, `renderPort`, `renderSys`, `renderEdge`, `renderGuard`, `renderObs`) with *Edit…*, the problems of the model and an observation point's cells (`renderGenerated`), and *Delete …* at the bottom (`remove` asks first). Helpers: `head` (title, kind, Edit…), `section`, `kv` (a definition list), `select`, `useCases` and `ucItem` (the use-case list), `claims`. `judgesText(o)` says what a point judges |
 | `Outline`, `allRowsDialog()` | the outline lists (`renderList`; `group` and `item` build them; `match` filters; click selects and reveals, double-click edits) and the All rows window |
 
@@ -245,11 +255,11 @@ One editing window per kind of model element. Each edits a copy and saves with `
 
 | definition | what it does |
 |---|---|
-| `fmtAt(at, doc)` | a witness's `at` part in words ("o_statement: oom 1–10, tainted") |
+| `fmtAt(at, doc)` | a witness's `at` part in words ("o_statement: oom present, taint above what the point accepts"; a mode logged as `[0, 0]` is absent) |
 | `EvidenceView` | the register: `refresh()` asks `POST /api/evidence/register` for the state of everything; `render()` draws the summary and three panels (`logsPanel` with `fileCard` per log, `certsPanel`, `contextPanel` for recognisers, the manifest and the decisions). Intake: `addFiles` sorts dropped files, `addLog` (`POST /api/evidence/logs`), `addCert` (`POST /api/evidence/certificates`), `fromCase` loads a case file (`available` lists the case's files), `removeFile`; `recogniserTexts`, `deployments`, `lookups` merge the case's and the analyst's; `withdraw`, `rejectWitness` open the dialogs; `strip` drops the server's classification before storing |
-| `openCertDialog(certId)` | the certificate wizard: what it certifies (guards and components with open rows, from `S.check.summary.rows`), what it establishes (never disabled where the LLM rule or decidability forbids it), who/when/how (version prefilled, scope, signed-against versions), and a review with the server's classification |
+| `openCertDialog(certId)` | the certificate wizard: what it certifies (guards and components with open rows, from `S.check.summary.rows`, and whatever can have a confirmed table, `tableAllowed`), what it establishes (*Table confirmed*, written `table: confirmed`; never disabled where the LLM rule or decidability forbids it), who/when/how (version prefilled, scope, signed-against versions), and a review with the server's classification |
 | `openCertDetails(c)`, `openWithdrawDialog(c)` | a certificate in full (edit and delete for hand-made ones, withdraw when in force); the withdrawal decision |
-| `openWitnessDialog(witId)` | the witness wizard: where and when, what was seen (per mode: not logged, not there, exactly, at least, between; taint, confidentiality, authority), source, and a review: `POST /api/evidence/witness` shapes and classifies it |
+| `openWitnessDialog(witId)` | the witness wizard: where and when, what was seen (per mode: not logged, absent, present, and on a refined scale exactly, at least, between; taint, confidentiality, authority), source, and a review: `POST /api/evidence/witness` shapes and classifies it |
 | `openWitnessDetails(w, fmtAt)`, `openRejectDialog(w)` | a witness in full (edit and delete for hand-made ones, reject for the others); the two-reviewer rejection |
 | `certRows`, `rowWords`, `word`, `stateChip`, `changed`, `strip` | helpers |
 
@@ -267,8 +277,9 @@ One editing window per kind of model element. Each edits a copy and saves with `
 | definition | what it does |
 |---|---|
 | `VerdictsView.render()`, `list(rep)` | the summary counts, the exports, the cells grouped by observation point, worst first |
-| `detail()` | one cell: meaning, statuses (per use case), advice, conflict box, why, candidates, root causes, severity, certificates and witnesses used, certificates withheld by scope |
-| `rooms(c, host)`, `trace(c, host)`, `asp(c)` | `GET …/possibilities` (candidate boxes, struck ones with what struck them), `GET …/trace` (a reaching run, round by round), `GET …/asp` |
+| `detail()` | one cell: meaning, statuses (per use case), advice, the two cards below, conflict box, why, candidates, root causes, severity, certificates and witnesses used, certificates withheld by scope |
+| `orderCard(o)`, `fidelityCard(f)` | `order_dependent` of a cell: the component, its ports and the use cases whose firing order decides the outcome; `fidelity`: consistent, complete, correct, what is uncovered, which tables are unconfirmed |
+| `rooms(c, host)`, `trace(c, host)`, `asp(c)` | `GET …/possibilities` (candidate boxes, struck ones with what struck them), `GET …/trace` (a reaching run, one firing order, firing by firing, with the rows that applied in each), `GET …/asp` |
 | `rankingPanel`, `claimsPanel`, `housekeepingPanel` | certify next; claims and their judgement; re-verify, declared absorptions, certificates not in force |
 | `export(kind, type)` | downloads `report.md` or `cra.json` |
 | `shortReason(c)` | the one-line reason in the cell list |

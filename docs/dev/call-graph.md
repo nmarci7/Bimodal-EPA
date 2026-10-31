@@ -67,11 +67,13 @@ flowchart LR
   m19[mcp.server] --> m15[report.explain]
   m19[mcp.server] --> m16[report.markdown]
   m19[mcp.server] --> m17[workspace]
+  m23[model.defaults] --> m12[model.cone]
   m23[model.defaults] --> m13[model.load]
   m13[model.load] --> m23[model.defaults]
   m13[model.load] --> m14[model.wellformed]
   m16[report.markdown] --> m15[report.explain]
   m20[translate.to_tla] --> m12[model.cone]
+  m20[translate.to_tla] --> m23[model.defaults]
 ```
 
 ## Who calls whom (epa/)
@@ -82,11 +84,15 @@ flowchart LR
 | `alethic.dump_reader.parse_labels` | `alethic.dump_reader.parse_value` |
 | `alethic.dump_reader.parse_value` | `alethic.dump_reader._P`, `alethic.dump_reader._tokens` |
 | `alethic.dump_reader.read_dump` | `alethic.dump_reader.parse_value` |
-| `alethic.runs.matches` | `alethic.runs.effective` |
+| `alethic.runs._fifo_path` | `alethic.runs._consumed`, `alethic.runs._fired_by` |
+| `alethic.runs._fired_by` | `alethic.runs._carried` |
+| `alethic.runs._note_heads` | `alethic.dump_reader.parse_value` |
+| `alethic.runs._states_of` | `alethic.dump_reader.parse_value`, `alethic.dump_reader.read_dump_raw` |
+| `alethic.runs.matches` | `alethic.runs._taint_matches`, `alethic.runs.effective` |
+| `alethic.runs.races` | `alethic.runs.reaches`, `alethic.runs.used` |
 | `alethic.runs.reaches` | `alethic.runs.effective` |
-| `alethic.runs.runs_from_dump` | `alethic.dump_reader.parse_labels`, `alethic.dump_reader.parse_value`, `alethic.dump_reader.read_dump_raw`, `alethic.runs.Run` |
-| `alethic.runs.severity` | `alethic.runs.effective` |
-| `alethic.runs.trace` | `alethic.dump_reader.read_dump` |
+| `alethic.runs.runs_from_dump` | `alethic.dump_reader.parse_labels`, `alethic.dump_reader.parse_value`, `alethic.dump_reader.read_dump_raw`, `alethic.runs.Run`, `alethic.runs._note_heads` |
+| `alethic.runs.trace` | `alethic.runs._fifo_path`, `alethic.runs._states_of` |
 | `alethic.tlc_runner.run` | `alethic.tlc_runner.TLCError`, `alethic.tlc_runner._parse_stats`, `alethic.tlc_runner.find_jar` |
 | `api.app._engine` | `engine.coordinator.Engine` |
 | `api.app._model` | `model.load.load_model` |
@@ -113,23 +119,26 @@ flowchart LR
 | `api.app.workspace_meta` | `workspace.meta` |
 | `api.app.workspace_put` | `workspace.empty_evidence`, `workspace.meta`, `workspace.save` |
 | `cli._engine` | `engine.coordinator.Engine` |
-| `cli._print` | `report.explain.reason_line`, `report.markdown.cra_export`, `report.markdown.report` |
+| `cli._print` | `report.explain.fidelity_line`, `report.explain.reason_line`, `report.markdown.cra_export`, `report.markdown.report` |
 | `cli.main` | `cli._engine`, `cli._print`, `engine.scenario.load_case`, `engine.scenario.stage_inputs`, `epistemic.reason.candidate_space`, `intake.bootstrap.apply_answers`, `intake.bootstrap.questionnaire`, `intake.bootstrap.read_spans`, `intake.bootstrap.skeleton_from_mcp`, `intake.bootstrap.skeleton_from_traces`, `intake.cert_import.load`, `intake.log_import.load_deployments`, `intake.log_import.load_recogniser`, `intake.log_import.recognise_all`, `intake.mcp_import.read_tools_list`, `mcp.server.Workbench`, `mcp.server.build_server`, `model.cone.cells`, `model.cone.cone_of_cell`, `model.cone.cones`, `model.load.load_model`, `model.wellformed.absorbed`, `translate.to_tla.module_for` |
 | `engine.cache.RunCache.covered` | `engine.cache.RunCache.coverage`, `engine.cache.covers` |
 | `engine.cache.RunCache.runs` | `alethic.runs.Run` |
-| `engine.coordinator.Engine.__init__` | `engine.cache.RunCache` |
+| `engine.coordinator.Engine.__init__` | `engine.cache.RunCache`, `model.cone.default_schedule` |
 | `engine.coordinator.Engine.analyse` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.decide`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.rank`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator._count_vectors`, `engine.coordinator.judge_claims`, `model.cone.cells`, `model.cone.cones`, `model.wellformed.absorbed` |
 | `engine.coordinator.Engine.applies` | `engine.coordinator.Engine.inert` |
-| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator.Engine.witnesses_on`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
+| `engine.coordinator.Engine.decide` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.fidelity`, `engine.coordinator.Engine.inert`, `engine.coordinator.Engine.mark_cut`, `engine.coordinator.Engine.mark_order_dependence`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.reasons`, `engine.coordinator.Engine.witnesses_on`, `engine.coordinator._minimal`, `epistemic.reason.candidate_space`, `epistemic.verdicts.advice`, `epistemic.verdicts.statuses_for_display`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.ensure` | `alethic.runs.runs_from_dump`, `alethic.tlc_runner.run`, `engine.coordinator.Engine.emit`, `engine.coordinator._count_vectors`, `translate.to_tla.module_for` |
+| `engine.coordinator.Engine.fidelity` | `engine.coordinator.Engine.reached_heads`, `engine.coordinator.Engine.table_in_force`, `model.cone.mentions`, `model.cone.report_components` |
 | `engine.coordinator.Engine.inert` | `model.cone._trigger_possible`, `model.cone.normal_edges`, `model.cone.possible` |
+| `engine.coordinator.Engine.mark_cut` | `epistemic.verdicts.cut_advice` |
+| `engine.coordinator.Engine.mark_order_dependence` | `alethic.runs.race_at`, `alethic.runs.races`, `epistemic.verdicts.order_advice` |
 | `engine.coordinator.Engine.possibilities` | `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.register`, `engine.coordinator.Engine.suspension`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.candidate_space`, `model.cone.cells`, `model.cone.cones` |
 | `engine.coordinator.Engine.problem` | `alethic.runs.reaches`, `alethic.runs.severity`, `alethic.runs.used`, `engine.coordinator.Engine.applies`, `engine.coordinator.Engine.wcone`, `engine.coordinator.Engine.witness_runs`, `epistemic.reason.CellProblem` |
 | `engine.coordinator.Engine.rank` | `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.reasons` | `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.pins`, `engine.coordinator.Engine.problem`, `engine.coordinator.Engine.witnesses_on`, `epistemic.verdicts.verdict_of` |
 | `engine.coordinator.Engine.register` | `intake.cert_import.classify`, `intake.cert_import.reverify`, `intake.log_import.classify_witness` |
 | `engine.coordinator.Engine.suspension` | `alethic.runs.matches`, `engine.coordinator.Engine.emit`, `engine.coordinator.Engine.ensure`, `engine.coordinator.Engine.witness_cone`, `engine.coordinator.Engine.witnesses_on`, `epistemic.reason.CellProblem` |
-| `engine.coordinator.Engine.trace_of` | `alethic.runs.trace`, `model.cone.cells`, `model.cone.cones` |
+| `engine.coordinator.Engine.trace_of` | `alethic.runs.trace`, `model.cone.cells`, `model.cone.cones`, `translate.to_tla.port_key` |
 | `engine.coordinator.Engine.vacuous` | `engine.coordinator.Engine.wcone` |
 | `engine.coordinator.Engine.wcone` | `engine.coordinator.Engine.witness_cone` |
 | `engine.coordinator.Engine.witness_cone` | `model.cone.Cell`, `model.cone.Cone`, `model.cone.cone_of_cell` |
@@ -207,16 +216,21 @@ flowchart LR
 | `mcp.server.check` | `model.load.load_model`, `model.load.validate` |
 | `mcp.server.main` | `mcp.server.Workbench`, `mcp.server.build_server` |
 | `model.cone.Cell.parse` | `model.cone.Cell` |
-| `model.cone.Cone.key` | `model.cone._comp_sig` |
+| `model.cone.Cone.key` | `model.cone._comp_sig`, `model.cone.schedule_of` |
+| `model.cone._carries_alone` | `model.cone._when_ports`, `model.cone.forwarding` |
 | `model.cone._creates_message` | `model.cone._trigger_possible`, `model.cone.normal_edges`, `model.cone.possible` |
+| `model.cone._guards_met` | `model.cone._carries_alone`, `model.cone._when_ports`, `model.cone.downstream_guards` |
+| `model.cone._provenance_bound` | `model.cone._level`, `model.cone._sent`, `model.cone._when_ports`, `model.cone.forwarding` |
+| `model.cone._provenance_carriers` | `model.cone._carries_alone`, `model.cone._provenance_bound`, `model.cone._sent`, `model.cone._when_ports` |
 | `model.cone.cells` | `model.cone.Cell` |
-| `model.cone.cone_of_cell` | `model.cone.Cone`, `model.cone._creates_message`, `model.cone.downstream_guards`, `model.cone.forwarding`, `model.cone.normal_edges`, `model.cone.possible`, `model.cone.upstream` |
+| `model.cone.cone_of_cell` | `model.cone.Cone`, `model.cone._creates_message`, `model.cone._guards_met`, `model.cone._provenance_carriers`, `model.cone.downstream_guards`, `model.cone.forwarding`, `model.cone.normal_edges`, `model.cone.possible`, `model.cone.schedule_of`, `model.cone.upstream` |
 | `model.cone.cones` | `model.cone.Cone`, `model.cone.cone_of_cell` |
 | `model.cone.exact_points` | `model.cone._creates_message`, `model.cone.upstream` |
 | `model.cone.normal_edges` | `model.cone.forwarding` |
 | `model.cone.possible` | `model.cone._trigger_possible`, `model.cone.forwarding` |
+| `model.cone.schedule_of` | `model.cone.default_schedule` |
 | `model.defaults.add_guard_rows` | `model.load.Row` |
-| `model.defaults.add_worst_case_defaults` | `model.defaults.has_defaults`, `model.defaults.replaces_default`, `model.load.Row` |
+| `model.defaults.add_worst_case_defaults` | `model.cone.default_schedule`, `model.defaults.has_defaults`, `model.defaults.replaces_default`, `model.load.Row` |
 | `model.edit._edge` | `model.edit.EditError` |
 | `model.edit._split` | `model.edit.EditError` |
 | `model.edit.component` | `model.edit.EditError` |
@@ -239,17 +253,27 @@ flowchart LR
 | `model.edit.restore_default` | `model.edit.component` |
 | `model.edit.set_absorbs` | `model.edit.EditError`, `model.edit.component` |
 | `model.load.Model.family` | `model.load.Model.children` |
+| `model.load._component_taint` | `model.load._taint_level` |
+| `model.load._parse_when` | `model.load._magnitude` |
+| `model.load._token` | `model.load._magnitude`, `model.load._taint_level` |
+| `model.load._tolerated_taint` | `model.load._taint_level` |
 | `model.load.load_model` | `model.load.ModelError`, `model.load.normalise`, `model.load.read_document`, `model.load.validate`, `model.wellformed.check` |
-| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_worst_case_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._token` |
-| `model.load.validate` | `model.load._absorbed_modes`, `model.load._entries`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref` |
+| `model.load.normalise` | `model.defaults.add_guard_rows`, `model.defaults.add_worst_case_defaults`, `model.load.Component`, `model.load.Edge`, `model.load.Model`, `model.load.ObsPoint`, `model.load.Row`, `model.load.UseCase`, `model.load._absorbed_modes`, `model.load._component_taint`, `model.load._entries`, `model.load._frequency`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._magnitude`, `model.load._mark_cycles`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._parse_when`, `model.load._taint_level`, `model.load._token`, `model.load._tolerated_taint` |
+| `model.load.validate` | `model.load._absorbed_modes`, `model.load._entries`, `model.load._frequency`, `model.load._guard_edge`, `model.load._is_asis`, `model.load._mode_list`, `model.load._parse_op`, `model.load._parse_ref`, `model.load._taint_level` |
 | `report.explain.trace_story` | `report.explain._tok` |
 | `report.markdown.cra_export` | `report.explain.reason_line` |
-| `report.markdown.report` | `report.explain.reason_line` |
-| `translate.to_tla._component` | `model.cone.forwarding`, `translate.to_tla._bexpr`, `translate.to_tla._ident`, `translate.to_tla._set` |
+| `report.markdown.report` | `report.explain.fidelity_line`, `report.explain.reason_line` |
+| `translate.to_tla._common` | `translate.to_tla._set`, `translate.to_tla._vector_pred` |
+| `translate.to_tla._component` | `model.cone.forwarding`, `translate.to_tla._bexpr`, `translate.to_tla._fp_magnitude`, `translate.to_tla._ident`, `translate.to_tla._set`, `translate.to_tla.port_key` |
+| `translate.to_tla._fifo_module` | `translate.to_tla._common`, `translate.to_tla._component`, `translate.to_tla._ident`, `translate.to_tla._set`, `translate.to_tla._solo`, `translate.to_tla._tok_expr`, `translate.to_tla.port_key` |
+| `translate.to_tla._rounds_module` | `translate.to_tla._common`, `translate.to_tla._component`, `translate.to_tla._ident`, `translate.to_tla._tok_expr`, `translate.to_tla.guard_strata` |
 | `translate.to_tla._set` | `translate.to_tla.q` |
+| `translate.to_tla._solo` | `translate.to_tla.port_key` |
+| `translate.to_tla._tok_expr` | `translate.to_tla._bexpr` |
 | `translate.to_tla._vector_pred` | `translate.to_tla._set` |
 | `translate.to_tla.guard_strata` | `model.cone.normal_edges`, `model.cone.possible`, `model.cone.upstream` |
-| `translate.to_tla.module_for` | `translate.to_tla._bexpr`, `translate.to_tla._component`, `translate.to_tla._ident`, `translate.to_tla._set`, `translate.to_tla._vector_pred`, `translate.to_tla.guard_strata` |
+| `translate.to_tla.module_for` | `model.cone.default_schedule` |
+| `translate.to_tla.port_key` | `translate.to_tla._ident` |
 | `workspace.blank` | `workspace.empty_evidence` |
 | `workspace.load` | `workspace.blank`, `workspace.empty_evidence` |
 | `workspace.meta` | `workspace.load` |

@@ -11,6 +11,9 @@ NEUTRAL = {  # the regulator-facing labels of the CRA export
 }
 
 
+TAINT_WORDS = ("clean", "internal", "identified", "open")
+
+
 def reason_line(cell):
     r = cell.get("reasons") or {}
     parts = []
@@ -25,19 +28,37 @@ def reason_line(cell):
     return "; ".join(parts)
 
 
+def fidelity_line(cell):
+    """Consistent, complete, correct in words, with what stands in the way."""
+    f = cell.get("fidelity")
+    if not f:
+        return ""
+    parts = [("consistent" if f["consistent"] else "not consistent"),
+             ("complete" if f["complete"] else "not complete"), ("correct" if f["correct"] else "not correct")]
+    gaps = [f"{u['component']}: " + ", ".join(f"{', '.join(fs)} on {p}" for p, fs in u["heads"].items())
+            for u in f["uncovered"]]
+    line = ", ".join(parts)
+    if gaps:
+        line += "; uncovered " + "; ".join(gaps)
+    if f["unconfirmed"]:
+        line += "; no confirmed table on " + ", ".join(f["unconfirmed"])
+    return line
+
+
 def _tok(m, k, fields):
-    parts = [f"{f} {k['b'][f]}" for f in fields if k["b"].get(f)]
+    parts = [f"{f} present" if k["b"][f] == 1 else f"{f} {k['b'][f]}" for f in fields if k["b"].get(f)]
     if k.get("t"):
-        parts.append("tainted")
+        parts.append(f"taint {TAINT_WORDS[k['t']]}")
     if k.get("c"):
         parts.append(m.conf_levels[k["c"]])
     if k.get("a", m.auth_top) < m.auth_top:
         parts.append(f"authority {m.auth_levels[k['a']]}")
-    return ", ".join(parts) or "clean"
+    return ", ".join(parts) or "no failure"
 
 
 def trace_story(m, trace, fields):
-    """Round by round, the edges whose label changed, with the rows that fired."""
+    """Step by step (firings, or rounds), the edges whose label changed, and the rows that applied in that
+    step (`fired` is every row applied so far). A firing that changed no edge is told too."""
     if not trace:
         return []
     lines, prev = [], None
@@ -49,14 +70,17 @@ def trace_story(m, trace, fields):
                     changed.append((eid, lab))
             elif lab != prev["labels"].get(eid):
                 changed.append((eid, lab))
-        if changed:
+        if changed or (prev is not None and "component" in st):
             what = []
             for eid, lab in changed:
                 e = m.edges[eid]
                 src = e.src[1] if e.src[0] == "sys" else e.src[0]
                 dst = e.dst[1] if e.dst[0] == "sys" else e.dst[0]
                 what.append(f"{src} → {dst}: {_tok(m, lab['k'], fields)}")
-            head = "start" if prev is None else f"round {st['round']}"
-            lines.append({"step": head, "edges": what, "fired": st.get("fired", [])})
+            head = "start" if prev is None else (f"round {st['round']}" if "component" not in st
+                                                 else f"firing {st['round']}: {st['component']}".rstrip(": "))
+            before = set(prev["fired"]) if prev else set()
+            lines.append({"step": head, "edges": what, "fired": st.get("fired", []),
+                          "applied": sorted(set(st.get("fired", [])) - before)})
         prev = st
     return lines

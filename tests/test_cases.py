@@ -11,27 +11,30 @@ from epa.model.load import load_model
 ROOT = os.path.dirname(os.path.dirname(__file__))
 
 EXPECTED = {
-    ("wallet", "S0"): {"oom@o_statement": ("unchecked", 6), "dup@o_statement": ("unchecked", 18),
-                       "auth@o_statement": ("guarantee", 1), "conf@o_presentation": ("unchecked", 3)},
-    ("wallet", "S1"): {"oom@o_statement": ("guarantee", 2), "dup@o_statement": ("guarantee", 6),
+    ("wallet", "S0"): {"oom@o_statement": ("unchecked", 6), "dup@o_statement": ("unchecked", 36),
+                       "auth@o_statement": ("guarantee", 1), "conf@o_presentation": ("unchecked", 3),
+                       "taint@o_statement": ("exposed", 1)},
+    ("wallet", "S1"): {"oom@o_statement": ("guarantee", 2), "dup@o_statement": ("guarantee", 12),
                        "conf@o_presentation": ("guarantee", 1)},
-    ("wallet", "S2"): {"oom@o_statement": ("hope", 3), "dup@o_statement": ("guarantee", 6)},
+    ("wallet", "S2"): {"oom@o_statement": ("hope", 3), "dup@o_statement": ("guarantee", 12)},
     ("wallet", "S3"): {"oom@o_statement": ("hope", 3)},
-    ("wallet", "S4"): {"oom@o_statement": ("guarantee", 2), "dup@o_statement": ("guarantee", 6)},
+    ("wallet", "S4"): {"oom@o_statement": ("guarantee", 2), "dup@o_statement": ("guarantee", 12)},
     ("smart-home", "S0"): {"conf@o_egress": ("exposed", 1), "unsafe@o_actuator": ("unchecked", 72),
-                           "auth@o_actuator": ("unchecked", 3), "value@o_report": ("unchecked", 4)},
+                           "auth@o_actuator": ("unchecked", 3), "value@o_report": ("unchecked", 4),
+                           "heat_open@o_safety": ("unchecked", 4), "door_armed@o_safety": ("unchecked", 4)},
     # c_hub_failover and c_gs2 are scoped to voice and calendar, but the offline use case also reaches the
     # planner through the hub's context and can fire their rows: by the scope rule they do not count there
-    ("smart-home", "S1"): {"unsafe@o_actuator": ("guarantee", 24), "commission@o_actuator": ("guarantee", 48),
+    ("smart-home", "S1"): {"unsafe@o_actuator": ("guarantee", 24), "commission@o_actuator": ("guarantee", 96),
                            "omission@o_actuator": ("unchecked", 12), "value@o_actuator": ("unchecked", 4)},
     ("smart-home", "S2"): {"value@o_report": ("hope", 1), "conf@o_skill": ("hope", 1)},
     ("smart-home", "S3"): {"conf@o_egress": ("guarantee", 1), "value@o_report": ("guarantee", 1),
                            "conf@o_skill": ("unchecked", 3)},
-    ("mcp-coding-agent", "S0"): {"auth@o_process": ("exposed", 1), "auth@o_mcp": ("exposed", 1),
+    # a public issue has no one's authority; a maintainer's command has: per use case always and never
+    ("mcp-coding-agent", "S0"): {"auth@o_process": ("hope", 18), "auth@o_mcp": ("hope", 1),
                                  "conf@o_pr": ("unchecked", 3)},
-    ("mcp-coding-agent", "S1"): {"taint@o_process": ("guarantee", 1), "malicious@o_release": ("guarantee", 6),
-                                 "auth@o_process": ("exposed", 1)},
-    ("mcp-coding-agent", "S2"): {"conf@o_pr": ("hope", 1)},
+    ("mcp-coding-agent", "S1"): {"taint@o_process": ("guarantee", 2), "malicious@o_release": ("guarantee", 6),
+                                 "auth@o_process": ("hope", 2)},
+    ("mcp-coding-agent", "S2"): {"conf@o_pr": ("hope", 2)},
     ("mcp-coding-agent", "S3"): {"conf@o_pr": ("guarantee", 1)},
 }
 
@@ -50,6 +53,43 @@ def test_stage(case, stage, work):
         assert got[cell] == exp, (cell, got[cell], exp)
 
 
+def test_the_hub_races_are_sometimes_and_the_advice_names_them(work):
+    doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "smart-home"), "S0")
+    rep = Engine(load_model(doc), work).analyse(ev, rank=False)
+    cells = {c["cell"]: c for c in rep["cells"]}
+    heat, door = cells["heat_open@o_safety"], cells["door_armed@o_safety"]
+    assert heat["statuses"] == ["S", "A"]       # the default rows of the two LLMs can plan the hazard unasked
+    assert heat["order_dependent"] == {"component": "hub", "ports": ["plan", "window"], "use_cases": ["heating"]}
+    assert door["order_dependent"] == {"component": "hub", "ports": ["alarm", "plan"], "use_cases": ["door"]}
+    assert "order in which hub processes plan and window: synchronise them" in heat["advice"]
+
+
+def test_a_race_of_the_hub_is_told_step_by_step(work):
+    from epa.report import explain
+    doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "smart-home"), "S0")
+    m = load_model(doc)
+    eng = Engine(m, work)
+    rep = eng.analyse(ev, rank=False)
+    ex = next(c for c in rep["cells"] if c["cell"] == "heat_open@o_safety")["example_run"]
+    tr = eng.trace_of("heat_open@o_safety", ex["uc"], frozenset(ex["fire"]), ex["variant"])
+    story = explain.trace_story(m, tr, ["heat_open"])
+    assert story[0]["step"] == "start"
+    assert any(s["step"].endswith(": planner") for s in story)
+    assert any(s["step"].endswith(": hub") and any("heat_open present" in e for e in s["edges"]) for s in story)
+    for s in story[1:]:                     # one firing per step: only the component named sends in it
+        comp = s["step"].split(": ")[1]
+        assert all(e.startswith(f"{comp} → ") for e in s["edges"]), s
+
+
+def test_the_coding_agent_shows_what_authentication_buys(work):
+    doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "mcp-coding-agent"), "S0")
+    rep = Engine(load_model(doc), work).analyse(ev, rank=False)
+    cells = {c["cell"]: c for c in rep["cells"]}
+    assert cells["taint@o_process"]["per_uc"]["command"] == ["N"]
+    assert "A" in cells["taint@o_process"]["per_uc"]["issue"]
+    assert cells["auth@o_process"]["per_uc"] == {"issue": ["A"], "command": ["N"], "release": ["x"]}
+
+
 def test_wallet_incident_suspends_the_mandate_certificate(work):
     doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "wallet"), "S2")
     rep = Engine(load_model(doc), work).analyse(ev, rank=False)
@@ -57,6 +97,15 @@ def test_wallet_incident_suspends_the_mandate_certificate(work):
     assert oom["conflicts"] == [["c_gm"]] and oom["suspended"] == ["c_gm"]
     reg = {c["id"]: c["state"] for c in rep["register"]["certificates"]}
     assert reg["c_vendor_eval"] == "rejected"
+
+
+def test_the_confirmed_table_makes_the_out_of_mandate_cell_consistent_complete_and_correct(work):
+    for stage in ("S4", "S5"):
+        doc, ev, _ = stage_inputs(os.path.join(ROOT, "cases", "wallet"), stage)
+        rep = Engine(load_model(doc), work).analyse(ev, rank=False)
+        c = next(x for x in rep["cells"] if x["cell"] == "oom@o_statement")
+        assert (c["fidelity"]["consistent"], c["fidelity"]["complete"], c["fidelity"]["correct"]) == (True, True, True)
+    assert "c_gm_v3_table" in {x["certificate"] for x in rep["reverify"]}
 
 
 def test_wallet_llm_swap_puts_certificates_on_reverify(work):

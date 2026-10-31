@@ -36,8 +36,8 @@ DOCS = os.path.join(ROOT, "docs")
 INSTRUCTIONS = """Bimodal Agentic System Reasoner: bimodal error propagation analysis of agentic systems.
 A model has components (LLM, deterministic, tool, store, external, user) with input and output ports,
 edges between ports, rows (what a component does with failures), guards on edges, observation points
-on edges where a log exists, and use cases (where messages enter). The analysis runs every firing choice
-of the rows that matter through TLA+/TLC and keeps, with clingo, the candidates the evidence allows;
+on edges where a log exists, and use cases (where messages enter). The analysis runs every switch vector
+of the rows that matter, in every firing order, through TLA+/TLC and keeps, with clingo, the candidates the evidence allows;
 each observation point and judged failure (a cell, written mode@point) gets a verdict: guarantee, hope,
 exposed, unchecked, not exercised or conflict.
 
@@ -219,8 +219,10 @@ class Workbench:
         ins, outs = E.sys_ports(E.ensure_lists(copy.deepcopy(doc)))
         return {
             "name": doc.get("name"), "description": doc.get("description", ""), "modes": doc.get("modes"), "lattices": doc.get("lattices"),
+            **({"severity": doc["severity"]} if doc.get("severity") else {}),
             "components": [{"id": c["id"], "kind": c.get("kind"), "label": c.get("label", ""), "version": c.get("version"),
                             "in": c.get("in", []), "out": c.get("out", []), "rows": [r["id"] for r in c.get("rows", [])],
+                            **({"taint": c["taint"]} if "taint" in c else {}),
                             **({"absorbs": c["absorbs"]} if c.get("absorbs") else {}), **({"drop_defaults": c["drop_defaults"]} if c.get("drop_defaults") else {})}
                            for c in doc.get("components", [])],
             "system_inputs": sorted(ins), "system_outputs": sorted(outs),
@@ -228,7 +230,7 @@ class Workbench:
             "guards": [{"id": g["id"], "label": g.get("label", ""), "edge": g.get("edge"), "targets": g.get("targets", []),
                         **({"learned": True} if g.get("learned") else {}), **({"version": g["version"]} if g.get("version") else {})} for g in doc.get("guards", [])],
             "observation_points": [{"id": o["id"], "edge": o.get("edge"), "label": o.get("label", ""), "tolerate": o.get("tolerate", {}),
-                                    **{k: o[k] for k in ("taint", "clearance", "requires", "log") if o.get(k)}} for o in doc.get("observation_points", [])],
+                                    **{k: o[k] for k in ("taint", "tolerate_taint", "clearance", "requires", "log") if k in o}} for o in doc.get("observation_points", [])],
             "use_cases": doc.get("use_cases", []), "claims": doc.get("claims", []),
         }
 
@@ -276,8 +278,8 @@ class Workbench:
         ws = self.ws()
         m = self._model(ws)
         if not isinstance(certificate, dict) or not certificate.get("id") or not certificate.get("component"):
-            raise ToolError('a certificate is {"id", "component", "targets": {target: never|sometimes|always} or "rows": {row: ...}, '
-                            '"version", "issuer", "date", "method", "scope": [use cases], "context": {component: version}}')
+            raise ToolError('a certificate is {"id", "component", "targets": {target: never|sometimes|always} or "rows": {row: ...} '
+                            'or "table": "confirmed", "version", "issuer", "date", "method", "scope": [use cases], "context": {component: version}}')
         state, reason, rows = cert_import.classify(certificate, m)
         ev = ws["evidence"]
         ev["certificates"] = [c for c in ev["certificates"] if c.get("id") != certificate["id"]] + [_strip({**certificate, "manual": True})]
@@ -410,7 +412,8 @@ class Workbench:
         if c is None:
             raise ToolError(f"no cell {cell!r}; cells: {', '.join(x['cell'] for x in rep['cells'])}")
         keep = ("cell", "verdict", "statuses", "per_uc", "advice", "reasons", "conflicts", "suspended", "lacks_path", "candidates",
-                "rows", "root_causes", "severity", "certs_used", "witnesses_used", "scope_withheld", "example_run")
+                "rows", "root_causes", "severity", "certs_used", "witnesses_used", "scope_withheld", "example_run",
+                "order_dependent", "fidelity")
         return {k: c.get(k) for k in keep if k in c}
 
     def explain_cell(self, cell, candidates=False):
@@ -420,11 +423,12 @@ class Workbench:
             raise ToolError(f"no cell {cell!r}")
         m = self._model(ws)
         eng = Engine(m, self.work, cache=self.cache)
-        out = {"cell": cell, "verdict": c["verdict"], "advice": c.get("advice")}
+        out = {"cell": cell, "verdict": c["verdict"], "advice": c.get("advice"), "order_dependent": c.get("order_dependent"),
+               "fidelity": c.get("fidelity")}
         ex = c.get("example_run")
         if ex:
-            tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]))
-            out["reaching_run"] = {"use_case": ex["uc"], "rows_firing": ex["fire"], "story": explain.trace_story(m, tr, c.get("fields", []))}
+            tr = eng.trace_of(cell, ex["uc"], frozenset(ex["fire"]), ex.get("variant", 0))
+            out["reaching_run"] = {"use_case": ex["uc"], "rows_switched_on": ex["fire"], "story": explain.trace_story(m, tr, c.get("fields", []))}
         else:
             out["reaching_run"] = None
             out["note"] = "no run reaches the point in a remaining candidate"
@@ -577,7 +581,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def new_model(name: str, description: str = "") -> dict[str, Any]:
-        """Start an empty model (four failure modes, default levels) in the workspace, with no evidence. Replaces the workspace."""
+        """Start an empty model (the FPTC failure modes, worst-case defaults for every component, default levels) in the workspace, with no evidence. Replaces the workspace."""
         return wrap(lambda: b.new_model(name, description))
 
     @srv.tool(annotations=write)
@@ -610,10 +614,10 @@ def build_server(bench=None):
     def put_component(id: str, kind: str | None = None, label: str | None = None, version: str | None = None,  # noqa: A002
                       inputs: list[str] | None = None, outputs: list[str] | None = None, flow: dict[str, list[str]] | None = None,
                       authority: str | None = None, clearance: str | None = None, requires: str | None = None,
-                      trusted: bool | None = None, raises: bool | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Create a component (kind: llm, deterministic, tool, store, external, user) or change the fields given. inputs/outputs add ports; flow maps each input port to the outputs it sends to; new_id renames it (edges follow)."""
+                      trusted: bool | None = None, taint: str | int | None = None, raises: bool | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
+        """Create a component (kind: llm, deterministic, tool, store, external, user) or change the fields given. inputs/outputs add ports; flow maps each input port to the outputs it sends to; taint is the level it adds to what it sends (clean, internal, identified, open, or 0..3; default internal for llm, external and user, clean otherwise; trusted is the old boolean, still read); new_id renames it (edges follow)."""
         return wrap(lambda: b.put_component(force=force, id=id, kind=kind, label=label, version=version, inputs=inputs, outputs=outputs,
-                                            flow=flow, authority=authority, clearance=clearance, requires=requires, trusted=trusted,
+                                            flow=flow, authority=authority, clearance=clearance, requires=requires, trusted=trusted, taint=taint,
                                             raises=raises, new_id=new_id))
 
     @srv.tool(annotations=gone)
@@ -628,12 +632,12 @@ def build_server(bench=None):
 
     @srv.tool(annotations=gone)
     def remove_edge(edge: str, force: bool = False) -> dict[str, Any]:
-        """Remove an edge with its guards and its observation point."""
+        """Remove an edge with its guards and its observation points."""
         return wrap(lambda: b.remove_edge(edge, force))
 
     @srv.tool(annotations=write)
     def put_row(component: str, row: dict[str, Any], replace: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Add a row to a component, or replace the row with the same id (or the row named by replace). A row: {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: "const k" | "keep" | "+k" | "max"}}, activation?: always | sometimes | never}. No when: an internal fault; no then: a sink; only "any" and "as it is": forwarding."""
+        """Add a row to a component, or replace the row with the same id (or the row named by replace). A row: {id, label?, when: {port | "*": "any" | {mode: threshold}}, then: {port: "as it is" | {mode: "present", or on a refined scale "const k" | "keep" | "+k" | "max"}}, frequency?: always | sometimes | never}. No when: an internal fault; no then: a sink; only "any" and "as it is": forwarding."""
         return wrap(lambda: b.put_row(component, row, replace, force))
 
     @srv.tool(annotations=gone)
@@ -648,7 +652,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def drop_default(component: str, port: str, mode: str, reason: str, force: bool = False) -> dict[str, Any]:
-        """Drop a worst-case default of a component (on any message, mode at 10 on port), with the structural reason. LLM components always have them; every component does when worst_case_defaults is all (a new model)."""
+        """Drop a worst-case default of a component (on any message, mode present on port), with the structural reason. LLM components always have them; every component does when worst_case_defaults is all (a new model)."""
         return wrap(lambda: b.drop_default(component, port, mode, reason, force))
 
     @srv.tool(annotations=write)
@@ -660,7 +664,7 @@ def build_server(bench=None):
     def put_guard(id: str | None = None, edge: str | None = None, label: str | None = None,  # noqa: A002
                   targets: list[dict[str, Any]] | None = None, version: str | None = None, learned: bool | None = None,
                   closed_output: bool | None = None, fp_omission: int | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Create a guard on an edge, or change the fields given. targets: [{mode, threshold, decidable} | {taint: true} | {conf: level} | {auth: level}]. learned: a classifier or LLM judge (never certifiable as never). closed_output: may wash taint."""
+        """Create a guard on an edge, or change the fields given. targets: [{mode, decidable, threshold on a refined scale} | {taint: level} | {conf: level} | {auth: level}]. A taint target {taint: k} (internal, identified, open) catches taint at least k and lowers it to just below k; {taint: true} means any taint. It needs closed_output. learned: a classifier or LLM judge (never certifiable as never). closed_output: may wash taint."""
         return wrap(lambda: b.put_guard(force=force, id=id, edge=edge, label=label, targets=targets, version=version, learned=learned,
                                         closed_output=closed_output, fp_omission=fp_omission, new_id=new_id))
 
@@ -671,10 +675,10 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def put_observation_point(id: str | None = None, edge: str | None = None, label: str | None = None, log: str | None = None,  # noqa: A002
-                              tolerate: dict[str, int] | None = None, taint: str | None = None, clearance: str | None = None,
-                              requires: str | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Create an observation point on an edge (one per edge; it judges every top-level mode at 1 unless tolerate says otherwise), or change the fields given. tolerate: {mode: lowest magnitude that counts}; taint: reject; clearance/requires: a level or receiver."""
-        return wrap(lambda: b.put_observation_point(force=force, id=id, edge=edge, label=label, log=log, tolerate=tolerate, taint=taint,
+                              tolerate: dict[str, int] | None = None, taint: str | None = None, tolerate_taint: str | int | None = None,
+                              clearance: str | None = None, requires: str | None = None, new_id: str | None = None, force: bool = False) -> dict[str, Any]:
+        """Create an observation point on an edge (an edge may have several; a new one judges every top-level mode unless tolerate says otherwise), or change the fields given. tolerate: {mode: 1, or on a refined scale the lowest magnitude that counts}; tolerate_taint: the highest taint level accepted (clean, internal, identified, open, or 0..3); taint: reject is the old spelling of clean; clearance/requires: a level or receiver."""
+        return wrap(lambda: b.put_observation_point(force=force, id=id, edge=edge, label=label, log=log, tolerate=tolerate, taint=taint, tolerate_taint=tolerate_taint,
                                                     clearance=clearance, requires=requires, new_id=new_id))
 
     @srv.tool(annotations=gone)
@@ -684,7 +688,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def put_use_case(id: str, entries: list[dict[str, Any]], label: str = "", force: bool = False) -> dict[str, Any]:  # noqa: A002
-        """Create or replace a use case: entries [{port: system input name, token: {taint: bool, conf: level, auth: level, modes: {mode: magnitude}}}]."""
+        """Create or replace a use case: entries [{port: system input name, token: {taint: clean | internal | identified | open (true means open), conf: level, auth: level, modes: {mode: present, or a number on a refined scale}}}]."""
         return wrap(lambda: b.put_use_case(id, entries, label, force))
 
     @srv.tool(annotations=gone)
@@ -705,11 +709,13 @@ def build_server(bench=None):
     @srv.tool(annotations=write)
     def set_model_settings(name: str | None = None, description: str | None = None, modes: list[Any] | None = None,
                            confidentiality: list[str] | None = None, authority: list[str] | None = None,
-                           worst_case_defaults: str | None = None, force: bool = False) -> dict[str, Any]:
-        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}), the confidentiality and authority levels (low to high), or worst_case_defaults: "all" (every component starts with an open worst-case row per output and failure mode, FPTC style; a new model's setting) or "llm" (only LLM components)."""
+                           worst_case_defaults: str | None = None, severity: dict[str, int] | None = None,
+                           loop_bound: int | None = None, force: bool = False) -> dict[str, Any]:
+        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}), the confidentiality and authority levels (low to high), worst_case_defaults: "all" (every component starts with an open worst-case row per output and failure mode, FPTC style; a new model's setting) or "llm" (only LLM components), severity: {mode: whole number}, how much a failure weighs in the certify-next ranking (default 1; it changes no verdict; the map given replaces the old one, {} removes it), or loop_bound: k, how many times an edge may carry one token value in a run (default 2; a cell the bound cut says so in its advice)."""
         return wrap(lambda: b.set_model_settings(force=force, name=name, description=description, modes=modes,
                                                  confidentiality=confidentiality, authority=authority,
-                                                 worst_case_defaults=worst_case_defaults))
+                                                 worst_case_defaults=worst_case_defaults, severity=severity,
+                                                 loop_bound=loop_bound))
 
     # ---- evidence
     @srv.tool(annotations=read)
@@ -719,7 +725,7 @@ def build_server(bench=None):
 
     @srv.tool(annotations=write)
     def add_certificate(certificate: dict[str, Any]) -> dict[str, Any]:
-        """Add a certificate and say how the model classifies it. {id, component, targets: {target key: never|sometimes|always} (guards) or rows: {row id: ...}, version, issuer, date, method, scope: [use cases], context: {component: version}}. Never on an LLM row or a learned guard is rejected (the LLM rule)."""
+        """Add a certificate and say how the model classifies it. {id, component, targets: {target key: never|sometimes|always} (guards) or rows: {row id: ...}, or table: "confirmed" (a fault injection campaign confirmed the component's table, with or without the others), version, issuer, date, method, scope: [use cases], context: {component: version}}. Never on an LLM row or a learned guard is rejected (the LLM rule), and so is a confirmed table there."""
         return wrap(lambda: b.add_certificate(certificate))
 
     @srv.tool(annotations=write)
@@ -765,12 +771,12 @@ def build_server(bench=None):
 
     @srv.tool(annotations=read)
     def get_verdict(cell: str) -> dict[str, Any]:
-        """One cell of the last analysis in full: statuses, advice, reasons (structural, certificates it rests on, dropped defaults), conflicts and suspended certificates, candidates, root causes, evidence used."""
+        """One cell of the last analysis in full: statuses, advice, order_dependent (the component and ports whose firing order decides the outcome), fidelity (consistent, complete, correct, what is uncovered, which tables are unconfirmed), reasons (structural, certificates it rests on, dropped defaults), conflicts and suspended certificates, candidates, root causes, evidence used."""
         return wrap(lambda: b.get_verdict(cell))
 
     @srv.tool(annotations=read)
     def explain_cell(cell: str, candidates: bool = False) -> dict[str, Any]:
-        """A run of the model in which the failure reaches the point, round by round; with candidates=true also the remaining candidate assignments."""
+        """A run of the model in which the failure reaches the point, firing by firing (one firing order); with candidates=true also the remaining candidate assignments."""
         return wrap(lambda: b.explain_cell(cell, candidates))
 
     @srv.tool(annotations=read)

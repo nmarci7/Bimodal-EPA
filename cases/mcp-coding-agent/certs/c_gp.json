@@ -6,6 +6,6 @@
   "issuer": "platform team",
   "date": "2026-10-10",
   "method": "exhaustive path tests: writes outside src/, docs/ and tests/ rejected, including symlinks, .github/, the agent's own config and package.json scripts",
-  "scope": ["issue"],
+  "scope": ["issue", "command"],
   "evidence": "ci://agent/paths/2026-10-10"
 }

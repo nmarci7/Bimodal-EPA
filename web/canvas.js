@@ -232,7 +232,8 @@ export class Canvas {
     g.appendChild(s('path', { class: 'line', d: path, 'marker-end': `url(#${isSel ? 'arrow-sel' : llm ? 'arrow-llm' : 'arrow'})` }));
     const at = (f) => ({ x: pa.x + dx * f, y: pa.y + dy * f });
     const guards = d.guards.filter((gd) => gd.edge === e.id);
-    const o = d.observation_points.find((op) => op.edge === e.id);
+    const points = d.observation_points.filter((op) => op.edge === e.id);
+    const o = points[0];
     const lab = e.label || '';
     if (lab) {
       const p = at(guards.length ? 0.22 : 0.5);
@@ -256,8 +257,10 @@ export class Canvas {
       pill.appendChild(s('text', { class: 't', x: w / 2, y: 26, 'text-anchor': 'middle' }, gs.text));
       this.gDeco.appendChild(pill);
     });
-    if (o) {
-      const p = at(Math.max(0.6, 1 - 34 / len));
+    points.forEach((o, i) => {
+      // several points on one edge sit one behind the other, their names on alternate sides of the line
+      const side = i % 2 ? -1 : 1;
+      const p = at(Math.max(0.6, 1 - 34 / len) - (i * 34) / len);
       const v = verdictAt[o.id];
       const [bg, ink] = v ? VERDICT_COLOURS[v] : ['#FFFFFF', '#2B6CB0'];
       const os = obsSummary(d, o);
@@ -266,13 +269,13 @@ export class Canvas {
       eg.appendChild(s('ellipse', { rx: 13, ry: 9, fill: bg, stroke: os.empty ? '#A2241A' : ink, 'stroke-width': sel.type === 'obs' && sel.id === o.id ? 3 : 1.6 }));
       eg.appendChild(s('circle', { r: 3.4, fill: os.empty ? '#A2241A' : ink }));
       this.gDeco.appendChild(eg);
-      const oa = Math.abs(nx) > 0.6 ? (nx > 0 ? 'start' : 'end') : 'middle';
+      const oa = Math.abs(nx) > 0.6 ? (nx * side > 0 ? 'start' : 'end') : 'middle';
       // the name and what it judges sit on the side of the edge given by its normal, away from the line
-      const above = Math.abs(nx) <= 0.6 && ny < 0;
-      const tx = p.x + nx * 18, ty = p.y + ny * 20 + 4;
+      const above = Math.abs(nx) <= 0.6 && ny * side < 0;
+      const tx = p.x + nx * side * 18, ty = p.y + ny * side * 20 + 4;
       this.gDeco.appendChild(s('text', { class: 'eye-label', x: tx, y: above ? ty - 13 : ty, 'text-anchor': oa }, o.label || o.id));
       this.gDeco.appendChild(s('text', { class: `eye-sub${os.empty ? ' warn' : ''}`, x: tx, y: above ? ty : ty + 13, 'text-anchor': oa }, os.text));
-    }
+    });
     return g;
   }
 
@@ -394,10 +397,7 @@ export class Canvas {
         if (!eid) { this.flash('Drop a guard or an observation point onto an edge.'); return; }
         // a window asks what the new guard catches, or what the point judges; Cancel adds nothing
         if (kind === 'guard') openGuardDialog(null, { edge: eid });
-        else {
-          const there = S.doc.observation_points.find((x) => x.edge === eid);
-          if (there) { this.flash(`${eid} is already observed by ${there.id}.`); openObsDialog(there.id); } else openObsDialog(null, { edge: eid });
-        }
+        else openObsDialog(null, { edge: eid });
       } else addComponent(kind, w.x - W / 2, w.y - H / 2);
     });
   }

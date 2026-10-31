@@ -1,7 +1,8 @@
 """The formal core of draft 4, and the decisions taken after it, each as a small model:
 the LLM rule on fixed rows, what may replace an LLM default, pass-through by default (A6) with declared
 absorptions, internal-fault, forwarding and sink rows, a dropping guard that waits for its input to
-settle, suspension across observation points, and the scope rule."""
+settle, suspension across observation points, and the scope rule. A guard now reads one token at a
+time, so what used to wait for its input to settle is a race."""
 import copy
 
 import pytest
@@ -137,9 +138,11 @@ def test_a_forwarded_message_is_not_dropped(work):
     assert v["commission@o2"] == ("unchecked", ["N", "S", "A"])
 
 
-def test_a_dropping_guard_waits_for_its_input_to_settle(work):
-    """x creates a message with s2 at once and adds s1 two passes later; g catches s1 and drops the
-    message, which only failure rows created. Read too early, g would have forwarded s2."""
+def test_a_guard_judges_each_token_so_a_drop_can_depend_on_the_order(work):
+    """x makes a message with s2 at once and one with s1 two hops later; g catches s1 and drops the
+    message, which only failure rows created. Taken together they are one token and g drops both, so
+    nothing arrives; taken apart the s2 token has nothing to catch and goes through. A run that sends
+    nothing is no clean use, so every run that uses the point reaches it."""
     v, _ = verdicts({
         "modes": ["omission", {"commission": ["s1", "s2"]}],
         "components": [
@@ -156,7 +159,7 @@ def test_a_dropping_guard_waits_for_its_input_to_settle(work):
         "use_cases": uc("req"),
         "observation_points": [{"id": "o", "edge": "e_side", "tolerate": {"s2": 1}}]}, work,
         {"certificates": [{"id": "c_g", "component": "g", "targets": {"s1": "never"}}]})
-    assert v["s2@o"] == ("not exercised", [])
+    assert v["s2@o"] == ("exposed", ["A"])
 
 
 FANOUT = {

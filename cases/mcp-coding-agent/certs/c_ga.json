@@ -6,7 +6,7 @@
   "issuer": "platform team",
   "date": "2026-10-10",
   "method": "schema review: the command is one of 14 enumerated commands with enumerated flags; no free text reaches the shell",
-  "scope": ["issue"],
+  "scope": ["issue", "command"],
   "context": {"planner": "coder-llm-2026-07", "runner": "runner-0.9"},
   "evidence": "repo://agent/allowlist-v2.json"
 }

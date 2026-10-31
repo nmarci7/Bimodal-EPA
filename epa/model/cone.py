@@ -2,19 +2,32 @@
 
 A *cell* is one failure judged at one observation point: a mode or sub-kind, taint, confidentiality
 or authority. Its *cone* is the part of the model that can change the cell: the components upstream
-of the point, the use cases that enter there, the rows whose firing can change the observed fields or
-whether a message exists on the observed edge, and the mode fields those rows read and write. Rows
-outside the cone cannot change the cell, so they are left out of its runs and its candidates.
+of the point, the use cases that enter there, the rows that can change the observed fields or whether a
+message exists on the observed edge, and the mode fields those rows read and write. Rows outside the
+cone cannot change the cell, so they are left out of its runs and its candidates. Completeness and
+correctness count only the components with a row kept in the cone (`report_components`).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 
 # Bumped whenever the meaning of a run changes, so that cached runs of an older engine are not reused.
 # 2: formal core draft 4 - pass-through by default, forwarding / internal-fault / sink rows, phased guards.
-SEMANTICS = 2
+# 3: FIFO firing - queues per input port, one ready component per step, the stopping rule; taint levels.
+# 4: the loop bound k and the cut report; tokens keep all their fields; sub-kinds have defaults of their own.
+SEMANTICS = 4
+
+
+def default_schedule():
+    """The firing semantics when nobody names one: fifo, unless EPA_SCHEDULE says otherwise."""
+    return os.environ.get("EPA_SCHEDULE", "fifo")
+
+
+def schedule_of(m):
+    return m.schedule or default_schedule()
 
 
 @dataclass(frozen=True)
@@ -43,16 +56,20 @@ class Cone:
     use_cases: list
     rows: list            # rows whose activation varies between runs (open, and fixed-sometimes)
     always: list          # rows fixed to always, inside the cone
-    fields: list          # mode fields the generated model tracks
+    fields: list          # mode fields the cone reads
     cell_rows: dict = field(default_factory=dict)   # cell id -> the rows of that cell's own cone
     cell_fields: dict = field(default_factory=dict) # cell id -> the mode fields that cell's cone reads
     rel: set = field(default_factory=set)            # (edge, field) pairs the runs compute exactly
     cell_rel: dict = field(default_factory=dict)     # cell id -> the (edge, field) pairs its own rows decide
+    cell_always: dict = field(default_factory=dict)  # cell id -> the always rows of that cell's own cone
     scope_ucs: list = None                           # use cases that can send over the point (the scope rule)
 
     def key(self, m):
         payload = {
             "semantics": SEMANTICS,
+            "schedule": schedule_of(m),
+            "loop_bound": m.loop_bound,
+            "kinds": sorted({c.kind for c in self.cells}),
             "rows": {r: m.rows[r].to_json() for r in self.rows + self.always},
             "comps": {c: _comp_sig(m.components[c]) for c in self.components},
             "edges": {e: [list(m.edges[e].src), list(m.edges[e].dst)] for e in self.edges},
@@ -63,7 +80,8 @@ class Cone:
 
 
 def _comp_sig(c):
-    return {"kind": c.kind, "flow": c.flow, "passes": c.passes, "trusted": c.trusted, "authority": c.authority,
+    return {"kind": c.kind, "flow": c.flow, "passes": c.passes, "trusted": c.trusted, "taint": c.taint,
+            "authority": c.authority,
             "raises": c.raises, "targets": [{k: v for k, v in t.items() if k != "row"} for t in c.targets],
             "learned": c.learned, "closed": c.closed_output, "fp": c.fp_omission, "on_cycle": c.on_cycle}
 
@@ -74,7 +92,7 @@ def cells(m, only=None):
         for f in m.fields:
             if f in o.tolerate:
                 out.append(Cell("mode", f, o.id))
-        if o.taint == "reject":
+        if o.tolerate_taint is not None:
             out.append(Cell("taint", "taint", o.id))
         if o.clearance is not None:
             out.append(Cell("conf", "conf", o.id))
@@ -252,6 +270,119 @@ def _trigger_fields(m, r):
     return fs
 
 
+def _carries_alone(m, r, sub):
+    """The row sends on an edge of the sub-network from an input port that does not forward there."""
+    c = m.components[r.comp]
+    forwards = {(p, q) for ports, q, f, _ in forwarding(m, c) if f is None for p in ports}
+    return any((p, q) not in forwards and any(e.id in sub for e in m.edges_into(c.id, p))
+               for q in r.then if any(e.id in sub for e in m.edges_from(c.id, q)) for p in _when_ports(m, r))
+
+
+def _guards_met(m, rid, U, sub):
+    """The guard targets, off a cycle, that a token sent by this row alone can trigger on its way to the
+    point: a mode target if the token carries that mode, a provenance target always."""
+    r = m.rows[rid]
+    if r.kind not in ("row", "default") or not _carries_alone(m, r, sub):
+        return []
+    c = m.components[r.comp]
+    out = []
+    for q, emits in r.then.items():
+        mine = set(emits)
+        if q in r.asis:
+            mine |= {f for p in _when_ports(m, r) for f in c.passes.get(p, [])}
+        for gid in downstream_guards(m, r.comp, q) & U:
+            g = m.components[gid]
+            if not g.on_cycle:
+                out += [(g, t) for t in g.targets if t["kind"] != "mode" or set(m.family(t["mode"])) & mine]
+    return out
+
+
+_WORSE = {"conf": max, "taint": max, "auth": min}
+
+
+def _level(tok, kind):
+    return tok[{"conf": "c", "taint": "t", "auth": "a"}[kind]]
+
+
+def _sent(m, c, kind, levels):
+    """What a firing of c sends in this provenance dimension, given the levels of its heads."""
+    if kind == "conf":
+        return max(levels)
+    if kind == "taint":
+        return max(levels + [c.taint])
+    return c.authority if c.raises else min(levels + [c.authority])
+
+
+def _provenance_bound(m, u, kind, skip=()):
+    """The worst level of this dimension each edge can carry in use case u, without the rows in `skip`.
+    An upper bound: guards are read as passing everything."""
+    worse = _WORSE[kind]
+    at = {eid: _level(tok, kind) for eid, tok in u.entries}
+    changed = True
+
+    def put(q_edges, v):
+        nonlocal changed
+        for e in q_edges:
+            if e.id not in at or worse(at[e.id], v) != at[e.id]:
+                at[e.id] = v if e.id not in at else worse(at[e.id], v)
+                changed = True
+    while changed:
+        changed = False
+        for c in m.components.values():
+            heard = {p: [at[e.id] for e in m.edges_into(c.id, p) if e.id in at] for p in c.ins}
+            for ports, q, r, _ in forwarding(m, c):
+                if r is None or r.id not in skip:
+                    levels = [v for p in ports for v in heard[p]]
+                    if levels:
+                        put(m.edges_from(c.id, q), _sent(m, c, kind, levels))
+            for r in m.comp_rows(c.id):
+                if r.kind in ("row", "default", "fp") and r.id not in skip:
+                    levels = [v for p in _when_ports(m, r) for v in heard.get(p, [])]
+                    for q in r.then:
+                        if levels:
+                            put(m.edges_from(c.id, q), _sent(m, c, kind, levels))
+    return at
+
+
+def _provenance_carriers(m, kind, ucs, sub, U):
+    """The rows a provenance cell needs under fifo. A token carries the provenance of the heads of its own
+    firing, nothing else, so a row that sends from a port with no forwarding to that output may be the
+    only way that port's provenance goes on (rounds joined every input into every label instead). It
+    matters only if it can send something worse than the output gets without such rows."""
+    carriers = [r for r in m.rows.values() if r.comp in U and r.kind in ("row", "default") and r.fixed != "N"
+                and _carries_alone(m, r, sub)]
+    skip = {r.id for r in carriers}
+    out = []
+    for u in (x for x in m.use_cases if x.id in ucs):
+        full, bare = _provenance_bound(m, u, kind), _provenance_bound(m, u, kind, skip)
+        for r in carriers:
+            c = m.components[r.comp]
+            levels = [full[e.id] for p in _when_ports(m, r) for e in m.edges_into(c.id, p) if e.id in full]
+            for q in r.then:
+                for e in m.edges_from(c.id, q):
+                    if levels and e.id in sub and r not in out:
+                        v = _sent(m, c, kind, levels)
+                        if e.id not in bare or _WORSE[kind](v, bare[e.id]) != bare[e.id]:
+                            out.append(r)
+    return out
+
+
+def report_components(m, cone, cell):
+    """The components that count as in a cell's cone for completeness and correctness: those with a row
+    kept in it. A component that only forwards through its flow is searched through but stays out."""
+    rows = set(cone.cell_rows.get(cell.id, ())) | set(cone.cell_always.get(cell.id, ()))
+    return sorted({m.rows[r].comp for r in rows})
+
+
+def mentions(m, comp, port, f):
+    """The component's table names failure f on this port: a row's pattern or a declared absorption
+    names it, its parent or one of its sub-kinds. A row that says only `any` does not name it."""
+    kin = {f, m.parent.get(f)} | set(m.children(f))
+    if any(a["port"] == port and kin & set(a["modes"]) for a in m.components[comp].absorbs):
+        return True
+    return any(kin & set(r.when.get(port, {}).get("modes", {})) for r in m.comp_rows(comp))
+
+
 def cone_of_cell(m, cell):
     """Backward relevance over (edge, mode field) pairs, starting at the observed edge: a row is in
     the cone if it writes a relevant field on an edge, or decides whether a message exists on a
@@ -304,6 +435,9 @@ def cone_of_cell(m, cell):
                     if not g.on_cycle:
                         for t in g.targets:
                             add_guard_target(g, t)
+    if cell.kind != "mode" and schedule_of(m) == "fifo":
+        for r in _provenance_carriers(m, cell.kind, ucs, sub, U):
+            add_row(r)
     # guards whose provenance target is the cell's kind
     if cell.kind != "mode":
         for g in m.components.values():
@@ -311,42 +445,58 @@ def cone_of_cell(m, cell):
                 for t in g.targets:
                     if t["kind"] == cell.kind:
                         add_guard_target(g, t)
-    while work:
-        eid, f = work.pop()
-        src = m.edges[eid].src
-        if src[0] == "sys" or src[0] not in U:
-            continue
-        c = m.components[src[0]]
-        if c.is_guard:
-            for e in m.edges_into(c.id, "in"):
-                if e.id in sub:
-                    mark(e.id, [f])
-            for t in c.targets:
-                if t["kind"] == "mode" and f in m.family(t["mode"]):
-                    add_guard_target(c, t)
-            fp = m.rows.get(f"fp.{c.id}")
-            if fp is not None and f == "omission":
-                add_row(fp)
-            continue
-        for r in m.comp_rows(c.id):
-            if f in r.then.get(src[1], {}):
-                add_row(r)
-        # pass-through: the field comes from every input port that forwards to this output, unless a
-        # sink row there may absorb it
-        for ports, q, r, _ in forwarding(m, c):
-            if q != src[1]:
+    def settle():
+        while work:
+            eid, f = work.pop()
+            src = m.edges[eid].src
+            if src[0] == "sys" or src[0] not in U:
                 continue
-            if r is not None:
-                add_row(r)
-            for p in ports:
-                if f not in c.passes.get(p, []):
-                    continue
-                for e in m.edges_into(c.id, p):
+            c = m.components[src[0]]
+            if c.is_guard:
+                for e in m.edges_into(c.id, "in"):
                     if e.id in sub:
                         mark(e.id, [f])
-                for s in m.comp_rows(c.id):
-                    if s.kind == "sink" and any(f in m.family(g) for g in s.when.get(p, {}).get("modes", {})):
-                        add_row(s)
+                for t in c.targets:
+                    if t["kind"] == "mode" and f in m.family(t["mode"]):
+                        add_guard_target(c, t)
+                fp = m.rows.get(f"fp.{c.id}")
+                if fp is not None and f == "omission":
+                    add_row(fp)
+                continue
+            for r in m.comp_rows(c.id):
+                if f in r.then.get(src[1], {}):
+                    add_row(r)
+            # pass-through: the field comes from every input port that forwards to this output, unless a
+            # sink row there may absorb it
+            for ports, q, r, _ in forwarding(m, c):
+                if q != src[1]:
+                    continue
+                if r is not None:
+                    add_row(r)
+                for p in ports:
+                    if f not in c.passes.get(p, []):
+                        continue
+                    for e in m.edges_into(c.id, p):
+                        if e.id in sub:
+                            mark(e.id, [f])
+                    for s in m.comp_rows(c.id):
+                        if s.kind == "sink" and any(f in m.family(g) for g in s.when.get(p, {}).get("modes", {})):
+                            add_row(s)
+
+    settle()
+    # Under fifo a failure row can send a token of its own, which a guard off a cycle may drop even on an
+    # edge the normal flow also uses: the guards such a token can meet decide whether it arrives.
+    if schedule_of(m) == "fifo":
+        met = set()
+        while True:
+            fresh = [t for r in include for g, t in _guards_met(m, r, U, sub) if t["row"] not in met]
+            if not fresh:
+                break
+            for t in fresh:
+                met.add(t["row"])
+                g = m.components[m.rows[t["row"]].comp]
+                add_guard_target(g, t)
+            settle()
     # forwarding rows are structure: they decide which messages exist and which are normal
     for r in m.rows.values():
         if r.kind == "fwd" and r.comp in U and r.fixed != "N":
@@ -361,7 +511,8 @@ def cone_of_cell(m, cell):
     scope_ucs = [u for u in ucs if o.edge in m._possible[u]]
     return Cone(cells=[cell], obs=cell.obs, components=comps, edges=sub_edges, use_cases=ucs,
                 rows=rows, always=always, fields=fields, cell_rows={cell.id: rows},
-                cell_fields={cell.id: fields}, rel=set(rel), cell_rel={cell.id: set(rel)}, scope_ucs=scope_ucs)
+                cell_fields={cell.id: fields}, rel=set(rel), cell_rel={cell.id: set(rel)}, scope_ucs=scope_ucs,
+                cell_always={cell.id: always})
 
 
 def cones(m, cell_list, merge_limit=10):
@@ -385,6 +536,7 @@ def cones(m, cell_list, merge_limit=10):
                     g.cell_rows.update(k.cell_rows)
                     g.cell_fields.update(k.cell_fields)
                     g.cell_rel.update(k.cell_rel)
+                    g.cell_always.update(k.cell_always)
                     g.rel |= k.rel
                     break
             else:
@@ -392,7 +544,8 @@ def cones(m, cell_list, merge_limit=10):
                                    use_cases=k.use_cases, rows=list(k.rows), always=list(k.always),
                                    fields=list(k.fields), cell_rows=dict(k.cell_rows),
                                    cell_fields=dict(k.cell_fields), rel=set(k.rel),
-                                   cell_rel=dict(k.cell_rel), scope_ucs=k.scope_ucs))
+                                   cell_rel=dict(k.cell_rel), scope_ucs=k.scope_ucs,
+                                   cell_always=dict(k.cell_always)))
         out += groups
     return out
 

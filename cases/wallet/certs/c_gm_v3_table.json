@@ -1,0 +1,12 @@
+{
+  "id": "c_gm_v3_table",
+  "component": "gm",
+  "table": "confirmed",
+  "version": "mandate-v3",
+  "issuer": "wallet team (N. N.), second reviewer: security office",
+  "date": "2026-10-20",
+  "method": "fault injection campaign: every head combination the runs reach at the mandate check, injected into mandate-v3; every observed output is covered by its table",
+  "scope": ["pay"],
+  "context": {"agent": "gpt-x-2026-05", "wallet": "wallet-3.2"},
+  "evidence": "ci://wallet/mandate-check/fault-injection/2026-10-20"
+}

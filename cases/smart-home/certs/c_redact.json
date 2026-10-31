@@ -6,6 +6,6 @@
   "issuer": "privacy office",
   "date": "2026-10-28",
   "method": "the context payload is built from an allowlist of fields; occupancy and household members are not on it; review + schema test",
-  "scope": ["voice", "calendar", "offline"],
+  "scope": ["voice", "calendar", "offline", "heating", "door"],
   "evidence": "repo://hub/egress/context-allowlist.json"
 }

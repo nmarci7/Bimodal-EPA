@@ -14,8 +14,11 @@ stages:
   - id: S0
     label: Design time
     note: >
-      Authority at the shell and at the MCP server is exposed in every run, structurally: injected
-      issue text has no one's authority and nothing on the path can restore it.
+      A public issue is external and open, a maintainer's command external and identified. Per use
+      case the authority at the shell and at the MCP server is always wrong on an issue, structurally:
+      injected text has no one's authority and nothing on the path can restore it. On a maintainer's
+      command it is never wrong, which is what authentication buys. Whether private code reaches a pull
+      request depends on the order in which the MCP server takes the tool call and the private read.
   - id: S1
     label: The platform team certifies the allowlist, paths, tool pinning and lockfile
     note: The test suite is submitted as a certificate for "tests catch malicious packages"; it is rejected.
