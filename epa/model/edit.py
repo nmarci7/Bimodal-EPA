@@ -413,7 +413,7 @@ def remove_claim(doc, cell, by=None):
 
 
 def set_settings(doc, name=None, description=None, modes=None, confidentiality=None, authority=None,
-                 worst_case_defaults=None, severity=None):
+                 worst_case_defaults=None, severity=None, loop_bound=None):
     """Change the settings given. severity replaces the whole map; an empty map removes it."""
     notes = []
     if name is not None:
@@ -434,6 +434,9 @@ def set_settings(doc, name=None, description=None, modes=None, confidentiality=N
     if worst_case_defaults is not None:
         doc["worst_case_defaults"] = worst_case_defaults
         notes.append(f"worst-case defaults for {'every component' if worst_case_defaults == 'all' else 'LLM components'}")
+    if loop_bound is not None:
+        doc["loop_bound"] = loop_bound
+        notes.append("loop bound")
     if severity is not None:
         if severity:
             doc["severity"] = dict(severity)

@@ -12,8 +12,8 @@ Outputs, under <paper>/data/eval/:
   scaling.csv   open rows of one cone against cold analysis time (Figure fig:scaling)
   raw/          the JSON every value came from, with the machine and the versions
 
-The engine is only read and run, never changed. Run it on the commit that is tagged for the
-Zenodo release: results.tex records that commit, and Section 5.3 prints it.
+The engine is only read and run, never changed. Run it on the commit of the supplementary archive:
+results.tex records that commit, and Section 5.1 prints it.
 """
 from __future__ import annotations
 
@@ -213,6 +213,7 @@ def stages(engine, raw):
                                               "has_reason": bool(c.get("reasons")),
                                               "structural": bool((c.get("reasons") or {}).get("structural")),
                                               "order_dependent": c.get("order_dependent"),
+                                              "cut": sorted({x["edge"] for x in c.get("cut") or []}),
                                               "advice": c.get("advice"),
                                               "fidelity": c.get("fidelity"),
                                               "certs_used": c.get("certs_used", []),
@@ -334,6 +335,11 @@ def derived(out):
         v["rq4-hope"] = str(sum(1 for c in cells if c["verdict"] == "hope"))
         v["rq4-exposed"] = str(sum(1 for c in cells if c["verdict"] == "exposed"))
         v["rq4-notex"] = str(sum(1 for c in cells if c["verdict"] == "not exercised"))
+    if all(s0):
+        short = {"smart-home": "hub", "wallet": "wallet", "mcp-coding-agent": "coding"}
+        v["cut-cells"] = str(sum(1 for x in s0 for c in x["cells"].values() if c.get("cut")))
+        for x in s0:
+            v[f"{short[x['case']]}-cut"] = str(sum(1 for c in x["cells"].values() if c.get("cut")))
     mis = st.get(("wallet-misplaced", "S0"))
     if mis:
         c = cell(mis, "oom@")

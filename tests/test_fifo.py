@@ -1,5 +1,5 @@
 """The FIFO firing semantics, each rule as a small model: consumption, heads taken together, no memory,
-the stopping rule, internal faults, the normal bit, order dependence in the advice, the reduction of
+the loop bound and the cut report, internal faults, the normal bit, order dependence in the advice, the reduction of
 firing orders, taint levels, consistent / complete / correct, and a run told step by step."""
 import copy
 import os
@@ -120,6 +120,89 @@ def test_a_cycle_of_forwarders_ends_by_the_stopping_rule(work):
     assert eng.tlc_calls[0]["depth"] < 15
 
 
+LOOP = {"modes": ["omission", "late"],
+        "components": [
+            {"id": "a", "kind": "deterministic", "in": ["i", "back"], "out": ["o", "out"], "flow": {"i": ["o", "out"], "back": ["o", "out"]}},
+            {"id": "b", "kind": "deterministic", "in": ["i"], "out": ["o"]}],
+        "edges": [{"id": "e_in", "from": "sys.in", "to": "a.i"}, {"id": "e_ab", "from": "a.o", "to": "b.i"},
+                  {"id": "e_ba", "from": "b.o", "to": "a.back"}, {"id": "e_out", "from": "a.out", "to": "sys.out"}],
+        "use_cases": uc("in"),
+        "observation_points": [{"id": "o", "edge": "e_out", "tolerate": {"late": 1}}]}
+
+
+def test_an_edge_carries_a_token_value_at_most_k_times_and_the_cut_is_reported(tmp_path):
+    states = []
+    for k in (1, 2, 3):
+        cells, eng, m = analyse({**LOOP, "loop_bound": k}, str(tmp_path / str(k)))
+        c = cells["late@o"]
+        assert m.loop_bound == k
+        assert c["verdict"] == "guarantee"                  # no new verdict word
+        assert {x["edge"] for x in c["cut"]} == {"e_ab", "e_out"}
+        assert c["cut"][0]["token"]["k"]["b"]["late"] == 0
+        copies = "1 copy" if k == 1 else f"{k} copies"
+        assert c["advice"] == (f"a delivery was cut at e_ab, e_out after {copies}; deeper interactions were not "
+                               "analysed; raise k")
+        states.append(eng.tlc_calls[0]["distinct"])
+    assert states[0] < states[1] < states[2]                # one more lap per copy
+
+
+def test_the_default_bound_is_two():
+    assert load_model(LOOP).loop_bound == 2
+
+
+def test_the_bound_is_checked():
+    with pytest.raises(ModelError):
+        load_model({**LOOP, "loop_bound": 0})
+
+
+def test_no_cut_no_report_and_a_higher_bound_changes_nothing(tmp_path):
+    """Property: when no delivery is cut for a cell, its result equals the result without any bound."""
+    d = copy.deepcopy(RACE)
+    results = []
+    for k in (2, 3, 7):
+        cells, eng, _ = analyse({**d, "loop_bound": k}, str(tmp_path / str(k)))
+        c = cells["bad@o"]
+        assert c["cut"] == [] and "cut" not in c["advice"]
+        results.append((c["verdict"], c["statuses"], c["advice"], eng.tlc_calls[0]["distinct"]))
+    assert results[0] == results[1] == results[2]
+
+
+def test_a_failure_that_needs_a_second_copy_shows_at_k_2_and_the_cut_at_k_1_says_so(tmp_path):
+    """d has no memory: its row needs a token on x and the answer of r on y in one firing, and that answer
+    exists only after d consumed a first copy on x. So the failure needs a second copy of one token value
+    on e_sd. k = 1 cuts that copy: the cell reads guarantee, and says it was cut."""
+    d = {"modes": ["omission", "bad"],
+         "components": [
+             {"id": "w", "kind": "deterministic", "in": ["i"], "out": ["o"]},
+             {"id": "s", "kind": "deterministic", "in": ["i", "j"], "out": ["o"], "flow": {"i": ["o"], "j": ["o"]}},
+             {"id": "d", "kind": "deterministic", "in": ["x", "y"], "out": ["o", "out"], "flow": {"x": ["o", "out"], "y": []},
+              "rows": [{"id": "both", "frequency": "always", "when": {"x": "any", "y": "any"}, "then": {"out": {"bad": "present"}}}]},
+             {"id": "r", "kind": "deterministic", "in": ["i"], "out": ["o"]}],
+         "edges": [{"id": "e_a", "from": "sys.a", "to": "s.i"}, {"id": "e_b", "from": "sys.b", "to": "w.i"},
+                   {"id": "e_ws", "from": "w.o", "to": "s.j"}, {"id": "e_sd", "from": "s.o", "to": "d.x"},
+                   {"id": "e_dr", "from": "d.o", "to": "r.i"}, {"id": "e_rd", "from": "r.o", "to": "d.y"},
+                   {"id": "e_o", "from": "d.out", "to": "sys.out"}],
+         "use_cases": uc("a", "b"),
+         "observation_points": [{"id": "o", "edge": "e_o", "tolerate": {"bad": 1}}]}
+    one, _, _ = analyse({**d, "loop_bound": 1}, str(tmp_path / "1"))
+    two, _, _ = analyse({**d, "loop_bound": 2}, str(tmp_path / "2"))
+    assert one["bad@o"]["verdict"] == "guarantee"
+    assert "e_sd" in {x["edge"] for x in one["bad@o"]["cut"]} and one["bad@o"]["advice"].endswith("raise k")
+    assert two["bad@o"]["statuses"] == ["S"]
+
+
+def test_tokens_keep_the_fields_a_cell_does_not_read(tmp_path):
+    """Two tokens that differ only in a field the cell's cone does not read are two values on an edge."""
+    from epa.translate import to_tla
+    d = copy.deepcopy(RACE)
+    m = load_model(d)
+    m.schedule = "fifo"
+    cone = next(k for k in C.cones(m, C.cells(m)))
+    text, _ = to_tla.module_for(m, cone, schedule="fifo")
+    assert 'ModeSet == {"omission", "commission", "bad"}' in text
+    assert "LoopBound == 2" in text
+
+
 def test_an_internal_fault_applies_once_with_nothing_arriving(work):
     d = {"modes": ["omission", "commission"],
          "components": [{"id": "x", "kind": "deterministic", "in": ["req"], "out": ["out", "alarm"],
@@ -135,9 +218,9 @@ def test_an_internal_fault_applies_once_with_nothing_arriving(work):
     assert {tuple(sorted(r.fired)) for r in runs} == {(), ("r_int",)}
 
 
-def test_a_token_value_an_edge_carried_is_not_delivered_again(work):
-    """Two entries of one value on two edges into a port: the port's queue holds both; the output edge
-    of the component carries the value once."""
+def test_a_token_value_an_edge_carried_k_times_is_not_delivered_again(work):
+    """Two entries of one value on two edges into a port: the port's queue holds both; at k = 1 the output
+    edge of the component carries the value once."""
     d = {"modes": ["omission", "late"],
          "components": [{"id": "x", "kind": "deterministic", "in": ["i"], "out": ["o"]},
                         {"id": "y", "kind": "deterministic", "in": ["i"], "out": ["o"],
@@ -145,11 +228,12 @@ def test_a_token_value_an_edge_carried_is_not_delivered_again(work):
                                    "frequency": "always"}]}],
          "edges": [{"id": "e1", "from": "sys.a", "to": "x.i"}, {"id": "e2", "from": "sys.b", "to": "x.i"},
                    {"id": "e3", "from": "x.o", "to": "y.i"}, {"id": "e4", "from": "y.o", "to": "sys.out"}],
-         "use_cases": uc("a", "b"),
+         "use_cases": uc("a", "b"), "loop_bound": 1,
          "observation_points": [{"id": "o", "edge": "e4", "tolerate": {"late": 1}}]}
     cells, eng, m = analyse(d, work)
     assert cells["late@o"]["verdict"] == "exposed"
     assert eng.tlc_calls[0]["distinct"] <= 4       # x twice, y once: at most four states in a line
+    assert {x["edge"] for x in cells["late@o"]["cut"]} == {"e3"}
 
 
 def test_a_caught_message_that_only_a_failure_row_made_is_dropped():

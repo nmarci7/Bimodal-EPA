@@ -30,7 +30,7 @@ components:
     rows:
       - id: p_offmandate
         label: pays an account the mandate does not cover
-        when: {invoice: any}
+        when: {"*": any}
         then: {request: {oom: present}}
       - id: p_dup
         label: re-plans on a stale account view and pays the invoice again
@@ -38,11 +38,12 @@ components:
         then: {request: {dup: present}}
       - id: p_over
         label: pays more than the mandate's per-payment limit
-        when: {invoice: any}
+        when: {"*": any}
         then: {request: {over: present}}
     drop_defaults:
       - {port: request, mode: omission, reason: "the agent always emits a request on the happy path; a missing payment is the invoice's dunning problem, not a hazard"}
       - {port: request, mode: commission, reason: "the agent's commissions in this model are named: out of mandate, duplicate, over the limit"}
+      - {port: request, mode: revoked, reason: "revoked names a signature under a revoked mandate, and only the wallet signs"}
       - {port: request, mode: late, reason: "lateness is modelled at the bank, whose confirmation can be slow"}
       - {port: request, mode: value, reason: "a wrong amount is modelled as the over-the-limit sub-kind"}
     pos: {x: 70, y: 320}

@@ -15,6 +15,9 @@ modes:
                                            # the front door unlocked while the alarm is armed
   - late
   - value
+# One lap: tokens circulate on this system's normal flow (hub, planner, devices, hub), so k = 2 multiplies the
+# interleavings, and its largest cone does not finish within TLC's 900 s. Every cell reports the cut.
+loop_bound: 1
 severity: {omission: 10, unsafe: 8, chatter: 3, instr: 7, heat_open: 8, door_armed: 9, late: 6, value: 10}
 lattices:
   confidentiality: [public, household, presence]
@@ -41,6 +44,7 @@ components:
     drop_defaults:
       - {port: plan, mode: commission, reason: "the planner's commissions on the plan are modelled as unsafe actuation and chatter"}
       - {port: plan, mode: hazard, reason: "the planner asks for what the owner asked; its two hazards are the rows h_heat and h_door"}
+      - {port: plan, mode: instr, reason: "a planted instruction is a memory write, and a plan writes no memory"}
       - {port: write, mode: hazard, reason: "a memory write commands no device"}
       - {port: write, mode: commission, reason: "the only commission a memory write carries here is a planted instruction"}
       - {port: write, mode: omission, reason: "a lost memory write loses a convenience, not a function"}
@@ -106,6 +110,7 @@ components:
       - {id: l_unsafe, label: the local model issues an unsafe command, when: {voice: any}, then: {cmd: {unsafe: present}}}
     drop_defaults:
       - {port: cmd, mode: hazard, reason: "the owner asks the cloud agent for heating and doors; the local model only relays voice"}
+      - {port: cmd, mode: instr, reason: "a planted instruction is a memory write, and the local model has no edge to memory"}
       - {port: cmd, mode: omission, reason: "the local path is the fallback; its silence is the cloud path's availability problem"}
       - {port: cmd, mode: commission, reason: "the local model's commissions are modelled as unsafe commands"}
       - {port: cmd, mode: late, reason: "local inference, no network round trip"}

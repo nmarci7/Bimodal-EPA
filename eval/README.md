@@ -4,18 +4,13 @@
 
 ## What the paper's numbers come from
 
-The paper prints commit `d90bcbb`, tag `tdk26-eval`. This folder and the listing model were added after that tag. Nothing under `epa/`, `web/`, `cases/`, `bench/` or `vendor/` changed since, which this shows:
+`results.tex` records the commit it was measured on, and the paper prints it. The code is submitted with the paper as a zip. To rerun, from a clean checkout of that commit:
 
 ```bash
-git diff --stat tdk26-eval HEAD -- epa web cases bench vendor
+<python> eval/collect.py --paper <paper checkout> --python <python> --repeats 3 --max-seconds 120
 ```
 
-To rerun on the tagged commit, keep this `collect.py` and point it at a checkout of the tag:
-
-```bash
-git worktree add ../epa-tag tdk26-eval
-<python> eval/collect.py --engine ../epa-tag --paper <paper checkout> --python <python> --repeats 3 --max-seconds 120
-```
+The tag `tdk26-eval` marks the earlier state of 30 October (one copy per edge and token value, reduced tokens, no sub-kind defaults), which the paper uses as its before figures.
 
 `<python>` is the interpreter with `requirements.txt` installed; it runs the script as well as the benchmark. Without `--python`, the script looks for `.venv/bin/python` in the engine checkout. Without `--engine`, it measures the checkout it sits in. A rerun overwrites `results.tex`, and it warns if the checkout has uncommitted changes. Timings depend on the machine; the states and the verdicts should not.
 
@@ -38,6 +33,7 @@ Use `--only env,bench,stages` to run a subset, for example `--only stages` after
 | `sweep-max-{rows,s,states}`, `scaling.csv` | `bench/bench.py` B1, medians |
 | `ready-{k}-{s,states}`, `ready-max-{k,s,states}` | `bench/bench.py` B5, medians |
 | `rq4-*`, `reasons-check`, `{case}-{stage}-{g,h,u,e,x,c}` | `derived()` and the stage verdict counts |
+| `cut-cells`, `{hub,wallet,coding}-cut` | `derived()`: the design-time cells whose runs had a delivery cut by the loop bound |
 
 ## The simulator
 
@@ -45,4 +41,4 @@ Use `--only env,bench,stages` to run a subset, for example `--only stages` after
 python eval/sim.py --vectors 30
 ```
 
-For a sample of switch vectors per cone, `sim.py` walks every firing order in Python and compares the end states with what TLC finds, per use case and vector. It shares no code with the generated module, but it takes the loaded model, the cones and the tracked fields from the engine, so it tests the firing translator and not those. It knows only the present/absent scale. Each run prints its pair count and the number of differences, and exits with 1 if any pair differs.
+For a sample of switch vectors per cone, `sim.py` walks every firing order in Python and compares the end states with what TLC finds, per use case and vector. It shares no code with the generated module, but it takes the loaded model and the cones from the engine, so it tests the firing translator and not those. It compares the end states and the deliveries the loop bound cut. It knows only the present/absent scale. Each run prints its pair count and the number of differences, and exits with 1 if any pair differs.

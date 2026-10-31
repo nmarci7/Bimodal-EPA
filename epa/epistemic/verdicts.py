@@ -46,6 +46,13 @@ def order_advice(comp=None, ports=()):
     return f"sometimes, because the outcome depends on the order in which {what}: synchronise them"
 
 
+def cut_advice(edges, k):
+    """What a cell says when the loop bound blocked a delivery in its cone: no new verdict word, only
+    that the result stops at k copies."""
+    copies = "1 copy" if k == 1 else f"{k} copies"
+    return f"a delivery was cut at {', '.join(edges)} after {copies}; deeper interactions were not analysed; raise k"
+
+
 def advice(verdict, seen):
     s = set(statuses_for_display(seen))
     if verdict == "unchecked":

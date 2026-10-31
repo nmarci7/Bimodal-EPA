@@ -7,7 +7,7 @@
 // unchecked, exposed (A), guarantee (N), unchecked {S,A}, hope (S), guarantee (N). The story is
 // checked with the engine in tests/test_tutorial.py.
 import { h, clear, verdictClass } from './lib.js';
-import { S, on, emit, cloneDoc, commitDoc, persist, blankDoc, connectPorts, addObs, analysisBasis, runCheck } from './state.js';
+import { S, on, emit, cloneDoc, commitDoc, persist, blankDoc, connectPorts, addObs, analysisBasis, runCheck, modeFields } from './state.js';
 import { button, confirmDialog, isDialogOpen, closeAllDialogs } from './dialog.js';
 
 // ---------------------------------------------------------------- what the user built so far
@@ -32,7 +32,9 @@ export function context(d) {
   const onLlm = llmEdge ? d.guards.filter((g) => g.edge === llmEdge.id) : [];
   const guard = onLlm.find((g) => (g.targets || []).some((t) => t.mode === 'value')) || onLlm[0] || null;
   return { parser, llm, sin: [...ins][0] || null, sout: [...outs][0] || null, outEdge, inEdge, llmIn, llmEdge, obs, guard,
-    valueRow: parser && outEdge ? `default.${parser.id}.${outEdge.from.split('.')[1]}.value` : null };
+    valueRow: parser && outEdge ? `default.${parser.id}.${outEdge.from.split('.')[1]}.value` : null,
+    // value and its sub-kinds: each has a default row of its own, so a fix certifies all of them
+    valueRows: parser && outEdge ? modeFields(d).filter((f) => f.name === 'value' || f.parent === 'value').map((f) => `default.${parser.id}.${outEdge.from.split('.')[1]}.${f.name}`) : [] };
 }
 
 const ev = () => S.evidence;
@@ -142,7 +144,7 @@ export const STEPS = [
     after: 'The register keeps the withdrawn report and the reason.' },
   { ch: 2, view: 'evidence', title: 'Certify the fix', target: T.button('New certificate'), text: 'New certificate… again: the value row, never.',
     done: () => { const c = context(S.doc); return !!c.parser && certSays(c.parser.id, 'never'); },
-    doIt: () => { const c = context(S.doc); addEvidence('certificates', { id: certId('c_fix'), component: c.parser.id, rows: { [c.valueRow]: 'never' }, issuer: 'parser team', method: 'property-based tests' }); } },
+    doIt: () => { const c = context(S.doc); addEvidence('certificates', { id: certId('c_fix'), component: c.parser.id, rows: Object.fromEntries(c.valueRows.map((r) => [r, 'never'])), issuer: 'parser team', method: 'property-based tests' }); } },
   { ...RUN('value is a guarantee: the evidence rules it out (N).', 'guarantee'), ch: 2 },
 
   { ch: 3, view: 'model', title: 'Add an LLM', target: T.pal('LLM component'), text: 'An LLM will write the request before your component reads it. Drag an LLM component onto the canvas.',

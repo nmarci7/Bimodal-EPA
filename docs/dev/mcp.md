@@ -122,7 +122,7 @@ them.
 | `set_absorbs`, `drop_default`, `restore_default` | What stops at an input (with the reason); an LLM default dropped (with the reason) or restored. |
 | `put_guard(doc, spec)`, `remove_guard(doc, gid)` | A new guard on an edge, or the fields given changed (rename with `new_id`). |
 | `put_observation_point(doc, spec)`, `remove_observation_point(doc, oid)` | A new point on an edge (judging every top-level mode unless told; an edge may have several), or the fields given changed (rename with `new_id`; claims follow). |
-| `put_use_case`, `remove_use_case`, `put_claim`, `remove_claim`, `set_settings` | Use cases, claims, and the name, description, modes, levels, `worst_case_defaults` (`all` or `llm`) and `severity` (the map given replaces the old one, `{}` removes it). |
+| `put_use_case`, `remove_use_case`, `put_claim`, `remove_claim`, `set_settings` | Use cases, claims, and the name, description, modes, levels, `loop_bound`, `worst_case_defaults` (`all` or `llm`) and `severity` (the map given replaces the old one, `{}` removes it). |
 | `NEW_MODES`, `blank(name, description)` | A new, empty model (as File → New model): the FPTC failure classes (omission, commission, early, late, value with the sub-kinds coarse and subtle) and `worst_case_defaults: all`. `web/state.js` (`blankDoc`) starts one the same way. |
 
 ## 5. Sequence: an assistant changes the model, the analyst sees it

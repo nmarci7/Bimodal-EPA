@@ -43,13 +43,19 @@ AtLeastAsBad(x, y) == /\ \A f \in DOMAIN x.b : x.b[f] >= y.b[f]
 \* the heads leave every non-empty queue of the firing component
 Pop(Q, ports) == [p \in DOMAIN Q |-> IF p \in ports /\ Q[p] # <<>> THEN Tail(Q[p]) ELSE Q[p]]
 
-\* The stopping rule: an edge delivers a token value only if it has not carried it in this run. `port` is
-\* the queue the edge ends in; "" for an edge that leaves the cone.
-Deliver(s, e, port, o) ==
+\* How many times a run has carried this value on one edge: S holds [m |-> value, c |-> count].
+Carried(S, m) == IF \E x \in S : x.m = m THEN (CHOOSE x \in S : x.m = m).c ELSE 0
+
+\* The stopping rule: an edge carries one token value at most k times in a run. A delivery the bound
+\* blocks is recorded in `cut`, with its edge and token. `port` is the queue the edge ends in; "" for an
+\* edge that leaves the cone.
+Deliver(s, e, port, o, k) ==
   IF ~o.u THEN s
-  ELSE LET m == [n |-> o.n, k |-> o.k] IN
-       IF m \in s.seen[e] THEN s
+  ELSE LET m == [n |-> o.n, k |-> o.k]
+           c == Carried(s.seen[e], m) IN
+       IF c >= k THEN [s EXCEPT !.cut = @ \cup {[e |-> e, m |-> m]}]
        ELSE [q |-> IF port = "" THEN s.q ELSE [s.q EXCEPT ![port] = Append(@, m)],
-             seen |-> [s.seen EXCEPT ![e] = @ \cup {m}],
+             seen |-> [s.seen EXCEPT ![e] = {x \in @ : x.m # m} \cup {[m |-> m, c |-> c + 1]}],
+             cut |-> s.cut,
              lab |-> [s.lab EXCEPT ![e] = MergeLab(@, o)]]
 =============================================================================

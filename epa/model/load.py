@@ -153,6 +153,7 @@ class Model:
     warnings: list = field(default_factory=list)
     severity: dict = field(default_factory=dict)  # mode -> how much it weighs in the ranking (default 1)
     schedule: str | None = None                   # the firing semantics the engine reads this model under
+    loop_bound: int = 2                           # k: how many times an edge carries one token value in a run
 
     # ---- lattice helpers -------------------------------------------------
     @property
@@ -271,6 +272,9 @@ def validate(doc) -> list:
         return p
     top, parent = _mode_list(doc)
     fields = set(top) | set(parent)
+    k = doc.get("loop_bound", defaults.LOOP_BOUND)
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1:
+        p.append(f"loop_bound must be a whole number of at least 1, not {k!r}")
     if doc.get("worst_case_defaults", "llm") not in defaults.WORST_CASE:
         p.append(f"worst_case_defaults must be one of {', '.join(defaults.WORST_CASE)}, "
                  f"not {doc.get('worst_case_defaults')!r}")
@@ -657,7 +661,8 @@ def normalise(doc) -> Model:
     m = Model(name=doc.get("name", "model"), description=doc.get("description", ""), top_modes=top,
               fields=fields, parent=parent, conf_levels=conf, auth_levels=auth, components=comps,
               edges=edges, rows=rows, obs=obs, use_cases=ucs, claims=list(doc.get("claims", [])),
-              decisions=list(doc.get("decisions", [])), doc=doc, severity=dict(doc.get("severity") or {}))
+              decisions=list(doc.get("decisions", [])), doc=doc, severity=dict(doc.get("severity") or {}),
+              loop_bound=doc.get("loop_bound", defaults.LOOP_BOUND))
     for c in comps.values():
         for a in c.absorbs:
             m.decisions.append({"kind": "absorb", "component": c.id, "port": a["port"], "modes": a["modes"],

@@ -15,7 +15,7 @@
 //   * for a guardrail, its fixed catching behaviour, one leak row per target and, if learned, its
 //     false-positive row (Definition: Guardrail).
 import { h, clear, toast } from './lib.js';
-import { S, on, emit, comp, edge, topModes, targetText, cloneDoc, commitDoc, edgeName, modeAt } from './state.js';
+import { S, on, emit, comp, edge, topModes, modeFields, targetText, cloneDoc, commitDoc, edgeName, modeAt } from './state.js';
 import { rowSentence, rowKind, rowFrequency, KINDS, defaultStatus, hasDefaults } from './rows.js';
 import { openRowDialog, deleteRow } from './rowdialog.js';
 import { openAbsorbDialog, openDropDefaultDialog, refinePreset, openComponentDialog, openGuardDialog, catchSentence } from './modeldialogs.js';
@@ -122,7 +122,7 @@ export class MapTable {
     }
     if (hasDefaults(S.doc, c)) {
       for (const q of c.out) {
-        for (const m of tops) {
+        for (const m of modeFields(S.doc).map((f) => f.name)) {
           const st = defaultStatus(c, q, m);
           n++;
           const hl = port && ((port.side === 'out' && port.name === q) || port.side === 'in') ? ' hl' : '';

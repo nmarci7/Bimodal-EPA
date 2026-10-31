@@ -22,6 +22,7 @@ class Run:
     rounds: int = 0               # rounds schedule only: how many rounds it took
     terminal_variants: int = 1    # how many distinct outcomes this (use case, F) has
     variant: int = 0              # which of them this run is
+    cut: frozenset = frozenset()  # fifo: (edge, token as JSON) of every delivery the loop bound blocked
 
     def key(self):
         return (self.uc, self.fire, self.variant)
@@ -56,12 +57,14 @@ def runs_from_dump(dump_path, keep_edges, heads=None):
         fired = frozenset(parse_value(raw["fired"]))
         lab = parse_labels(raw["lab"], cache)
         labels = {e: lab[e] for e in keep_edges if e in lab}
+        cut = frozenset((c["e"], json.dumps(c["m"], sort_keys=True)) for c in parse_value(raw.get("cut", "{}")))
         outcomes = per_key.setdefault((uc, fire), {})
         ident = (fired, json.dumps(labels, sort_keys=True))
         if ident in outcomes:
+            outcomes[ident].cut |= cut      # firing orders with one outcome: every cut any of them met
             continue
         outcomes[ident] = r = Run(uc=uc, fire=fire, fired=fired, labels=labels, variant=len(outcomes),
-                                  rounds=parse_value(raw["rnd"]) if "rnd" in raw else 0)
+                                  rounds=parse_value(raw["rnd"]) if "rnd" in raw else 0, cut=cut)
         runs[r.key()] = r
     for r in runs.values():
         r.terminal_variants = len(per_key[(r.uc, r.fire)])
@@ -103,10 +106,15 @@ def trace(dump_path, uc, fire, edges, labels=None, sources=None):
     return out
 
 
+def _carried(s, e):
+    """How many times the edge carried each token value so far: {value as JSON: count}."""
+    return {json.dumps(x["m"], sort_keys=True): x["c"] for x in s["seen"][e]}
+
+
 def _consumed(s):
     """How much of the run has happened: tokens taken off the queues, and internal faults applied.
     Every firing raises it."""
-    delivered = sum(len(v) for v in s["seen"].values())
+    delivered = sum(x["c"] for v in s["seen"].values() for x in v)
     waiting = sum(len(v) for v in s["q"].values())
     return delivered - waiting + len(s["spent"])
 
@@ -114,9 +122,11 @@ def _consumed(s):
 def _fired_by(a, b, sources):
     """The component whose firing leads from state a to state b, or None if no single firing does: only
     one component took heads, and every edge that delivered something is one of its own."""
-    if any(x not in list(b["seen"][e]) for e, xs in a["seen"].items() for x in xs):
+    before = {e: _carried(a, e) for e in a["seen"]}
+    after = {e: _carried(b, e) for e in a["seen"]}
+    if any(after[e].get(x, 0) < n for e, xs in before.items() for x, n in xs.items()):
         return None
-    senders = {sources.get(e, e) for e in a["seen"] if len(b["seen"][e]) != len(a["seen"][e])}
+    senders = {sources.get(e, e) for e in a["seen"] if after[e] != before[e]}
     popped = set()
     for p, xs in a["q"].items():
         ys = b["q"][p]

@@ -1,7 +1,8 @@
 """A second reading of the firing rule: a brute-force simulator in Python, compared with what TLC finds, per
 use case and switch vector. It walks every firing order itself and shares no code with the generated module,
-but it takes the loaded model, the cones and the tracked fields from the engine, so it tests the firing
-translator and not those. Only the present/absent scale: every emission is `present`.
+but it takes the loaded model and the cones from the engine, so it tests the firing translator and not those.
+It compares the end states and the deliveries the loop bound cut. Only the present/absent scale: every
+emission is `present`.
 
     python eval/sim.py [CASE ...] [--vectors N]
 
@@ -25,18 +26,15 @@ def worst(a, b):
 class Sim:
     def __init__(self, m, cone, F):
         self.m, self.k, self.F = m, cone, F
-        self.fields = set(cone.fields)
+        self.fields = set(m.fields)
         self.inc = set(cone.rows) | set(cone.always)
-        self.track = to_tla._tracked(m, cone, self.inc)
         self.comps = cone.components
-        self.top = m.auth_top
 
     def on(self, rid):
         return rid in self.k.always or rid in self.F
 
     def tok(self, t):
-        return (frozenset(f for f, v in t["b"].items() if v and f in self.fields), t["c"] if self.track["c"] else 0,
-                t["a"] if self.track["a"] else self.top, t["t"] if self.track["t"] else 0)
+        return (frozenset(f for f, v in t["b"].items() if v), t["c"], t["a"], t["t"])
 
     def start(self, u):
         q, seen, lab = {}, {}, {}
@@ -44,7 +42,7 @@ class Sim:
             if eid not in self.k.edges:
                 continue
             msg = (True, self.tok(t))
-            seen[eid] = {msg}
+            seen[eid] = {msg: 1}
             lab[eid] = (True, msg[1])
             d = self.m.edges[eid].dst
             if d[0] in self.comps:
@@ -55,7 +53,7 @@ class Sim:
         return [r for r in self.m.comp_rows(c) if r.id in self.inc and not r.when and r.kind == "row"]
 
     def ready(self, st, c):
-        q, _, _, _, spent = st
+        q, spent = st[0], st[4]
         return any(p[0] == c and v for p, v in q) or any(self.on(r.id) and r.id not in spent for r in self.internal(c))
 
     def transform(self, c, heads, spent):
@@ -124,12 +122,6 @@ class Sim:
         conf = max([x[1] for x in cs] or [0])
         taint = max([x[3] for x in cs] + [comp.taint])
         auth = comp.authority if comp.raises else min([x[2] for x in cs] + [comp.authority])
-        if not self.track["c"]:
-            conf = 0
-        if not self.track["t"]:
-            taint = 0
-        if not self.track["a"]:
-            auth = self.top
         for qp in comp.outs:
             if not any(e.id in self.k.edges for e in m.edges_from(c, qp)):
                 continue
@@ -150,12 +142,11 @@ class Sim:
                     send = True
                     b |= set(r.then[qp]) & self.fields
             if send:
-                out[qp] = (n if self.track["n"] else True, (frozenset(b), conf, auth, taint))
+                out[qp] = (n, (frozenset(b), conf, auth, taint))
         return out, fired, faults
 
     def step(self, st, c):
-        q, seen, lab, fired, spent = st
-        q2, seen2, lab2 = dict(q), dict(seen), dict(lab)
+        q, seen, lab, fired, spent, cut = st
         heads = {}
         for (cc, p), v in q:
             if cc == c and v:
@@ -164,30 +155,33 @@ class Sim:
         for p in heads:
             q2[(c, p)] = q2[(c, p)][1:]
         out, f, faults = self.transform(c, heads, spent)
-        seen2 = {k: set(v) for k, v in seen}
+        seen2 = {k: dict(v) for k, v in seen}
         lab2 = dict(lab)
+        cut2 = set(cut)
         for e in self.k.edges:
             ed = self.m.edges[e]
             if ed.src[0] != c or ed.src[1] not in out:
                 continue
             msg = out[ed.src[1]]
-            if msg in seen2.get(e, set()):
+            if seen2.get(e, {}).get(msg, 0) >= self.m.loop_bound:
+                cut2.add(e)
                 continue
-            seen2.setdefault(e, set()).add(msg)
+            seen2.setdefault(e, {})[msg] = seen2.get(e, {}).get(msg, 0) + 1
             lab2[e] = (lab2[e][0] or msg[0], worst(lab2[e][1], msg[1])) if e in lab2 else (msg[0], msg[1])
             if ed.dst[0] in self.comps:
                 q2.setdefault(ed.dst, []).append(msg)
-        return (freeze(q2), freeze_sets(seen2), tuple(sorted(lab2.items(), key=repr)), fired | frozenset(f), spent | frozenset(faults))
+        return (freeze(q2), freeze_counts(seen2), tuple(sorted(lab2.items(), key=repr)), fired | frozenset(f),
+                spent | frozenset(faults), frozenset(cut2))
 
     def terminal(self, u):
         q, seen, lab = self.start(u)
-        st = (freeze(q), freeze_sets(seen), tuple(sorted(lab.items(), key=repr)), frozenset(), frozenset())
-        seen_st, stack, ends = {st}, [st], set()
+        st = (freeze(q), freeze_counts(seen), tuple(sorted(lab.items(), key=repr)), frozenset(), frozenset(), frozenset())
+        seen_st, stack, ends = {st}, [st], {}
         while stack:
             s = stack.pop()
             ready = [c for c in self.comps if self.ready(s, c)]
             if not ready:
-                ends.add((s[3], s[2]))
+                ends.setdefault((s[3], s[2]), set()).update(s[5])
             for c in ready:
                 t = self.step(s, c)
                 if t not in seen_st:
@@ -200,8 +194,8 @@ def freeze(d):
     return tuple(sorted(((k, tuple(v)) for k, v in d.items() if v), key=repr))
 
 
-def freeze_sets(d):
-    return tuple(sorted(((k, frozenset(v)) for k, v in d.items()), key=repr))
+def freeze_counts(d):
+    return tuple(sorted(((k, frozenset(v.items())) for k, v in d.items()), key=repr))
 
 
 def read_tlc(run, edges):
@@ -227,13 +221,13 @@ def compare(case, sample):
         vecs = sorted({r.fire for r in runs.values()}, key=sorted)
         for F in rnd.sample(vecs, min(sample, len(vecs))):
             for u in (x for x in m.use_cases if x.id in k.use_cases):
-                got = {read_tlc(r, k.edges) for r in runs.values() if r.uc == u.id and r.fire == F}
+                got = {read_tlc(r, k.edges): {e for e, _ in r.cut} for r in runs.values() if r.uc == u.id and r.fire == F}
                 ends, n = Sim(m, k, F).terminal(u)
                 total += 1
                 if got != ends:
                     bad += 1
                     print("DIFFERENT", case, k.obs, u.id, sorted(F), "tlc", len(got), "sim", len(ends))
-                    for x in list(got ^ ends)[:2]:
+                    for x in list(set(got) ^ set(ends))[:2]:
                         print("   ", "tlc" if x in got else "sim", str(x)[:300])
         print(case, k.obs, "vectors sampled", min(sample, len(vecs)), "of", len(vecs), flush=True)
         shutil.rmtree(w, ignore_errors=True)

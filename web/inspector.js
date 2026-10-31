@@ -74,6 +74,7 @@ export class Inspector {
       this.head(d.name || 'model', 'model', '', () => openModelDialog(), false),
       d.description ? h('p', { class: 'desc' }, d.description) : null,
       this.kv([['Failure modes', modesText], ['Worst-case defaults', d.worst_case_defaults === 'all' ? 'every component (FPTC)' : 'LLM components only'],
+        ['Loop bound k', String(d.loop_bound ?? 2)],
         Object.keys(d.severity || {}).length ? ['Severity', Object.entries(d.severity).map(([m, k]) => `${m} ${k}`).join(', ')] : null]),
       this.kv([['Confidentiality', d.lattices.confidentiality.join(' < ')], ['Authority', d.lattices.authority.join(' < ')]], 'detail'),
       this.useCases(), this.claims(),

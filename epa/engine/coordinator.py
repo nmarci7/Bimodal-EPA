@@ -9,13 +9,14 @@ For every cone (one observation point, or a part of one):
                  reads off the statuses the remaining candidates give the failure;
   4. conflict  - if nothing remains, the remaining runs are explored, the minimal conflict sets are
                  found, their certificates suspended, and the cell is reconciled again;
-  5. derive    - verdict, advice (with order dependence), reasons, root causes, candidate counts, and
-                 whether the model is consistent, complete and correct for the cell.
+  5. derive    - verdict, advice (with order dependence and the cut report), reasons, root causes,
+                 candidate counts, and whether the model is consistent, complete and correct for the cell.
 Then the certify-next ranking, the claims, the re-verify list and the unmatched failures.
 """
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import time
 
@@ -257,17 +258,22 @@ class Engine:
         proj = {wid: (w["at"], w.get("use_case")) for wid, (w, _) in linked.items()}
         # Runs that differ only in what this cell cannot see are one run for it. Different firing orders of
         # one use case and switch vector stay apart as soon as the cell's outcome differs.
+        # A cut counts for this cell only in runs of its own cone, not those a merged cone adds for another
+        # cell: the runs that switch on nothing beyond this cell's rows and what every explored vector has.
         grouped = {}
+        beyond = min([len(r.fire - set(rows)) for r in allruns.values()] or [0])
         for r in allruns.values():
             uses, reaches = R.used(m, cell, r), R.reaches(m, cell, r)
             k = (r.uc, frozenset(r.fire & set(rows)), uses, reaches, frozenset(r.fired & set(rows)))
-            g = grouped.setdefault(k, {"sev": 0, "example": r})
+            g = grouped.setdefault(k, {"sev": 0, "example": r, "cut": set()})
             g["sev"] = max(g["sev"], R.severity(m, cell, r))
+            if len(r.fire - set(rows)) == beyond:
+                g["cut"] |= r.cut
         runs = []
         order = lambda kv: (kv[0][0], sorted(kv[0][1]), kv[0][2], kv[0][3], sorted(kv[0][4]))  # noqa: E731
         for i, ((uc, F, uses, reaches, fired), g) in enumerate(sorted(grouped.items(), key=order), start=1):
             runs.append({"id": i, "uc": uc, "fires": set(F), "uses": uses, "reaches": reaches, "matches": set(),
-                         "fired": set(fired), "sev": g["sev"], "example": g["example"]})
+                         "fired": set(fired), "sev": g["sev"], "example": g["example"], "cut": g["cut"]})
         cert_list = [(c["id"], c["resolved"]) for c in certs if set(c["resolved"]) & reach]
         cert_list += list(extra_certs)
         prob = CellProblem(m, rows, runs, cert_list, list(proj), extra_rows=extra_rows, wruns=wruns)
@@ -349,8 +355,19 @@ class Engine:
         res["reasons"] = self.reasons(cone, cell, prob, runs, on, won, verdict, register)
         if b:
             self.mark_order_dependence(res, cone, cell, runs, b["admits"])
+        self.mark_cut(res, runs, b["admits"] if b else {r["id"] for r in runs})
         res["fidelity"] = self.fidelity(cone, cell, res, register)
         return res
+
+    def mark_cut(self, res, runs, admits):
+        """A cell whose runs had a delivery blocked by the loop bound says so in its advice, in words, as a
+        race does: the verdict word stays, and the result holds up to k copies. With no cut in a run some
+        remaining candidate admits, the bound changed nothing for this cell."""
+        cut = set().union(*[r["cut"] for r in runs if r["id"] in admits] or [set()])
+        res["cut"] = [{"edge": e, "token": json.loads(t)} for e, t in sorted(cut)]
+        if cut:
+            text = V.cut_advice(sorted({e for e, _ in cut}), self.m.loop_bound)
+            res["advice"] = f"{res['advice']}; {text}" if res["advice"] else text
 
     def mark_order_dependence(self, res, cone, cell, runs, admits):
         """A cell is order dependent when two runs some remaining candidate admits, of one use case and

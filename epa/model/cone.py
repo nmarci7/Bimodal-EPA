@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 # Bumped whenever the meaning of a run changes, so that cached runs of an older engine are not reused.
 # 2: formal core draft 4 - pass-through by default, forwarding / internal-fault / sink rows, phased guards.
 # 3: FIFO firing - queues per input port, one ready component per step, the stopping rule; taint levels.
-SEMANTICS = 3
+# 4: the loop bound k and the cut report; tokens keep all their fields; sub-kinds have defaults of their own.
+SEMANTICS = 4
 
 
 def default_schedule():
@@ -55,7 +56,7 @@ class Cone:
     use_cases: list
     rows: list            # rows whose activation varies between runs (open, and fixed-sometimes)
     always: list          # rows fixed to always, inside the cone
-    fields: list          # mode fields the generated model tracks
+    fields: list          # mode fields the cone reads
     cell_rows: dict = field(default_factory=dict)   # cell id -> the rows of that cell's own cone
     cell_fields: dict = field(default_factory=dict) # cell id -> the mode fields that cell's cone reads
     rel: set = field(default_factory=set)            # (edge, field) pairs the runs compute exactly
@@ -67,6 +68,7 @@ class Cone:
         payload = {
             "semantics": SEMANTICS,
             "schedule": schedule_of(m),
+            "loop_bound": m.loop_bound,
             "kinds": sorted({c.kind for c in self.cells}),
             "rows": {r: m.rows[r].to_json() for r in self.rows + self.always},
             "comps": {c: _comp_sig(m.components[c]) for c in self.components},

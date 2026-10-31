@@ -95,7 +95,7 @@ Consumers: the coordinator (`analyse`, `witness_cone`, `inert`, `applies`, `reas
 
 | Definition | What it does | Calls |
 |---|---|---|
-| `replaces_default` | True if analyst row `r` replaces the default for `(port, mode)`: kind `row`, `mode` (a top-level mode exactly) in `r.then[port]`, and `r.when` is `{"*": any}` or, on a single-input component, `{that input: any}`. | — |
+| `replaces_default` | True if analyst row `r` replaces the default for `(port, mode)`: kind `row`, `mode` (a mode or sub-kind exactly) in `r.then[port]`, and `r.when` is `{"*": any}` or, on a single-input component, `{that input: any}`. | — |
 | `WORST_CASE` | What `worst_case_defaults` may say: `llm` (the default: LLM components only) or `all` (every component). `load.validate` rejects anything else. | — |
 | `has_defaults` | Whether a component of the document gets the worst-case table: every LLM does; with `worst_case_defaults: all` every component does. Mirrored by `hasDefaults` in `web/rows.js`. | — |
 | `add_worst_case_defaults` | For each component with defaults (`has_defaults`), output port and top mode: a replacing analyst row wins (a `const k < 10` is recorded as a `calibrate-default` decision); else a `drop_defaults` entry is recorded as a `drop-default` decision; else the row `default.<cid>.<port>.<mode>` is added (kind `default`, `{"*": any}` ⇒ mode const 10, open). The row is `llm` (under the LLM rule, never "never") only for an LLM component; any other component's default may be certified never (`rows: {"<port>.<mode>": never}`), which is how evidence earns a guarantee for a component nobody modelled. | load.Model.comp_rows, defaults.has_defaults, defaults.replaces_default |

@@ -12,6 +12,8 @@ components:
     flow: {in: [query], reply: [order]}
     rows:
       - {id: p1, when: {reply: any}, then: {order: {oom: present}}}
+    drop_defaults:
+      - {port: order, mode: oom, reason: "the harness writes an order only on the reply"}
   - {id: T, kind: tool, version: directory-3, in: [q], out: [a], flow: {q: [a]}}
 guards:
   - {id: M, edge: e_PB, version: mandate-v2, targets: [{mode: oom, decidable: true}]}

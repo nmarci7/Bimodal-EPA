@@ -58,19 +58,18 @@ step `Pop` and the stopping rule `Deliver`. Its text is part of the cache hash.
 | `_bexpr(parts)` | A token's `b` function from `[(field, expr)]`, as a `CASE` over `ModeSet` (all zero when empty). | — |
 | `port_key(comp, port)` | The name of an input port's queue in the module, `<comp>__<port>`. | to_tla._ident |
 | `module_for(m, cone, want, done, schedule, name)` | The entry point: checks the edge ids (ValueError for one that is not an identifier) and calls the translator `schedule` names (default: the model's, else `cone.default_schedule`). Returns `(module text, "SPECIFICATION Spec\nCHECK_DEADLOCK FALSE\n")`. | to_tla._fifo_module, to_tla._rounds_module |
-| `_common(m, cone, want, done, name)` | The lines both translators start with, up to `Vectors`; returns them with the fields and use cases. | to_tla._set, to_tla._vector_pred |
-| `_tok_expr(tok, fields, track)` | A use-case token as a TLA+ record (only non-zero cone fields in `b`; fields `track` leaves out are constant). | to_tla._bexpr |
+| `_common(m, cone, want, done, name, fields)` | The lines both translators start with, up to `Vectors`; returns them with the use cases. fifo passes every mode field, rounds the cone's. | to_tla._set, to_tla._vector_pred |
+| `_tok_expr(tok, fields)` | A use-case token as a TLA+ record (only non-zero fields in `b`). | to_tla._bexpr |
 | `_rounds_module(m, cone, want, done, name)` | The rounds module (section 3b). | to_tla._common, to_tla._tok_expr, to_tla.guard_strata, to_tla._component |
-| `_tracked(m, cone, in_cone)` | Which of `c`, `a`, `t` and the normal bit the tokens of this cone need (section 5). | — |
 | `_solo(m, cone, comps, ready)` | For each component, the text of the condition under which it alone is explored from a state (section 5). | to_tla.port_key |
 | `_solo.reach(start, avoid)` (nested) | The components a token can reach from `start` without passing through `avoid`. | — |
-| `_fifo_module(m, cone, want, done, name)` | The fifo module (section 3). | to_tla._common, to_tla._tracked, to_tla._tok_expr, to_tla._component, to_tla._solo, to_tla.port_key |
+| `_fifo_module(m, cone, want, done, name)` | The fifo module (section 3). | to_tla._common, to_tla._tok_expr, to_tla._component, to_tla._solo, to_tla.port_key |
 | `_fifo_module.queue_of(eid)` (nested) | The queue an edge ends in, `""` if it leaves the cone. | to_tla.port_key |
 | `_fp_magnitude(c, fifo)` | The omission a learned guard's false positive causes: as declared, else present (rounds: 10). | — |
 | `guard_strata(m, cone)` | `{guard: phase}` for the cone's droppers (guards not on a cycle that may receive a non-normal message); each phase is one more than the highest dropper upstream of it. Caches `normal_edges`/`possible` on the model. | cone.normal_edges, cone.possible, cone.upstream |
 | `guard_strata.may_drop(g)` (nested) | Whether some edge into the guard can carry a message that is not on the normal flow, in some use case. | load.Model.edges_into |
 | `guard_strata.s(g)` (nested) | The memoised phase of a dropper (cycles stopped by a provisional 0). | cone.upstream |
-| `_component(m, c, cone, fields, always, in_cone, L, stratum, track)` | Appends the operator `Outs_<c>`: what `c` sends on each output and the set of its non-always rows that applied. It reads the heads of `c`'s queues under fifo (`track` given, `Outs_<c>(Q, F, S)`) and the edge labels under rounds (`Outs_<c>(lab, F, ph)`). Separate branches for guards and other components (section 3). | cone.forwarding, load.Model.edges_into, load.Model.family, to_tla._ident, to_tla._set, to_tla._bexpr, to_tla._fp_magnitude, to_tla.port_key |
+| `_component(m, c, cone, fields, always, in_cone, L, stratum, fifo)` | Appends the operator `Outs_<c>`: what `c` sends on each output and the set of its non-always rows that applied. It reads the heads of `c`'s queues under fifo (`Outs_<c>(Q, F, S)`) and the edge labels under rounds (`Outs_<c>(lab, F, ph)`). Separate branches for guards and other components (section 3). | cone.forwarding, load.Model.edges_into, load.Model.family, to_tla._ident, to_tla._set, to_tla._bexpr, to_tla._fp_magnitude, to_tla.port_key |
 | `_component.eff(tok, mode)` (nested) | The TLA+ expression of a mode's effective magnitude (the max over its family). | load.Model.family |
 | `_component.sunk(p, f)` (nested) | The condition under which a firing sink row absorbs field `f` arriving at port `p`. | — |
 
@@ -102,12 +101,13 @@ step `Pop` and the stopping rule `Deliver`. Its text is part of the cache hash.
 
 | Definition | What it does | Calls |
 |---|---|---|
-| `Run` | Dataclass: `uc`, `fire` (the switch vector), `fired` (rows that applied), `labels` (edge → `{u, n, k}`), `rounds` (rounds schedule only), `terminal_variants` (how many outcomes this `(uc, fire)` has), `variant` (which one this is). | — |
+| `Run` | Dataclass: `uc`, `fire` (the switch vector), `fired` (rows that applied), `labels` (edge → `{u, n, k}`), `rounds` (rounds schedule only), `terminal_variants` (how many outcomes this `(uc, fire)` has), `variant` (which one this is), `cut` (edge and token of every delivery the loop bound blocked). | — |
 | `Run.key` | `(uc, fire, variant)`. | — |
 | `_note_heads(q, heads, cache)` | Adds the head combination of every component in one queue state to `heads`. | dump_reader.parse_value |
 | `runs_from_dump(dump_path, keep_edges, heads)` | Streams the dump, keeps the `done = TRUE` states, and returns one `Run` per distinct outcome (`fired`, labels of `keep_edges`) of each `(uc, fire)`. `heads`, if given, collects the head combinations of every state. | dump_reader.read_dump_raw, dump_reader.parse_value, dump_reader.parse_labels, runs._note_heads |
 | `_states_of(dump_path, uc, fire)` | The parsed states of one use case and switch vector. | dump_reader.read_dump_raw, dump_reader.parse_value |
 | `trace(dump_path, uc, fire, edges, labels, sources)` | One run as `[{round, fired, labels, component?}]`. Under fifo a consistent path ending in the outcome `labels`, rebuilt from the states, every firing a step; `sources` names the sender of each edge. Under rounds it skips rounds that changed no edge. | runs._states_of, runs._fifo_path |
+| `_carried(s, e)` | How many times edge `e` carried each value so far. | — |
 | `_consumed(s)` | How much of a run has happened in a state (tokens taken off queues, internal faults applied); every firing raises it. | — |
 | `_fired_by(a, b, sources)` | The component whose firing leads from state `a` to state `b`, or None: one component took heads and every edge that delivered is its own. | — |
 | `_fifo_path(states, edges, labels, sources)` | Depth-first search through the states of one `(uc, fire)` from the initial state to a terminal one with these labels. | runs._consumed, runs._fired_by |
@@ -135,7 +135,8 @@ step `Pop` and the stopping rule `Deliver`. Its text is part of the cache hash.
 | `MergeLab(l, o)` | merges a sent label into an edge's label (only if it is used) |
 | `AtLeastAsBad(x, y)` | x is at least as bad as y; not used |
 | `Pop(Q, ports)` | the queues with the head of every non-empty queue of `ports` removed |
-| `Deliver(s, e, port, o)` | the stopping rule: if `o` is sent and edge `e` has not carried that value in this run, append it to the queue `port` (none for `""`), add it to `seen[e]`, merge it into `lab[e]` |
+| `Carried(S, m)` | how many times the counted set `S` holds the value `m`, 0 if not at all |
+| `Deliver(s, e, port, o, k)` | the stopping rule: if `o` is sent and edge `e` has carried that value fewer than `k` times in this run, append it to the queue `port` (none for `""`), count it in `seen[e]` and merge it into `lab[e]`; otherwise add the edge and the token to `cut` |
 
 ## 3. The fifo module
 
@@ -144,18 +145,19 @@ step `Pop` and the stopping rule `Deliver`. Its text is part of the cache hash.
 EXTENDS Naturals, FiniteSets, Sequences, EpaLib
 ModeSet, ATop, T0, NoMsg, Edges, VecRows, UseCases, Want, Done, Vectors        \* as for rounds
 Ports    == {<queue of every input port of the cone that an edge of the cone ends in>}
+LoopBound == <k of the model>
 Start(x) == CASE x = "<uc>" -> [q |-> ..., seen |-> ..., lab |-> ...] [] ...
-VARIABLES uc, fire, q, seen, lab, fired, spent, done
+VARIABLES uc, fire, q, seen, cut, lab, fired, spent, done
 Outs_<c>(Q, F, S) == LET ... IN [p_<out port> |-> [u, n, k], ..., fired |-> <rows>, spent |-> <faults>]
 Ready_<c>(Q, S)   == <a queue of c is non-empty, or a switched-on internal fault is not yet in S>
 Quiet(Q, S)       == <no component is ready>
-Commit(s, o)      == q' = s.q /\ seen' = s.seen /\ lab' = s.lab /\ fired' = fired \cup o.fired
+Commit(s, o)      == q' = s.q /\ seen' = s.seen /\ cut' = s.cut /\ lab' = s.lab /\ fired' = fired \cup o.fired
                      /\ spent' = spent \cup o.spent /\ done' = Quiet(s.q, ...) /\ UNCHANGED <<uc, fire>>
 Fire_<c> == Ready_<c>(q, spent) /\ LET o == Outs_<c>(q, fire, spent)
-                                       s0 == [q |-> Pop(q, <c's queues>), seen |-> seen, lab |-> lab]
-                                       s1 == Deliver(s0, "<edge>", "<queue>", o.p_<port>) ...
+                                       s0 == [q |-> Pop(q, <c's queues>), seen |-> seen, cut |-> cut, lab |-> lab]
+                                       s1 == Deliver(s0, "<edge>", "<queue>", o.p_<port>, LoopBound) ...
                                    IN Commit(sn, o)
-Init == uc \in UseCases /\ fire \in Vectors /\ <q, seen, lab from Start(uc)> /\ fired = {} /\ spent = {} /\ done = Quiet(...)
+Init == uc \in UseCases /\ fire \in Vectors /\ <q, seen, lab from Start(uc)> /\ cut = {} /\ fired = {} /\ spent = {} /\ done = Quiet(...)
 Solo_<c> == <section 5>
 Next == IF Solo_a THEN Fire_a ELSE IF Solo_b THEN Fire_b ... ELSE Fire_a \/ Fire_b \/ ...
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
@@ -167,8 +169,9 @@ clock, no round and no phase in the module.
 * **State.** A FIFO queue per input port, `q`, holding messages `[n, k]`: `n` the normal bit (the message
   does not exist only because a failure row made it), `k` the token `[b, c, a, t]`. `b` holds one number
   per mode field, 0 absent and 1 present by default, larger on a refined scale; `c` the confidentiality
-  level, `a` the authority, `t` the taint level 0..3. Monitors: `seen[e]` the message values edge `e` has
-  delivered, `lab[e]` the label `[u, n, k]` with the field-wise worst token delivered, `fired` the open
+  level, `a` the authority, `t` the taint level 0..3. Tokens keep all their fields, whatever the cone
+  reads. Monitors: `seen[e]` the message values edge `e` has delivered, each with its count, `cut` every
+  delivery the bound blocked, with its edge and token, `lab[e]` the label `[u, n, k]` with the field-wise worst token delivered, `fired` the open
   rows that applied, `spent` the internal faults applied, `done` no component is ready.
 * **Arrival** only appends to a queue. **A step** fires one ready component. **A firing** removes the
   head of every non-empty queue of the component and applies its table to those heads, reading nothing
@@ -182,9 +185,13 @@ clock, no round and no phase in the module.
   one firing. `"*"` matches any head.
 * **Internal faults** (rows with an empty `when`). A switched-on one makes its component ready until it
   has applied. It applies in the first firing of its component, with or without heads, once per run.
-* **The stopping rule.** `Deliver` does not deliver a value the edge has already carried in this run: it
-  adds no new type of error. Components stay memoryless; this is the analysis remembering. Values are
-  compared exactly, normal bit included.
+* **The stopping rule.** An edge carries one value at most k times in a run (`loop_bound` of the model,
+  default 2). No finite rule is exact for every model: a failure may need any number of laps, so the
+  analysis bounds, as bounded model checking does, and says whether the bound mattered. `Deliver` records
+  a blocked delivery in `cut`; the coordinator reports it in the advice of every cell it concerns. If
+  no delivery is blocked, no run of the unbounded rule differs: every state reached is reached by the
+  same steps. Components stay memoryless; this is the analysis remembering. Values are compared exactly,
+  normal bit included.
 * **Starting tokens** sit on the edges leaving their system input and count as delivered. **Fan-out:** one
   output port delivers on each of its edges, each edge applying the stopping rule on its own. **Several
   edges into one port** share one queue. Tokens that arrive in one firing, or start on one port, queue
@@ -194,7 +201,7 @@ clock, no round and no phase in the module.
   the level. A caught message whose normal bit is false is dropped, unless the guard is on a cycle. A
   learned guard's false-positive row adds omission.
 * **Termination.** Modes, levels, edges and the normal bit are finite, so each edge delivers finitely
-  many values. Every firing takes a token off a queue or applies an internal fault, and each internal
+  many values, each at most k times. Every firing takes a token off a queue or applies an internal fault, and each internal
   fault applies once. So every run ends, in any order, and `WF_vars(Next)` adds nothing the analysis
   uses: it says that a ready component is not skipped for ever.
 * **Reading a run.** Only terminal states are read. Different firing orders may end differently, and that
@@ -246,15 +253,15 @@ one firing order: a step goes from a state to a later one if exactly one compone
 queues, only that component's edges delivered, and everything else only grew. No state variable exists
 for this.
 
-Firing orders multiply states, so the module uses two reductions. Both are switched on always;
-`EPA_POR=0` turns the first off, and `tests/test_fifo.py` compares the two on the hub.
+Firing orders multiply states, so the module uses one reduction. It is switched on always; `EPA_POR=0`
+turns it off, and `tests/test_fifo.py` compares the two on the hub.
 
 **One firing order for firings that cannot interact (`_solo`).** Say two firings of different components
 *commute* if doing them in either order gives the same state. Component c's firing changes c's queues,
 appends to the queues behind its output edges, and writes `seen`, `lab` on its own output edges and the
-sets `fired`, `spent`. So firings of c and d fail to commute only if one appends to a queue of the other
+sets `cut`, `fired`, `spent`. So firings of c and d fail to commute only if one appends to a queue of the other
 that is empty when the other fires (the other's heads then differ) or both append to one queue. Appending
-behind a head changes no head; `fired` and `spent` are unions; `seen` and `lab` of an edge have one writer.
+behind a head changes no head; `cut`, `fired` and `spent` are unions; `seen` and `lab` of an edge have one writer.
 
 Let R be everything that can fire before c does: the ready components other than c, and whatever a token
 can reach from them without passing through c. `Solo_c` holds when c is ready, no component of R receives
@@ -271,15 +278,10 @@ firing that can happen, since a component with a non-empty queue may fire. Equiv
 same firings, so every such firing occurs in the reduced graph, whose states therefore show every
 combination; they show no other, being reachable. So completeness may read the reduced states.
 
-**Tokens cut to what the cone reads (`_tracked`, `cone.fields`).** Tokens hold only the mode fields of
-the cone, and `c`, `a`, `t` and the normal bit only if a cell of the cone reads them or a guard of the
-cone tests them; nothing else in a cone reads them, since rows match on modes. Two tokens that differ
-only in a dropped field are then one value, and the second is not delivered. A component is memoryless, so
-that second firing could only have produced what the first did on the fields kept, unless it stood
-beside other heads the first did not. So the reduction can lose one thing: a combination of heads on
-a feedback loop that needs a token differing from an earlier one only outside the cone, where the second
-head is caused by the first token. Only a row naming several ports, or a guard dropping one token and not
-a merged one, can tell. This is the same trust the cone already puts in leaving rows out.
+**No token reduction.** Erasing the token fields a cone does not read would shrink the state space
+considerably, but two tokens that differ only in an erased field would become one value for the stopping
+rule, and a head combination could be lost on a feedback loop. Tokens therefore keep all their fields, so
+that the tool computes exactly the definitions.
 
 **Cones under fifo.** Two rules are added to the cone, and neither applies to rounds. A provenance cell
 keeps a row that sends from a port with no forwarding to that output, if that row can send something

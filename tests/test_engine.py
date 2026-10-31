@@ -71,7 +71,7 @@ def test_wallet_cones_are_tight():
     m = load_model(os.path.join(ROOT, "cases", "wallet", "model.yaml"))
     got = {c.id: C.cone_of_cell(m, c).rows for c in C.cells(m)}
     assert got["oom@o_statement"] == ["leak.gm.oom", "p_offmandate"]
-    assert got["dup@o_statement"] == ["b_slow", "leak.gd.dup", "p_dup"]
+    assert got["dup@o_statement"] == ["b_slow", "default.agent.request.dup", "leak.gd.dup", "p_dup"]
     assert got["auth@o_statement"] == []
 
 

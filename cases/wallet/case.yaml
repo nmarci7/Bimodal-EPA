@@ -33,9 +33,9 @@ stages:
       - {kind: withdraw-cert, certificate: c_gm, by: wallet team, reason: "mandate-v2 compares payee names, not IBANs"}
     logs: [data/statements/duna-bank-2026-10-16.csv]
   - id: S4
-    label: mandate-v3 compares IBANs and is re-certified
+    label: mandate-v3 compares IBANs, is re-certified, and a fault injection campaign confirms its table
     versions: {gm: mandate-v3}
-    certificates: [certs/c_gm_v3.json]
+    certificates: [certs/c_gm_v3.json, certs/c_gm_v3_table.json]
   - id: S5
     label: The vendor replaces the planner's LLM
     versions: {agent: gpt-y-2027-01}

@@ -19,6 +19,7 @@ lattices:                    # low → high
 worst_case_defaults: all     # optional: every component starts with worst-case rows (FPTC style);
                              # llm (the default when absent): only LLM components do
 severity: {oom: 9, dup: 9}   # optional: how much a mode weighs in the certify-next ranking (default 1)
+loop_bound: 2                # optional: k, how many times an edge carries one token value in a run
 components: [...]
 guards: [...]
 edges: [...]
@@ -36,6 +37,12 @@ then use numbers (`const k`, `keep`, `+k`, `threshold: k`). Everything below wor
 
 `severity` only ranks: it says what the ranking weighs when a guard turns this failure into a guarantee.
 It changes no verdict.
+
+`loop_bound` is k of the stopping rule: an edge carries the same token value at most k times in a run
+(default 2). The analysis is exhaustive within that bound, and a cell whose runs had a delivery blocked
+says so in its advice, for example `a delivery was cut at e_TP after 2 copies; deeper interactions were
+not analysed; raise k`. A system with a real turn limit sets k to that limit. Without such a line for a
+cell, the bound changed nothing for it.
 
 A new model (File → New model, or `new_model` over MCP) starts with the failure classes of FPTC
 (Wallace 2005), from the HAZOP/SHARD guide words, which match the service, timing and value error
@@ -147,20 +154,22 @@ stands alone, so a failure pattern names its port.
 ### Worst-case defaults
 
 Every output port of an LLM component - and of every component, when the model says
-`worst_case_defaults: all` - starts with one generated row per top-level mode: any message in, that
-mode present out, open. Only an analyst row with the same trigger - `when: {"*": any}`, or
-the only input port with `any` - that emits the same top-level mode on the same port replaces it; a
-magnitude on a refined scale is recorded as a calibration. Every other row emitting there (a failure pattern, a
-fork-join, a sub-kind) is added beside the default, because a narrower trigger would say that the
-component does not start the failure on its own. A row of an LLM component that emits a failure can
+`worst_case_defaults: all` - starts with one generated row per mode and per sub-kind: any message in,
+that failure present out, open. Each sub-kind has a row of its own, `default.<component>.<port>.<sub-kind>`.
+Only an analyst row with the same trigger - `when: {"*": any}`, or the only input port with `any` - that
+emits the same mode or sub-kind on the same port replaces it; a magnitude on a refined scale is recorded
+as a calibration. Every other row emitting there (a failure pattern, a fork-join, one port of several) is
+added beside the default, because a narrower trigger would say that the component does not start the
+failure on its own. A row of an LLM component that emits a failure can
 never be fixed to `never` (the LLM rule); the default of any other component can be, by a certificate
 (`rows: {"<port>.<mode>": never}`), which is how evidence earns a guarantee for a component nobody
 modelled. Dropping a default needs a reason, and the reason is printed wherever a verdict rests on
-it:
+it. A dropped mode keeps the defaults of its sub-kinds, so each sub-kind is dropped on its own:
 
 ```yaml
 drop_defaults:
   - {port: request, mode: late, reason: "lateness is modelled at the bank"}
+  - {port: request, mode: revoked, reason: "revoked names a signature, and only the wallet signs"}
 ```
 
 ## Guards

@@ -40,7 +40,7 @@ def test_a_new_model_starts_with_the_fptc_modes_and_defaults_for_every_component
     assert m.top_modes == ["omission", "commission", "early", "late", "value"]
     assert m.fields == ["omission", "commission", "early", "late", "value", "coarse", "subtle"]
     defaults = {r for r in m.rows if r.startswith("default.")}
-    assert defaults == {f"default.parser.out.{t}" for t in m.top_modes}
+    assert defaults == {f"default.parser.out.{t}" for t in m.fields}
     assert all(m.rows[r].open and not m.rows[r].llm for r in defaults)
 
 
@@ -88,7 +88,53 @@ def test_llm_defaults_keep_the_llm_rule():
     E.connect(d, "agent.reply", "sys.reply")
     m = load_model(d)
     agent = {r for r in m.rows if r.startswith("default.agent.reply.")}
-    assert len(agent) == 5 and all(m.rows[r].llm for r in agent)
+    assert len(agent) == 7 and all(m.rows[r].llm for r in agent)     # five modes and two sub-kinds
     cert = {"id": "c_agent", "component": "agent", "rows": {"reply.value": "never"}}
     state, reason, _ = classify(cert, m)
     assert state == "rejected" and "LLM rule" in reason
+
+
+def subkinds_model():
+    """An LLM with no hand-written row, and a guard for one of two sub-kinds."""
+    return {"modes": ["omission", {"commission": ["a", "b"]}],
+            "components": [{"id": "llm", "kind": "llm", "in": ["i"], "out": ["o"]}],
+            "guards": [{"id": "g", "edge": "e_o", "targets": [{"mode": "a", "decidable": True}]}],
+            "edges": [{"id": "e_i", "from": "sys.i", "to": "llm.i"}, {"id": "e_o", "from": "llm.o", "to": "sys.o"}],
+            "use_cases": [{"id": "u", "entries": [{"port": "i", "token": {}}]}],
+            "observation_points": [{"id": "p", "edge": "e_o", "tolerate": {"a": 1, "b": 1}}]}
+
+
+def test_an_llm_starts_with_a_default_for_every_sub_kind(work):
+    """A sub-kind nobody wrote a row for is not a structural guarantee: the LLM rule holds without exception."""
+    d = subkinds_model()
+    m = load_model(d)
+    assert {r for r in m.rows if r.startswith("default.")} == {f"default.llm.o.{f}" for f in ("omission", "commission", "a", "b")}
+    assert all(m.rows[f"default.llm.o.{f}"].llm for f in ("a", "b"))
+    v = verdicts(d, work)
+    assert v["a@p"] == "unchecked" and v["b@p"] != "guarantee"
+
+
+def test_a_guard_on_one_sub_kind_does_not_hide_the_other(work):
+    """Each sub-kind has a row of its own: certifying the guard on a leaves b as it was."""
+    cert = {"id": "c_g", "component": "g", "targets": {"a": "never"}}
+    v = verdicts(subkinds_model(), work, {"certificates": [cert]})
+    assert v["a@p"] == "guarantee" and v["b@p"] != "guarantee"
+
+
+def test_a_sub_kind_default_is_dropped_only_with_a_reason_that_is_printed(work):
+    d = subkinds_model()
+    d["components"][0]["drop_defaults"] = [{"port": "o", "mode": "b"}]
+    assert validate(d) == ["component llm: dropping the default o/b needs a reason"]
+    d["components"][0]["drop_defaults"] = [{"port": "o", "mode": "b", "reason": "b needs an edge this LLM does not have"}]
+    rep = Engine(load_model(d), work).analyse({}, rank=False)
+    c = next(x for x in rep["cells"] if x["cell"] == "b@p")
+    assert c["verdict"] == "guarantee"
+    assert [x["reason"] for x in c["reasons"]["decisions"]] == ["b needs an edge this LLM does not have"]
+    assert c["reasons"]["structural"] is False
+
+
+def test_a_dropped_mode_keeps_the_defaults_of_its_sub_kinds():
+    d = subkinds_model()
+    d["components"][0]["drop_defaults"] = [{"port": "o", "mode": "commission", "reason": "reason"}]
+    rows = load_model(d).rows
+    assert "default.llm.o.commission" not in rows and "default.llm.o.a" in rows and "default.llm.o.b" in rows

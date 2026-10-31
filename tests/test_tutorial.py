@@ -35,7 +35,8 @@ def test_the_tour_story(work):
     ev["certificates"].append({"id": "c_test", "component": "parser", "rows": {value_row: "always"}})
     assert verdict(d, ev, work)[0] == ("exposed", "A")
     ev["decisions"].append({"kind": "withdraw-cert", "certificate": "c_test", "by": "test team", "reason": "the bug is fixed"})
-    ev["certificates"].append({"id": "c_fix", "component": "parser", "rows": {value_row: "never"}})
+    ev["certificates"].append({"id": "c_fix", "component": "parser", "rows": {f"default.parser.order.{f}": "never"
+                                                                              for f in ("value", "coarse", "subtle")}})
     assert verdict(d, ev, work)[0] == ("guarantee", "N")
     # chapter 3: an LLM in front; a clean log line
     E.remove_edge(d, "e_request_parser")

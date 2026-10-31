@@ -10,9 +10,11 @@ fifo, the default. The state is a FIFO queue of tokens per input port, plus moni
 ready when one of its queues is non-empty or it has a switched-on internal fault not yet applied. One
 step fires one ready component, and TLC branches on which: the firing takes the head of every non-empty
 queue, applies the component's table to those heads and sends one token per output port written. A
-component remembers nothing. The stopping rule ends every run: an edge never delivers a token value it
-has already carried in this run. A run ends when nothing is ready (`done`). The monitor `lab` holds, per
-edge, the field-wise worst token delivered; `fired` the rows that applied; `seen` the delivered values.
+component remembers nothing. The stopping rule ends every run: an edge carries one token value at most k
+times in a run (`loop_bound` of the model, default 2). A run ends when nothing is ready (`done`). The
+monitor `lab` holds, per edge, the field-wise worst token delivered; `fired` the rows that applied; `seen`
+how many times each edge carried each value; `cut` every delivery the bound blocked, with its edge and
+token. Tokens keep all their fields: nothing in a token is erased because a cell does not read it.
 
 rounds, the older translator, kept for the differential test. Every component recomputes what it sends
 from what it receives and the result is merged into monotone edge labels until a fixpoint (`done`), with
@@ -85,9 +87,8 @@ def module_for(m, cone, want=({},), done=(), schedule=None, name="Cone"):
     return build(m, cone, want, done, name)
 
 
-def _common(m, cone, want, done, name):
+def _common(m, cone, want, done, name, fields):
     """The lines both translators start with."""
-    fields = list(cone.fields)
     ucs = [u for u in m.use_cases if u.id in cone.use_cases]
     vec_rows = list(cone.rows)
     L = [f"---------------------------- MODULE {name} ----------------------------",
@@ -108,15 +109,13 @@ def _common(m, cone, want, done, name):
     return L, fields, ucs
 
 
-def _tok_expr(tok, fields, track=None):
+def _tok_expr(tok, fields):
     parts = [(f, str(tok["b"].get(f, 0))) for f in fields if tok["b"].get(f, 0)]
-    track = track or {"c": True, "a": True, "t": True}
-    return (f"[b |-> {_bexpr(parts)}, c |-> {tok['c'] if track['c'] else 0}, "
-            f"a |-> {tok['a'] if track['a'] else 'ATop'}, t |-> {tok['t'] if track['t'] else 0}]")
+    return f"[b |-> {_bexpr(parts)}, c |-> {tok['c']}, a |-> {tok['a']}, t |-> {tok['t']}]"
 
 
 def _rounds_module(m, cone, want, done, name):
-    L, fields, ucs = _common(m, cone, want, done, name)
+    L, fields, ucs = _common(m, cone, want, done, name, list(cone.fields))
     comps = [m.components[c] for c in cone.components]
     edge_ids = list(cone.edges)
     always = set(cone.always)
@@ -172,18 +171,6 @@ def _rounds_module(m, cone, want, done, name):
     return "\n".join(L) + "\n", "SPECIFICATION Spec\nCHECK_DEADLOCK FALSE\n"
 
 
-def _tracked(m, cone, in_cone):
-    """Which provenance fields, and the normal bit, the tokens of this cone need. A field no cell of the
-    cone reads and no guard of the cone tests can change nothing the cone decides, so it stays constant
-    and two tokens that differ only there are one token value."""
-    kinds = {c.kind for c in cone.cells}
-    guards = [m.components[c] for c in cone.components if m.components[c].is_guard]
-    tested = {t["kind"] for g in guards for t in g.targets if t["row"] in in_cone}
-    droppers = any(not g.on_cycle and any(t["row"] in in_cone for t in g.targets) for g in guards)
-    return {"c": "conf" in kinds | tested, "a": "auth" in kinds | tested, "t": "taint" in kinds | tested,
-            "n": droppers}
-
-
 def _solo(m, cone, comps, ready):
     """For each component c, the condition under which firing c now cannot interact with anything that
     can happen before it, so that it alone is explored from this state (docs/dev/alethic.md, section 5:
@@ -224,15 +211,15 @@ def _solo(m, cone, comps, ready):
 
 
 def _fifo_module(m, cone, want, done, name):
-    L, fields, ucs = _common(m, cone, want, done, name)
+    L, fields, ucs = _common(m, cone, want, done, name, list(m.fields))
     comps = [m.components[c] for c in cone.components]
     always = set(cone.always)
     in_cone = set(cone.rows) | always
-    track = _tracked(m, cone, in_cone)
     in_cone_edges = set(cone.edges)
     ports = [port_key(c.id, p) for c in comps for p in c.ins
              if any(e.id in in_cone_edges for e in m.edges_into(c.id, p))]
     L.append(f"Ports == {_set(ports)}")
+    L.append(f"LoopBound == {m.loop_bound}")
 
     def queue_of(eid):
         d = m.edges[eid].dst
@@ -242,20 +229,20 @@ def _fifo_module(m, cone, want, done, name):
     starts = []
     for u in ucs:
         ents = [(eid, tok) for eid, tok in u.entries if eid in in_cone_edges]
-        msg = {eid: f"[n |-> TRUE, k |-> {_tok_expr(tok, fields, track)}]" for eid, tok in ents}
+        msg = {eid: f"[n |-> TRUE, k |-> {_tok_expr(tok, fields)}]" for eid, tok in ents}
         at = {}
         for eid, _ in ents:
             if queue_of(eid):
                 at.setdefault(queue_of(eid), []).append(msg[eid])
         qs = "[p \\in Ports |-> " + "".join(f'IF p = "{p}" THEN <<{", ".join(ms)}>> ELSE ' for p, ms in at.items()) + "<<>>]"
-        seen = "[e \\in Edges |-> " + "".join(f'IF e = "{e}" THEN {{{x}}} ELSE ' for e, x in msg.items()) + "{}]"
+        seen = "[e \\in Edges |-> " + "".join(f'IF e = "{e}" THEN {{[m |-> {x}, c |-> 1]}} ELSE ' for e, x in msg.items()) + "{}]"
         lab = "[e \\in Edges |-> " + "".join(
             f'IF e = "{e}" THEN [u |-> TRUE, n |-> TRUE, k |-> {x}.k] ELSE ' for e, x in msg.items()) + "NoMsg]"
         starts.append(f'x = "{u.id}" -> [q |-> {qs},\n      seen |-> {seen},\n      lab |-> {lab}]')
     L.append("Start(x) == CASE " + "\n             [] ".join(starts))
     L.append("")
-    L.append("VARIABLES uc, fire, q, seen, lab, fired, spent, done")
-    L.append("vars == <<uc, fire, q, seen, lab, fired, spent, done>>")
+    L.append("VARIABLES uc, fire, q, seen, cut, lab, fired, spent, done")
+    L.append("vars == <<uc, fire, q, seen, cut, lab, fired, spent, done>>")
     L.append("")
 
     ready = {}
@@ -267,13 +254,13 @@ def _fifo_module(m, cone, want, done, name):
                 terms.append(f'({on}~("{r.id}" \\in S))')
         ready[c.id] = " \\/ ".join(terms) or "FALSE"
     for c in comps:
-        _component(m, c, cone, fields, always, in_cone, L, track=track)
+        _component(m, c, cone, fields, always, in_cone, L, fifo=True)
         L.append(f"Ready_{_ident(c.id)}(Q, S) == {ready[c.id]}")
     L.append("Quiet(Q, S) == " + (" /\\ ".join(f"~Ready_{_ident(c.id)}(Q, S)" for c in comps) or "TRUE"))
     L.append("")
     L.append("\\* One firing: the heads leave their queues, each output port written delivers on its edges, and")
     L.append("\\* the run is done when nothing is ready any more. Nothing outside the queues remembers a firing.")
-    L.append("Commit(s, o) == /\\ q' = s.q /\\ seen' = s.seen /\\ lab' = s.lab")
+    L.append("Commit(s, o) == /\\ q' = s.q /\\ seen' = s.seen /\\ cut' = s.cut /\\ lab' = s.lab")
     L.append("                /\\ fired' = fired \\cup o.fired /\\ spent' = spent \\cup o.spent")
     L.append("                /\\ done' = Quiet(s.q, spent \\cup o.spent) /\\ UNCHANGED <<uc, fire>>")
     L.append("")
@@ -281,12 +268,12 @@ def _fifo_module(m, cone, want, done, name):
         cid = _ident(c.id)
         lets = [f"o == Outs_{cid}(q, fire, spent)"]
         mine = [port_key(c.id, p) for p in c.ins if port_key(c.id, p) in ports]
-        lets.append(f"s0 == [q |-> Pop(q, {_set(mine)}), seen |-> seen, lab |-> lab]")
+        lets.append(f"s0 == [q |-> Pop(q, {_set(mine)}), seen |-> seen, cut |-> cut, lab |-> lab]")
         n = 0
         for e in cone.edges:
             src = m.edges[e].src
             if src[0] == c.id:
-                lets.append(f's{n + 1} == Deliver(s{n}, "{e}", "{queue_of(e)}", o.p_{_ident(src[1])})')
+                lets.append(f's{n + 1} == Deliver(s{n}, "{e}", "{queue_of(e)}", o.p_{_ident(src[1])}, LoopBound)')
                 n += 1
         L.append(f"Fire_{cid} ==")
         L.append(f"  /\\ Ready_{cid}(q, spent)")
@@ -294,7 +281,7 @@ def _fifo_module(m, cone, want, done, name):
         L.append(f"     IN Commit(s{n}, o)")
         L.append("")
     L.append("Init == /\\ uc \\in UseCases /\\ fire \\in Vectors")
-    L.append("        /\\ LET s == Start(uc) IN q = s.q /\\ seen = s.seen /\\ lab = s.lab")
+    L.append("        /\\ LET s == Start(uc) IN q = s.q /\\ seen = s.seen /\\ lab = s.lab /\\ cut = {}")
     L.append("        /\\ fired = {} /\\ spent = {} /\\ done = Quiet(q, spent)")
     fires = [f"Fire_{_ident(c.id)}" for c in comps]
     every = " \\/ ".join(fires) or "FALSE"
@@ -352,12 +339,11 @@ def _fp_magnitude(c, fifo):
     return (PRESENT if fifo else ROUNDS_TOP) if c.learned else 0
 
 
-def _component(m, c, cone, fields, always, in_cone, L, stratum=0, track=None):
+def _component(m, c, cone, fields, always, in_cone, L, stratum=0, fifo=False):
     """The operator Outs_<c>: what c sends on each output port and which rows applied. Under rounds it
-    reads the edge labels (`lab`), under fifo (`track` given) the heads of its queues (`Q`)."""
+    reads the edge labels (`lab`), under fifo the heads of its queues (`Q`)."""
     from ..model.cone import forwarding
     from ..model.defaults import ROUNDS_TOP
-    fifo = track is not None
     cid = _ident(c.id)
     edge_ids = set(cone.edges)
     in_edges = {p: [e.id for e in m.edges_into(c.id, p) if e.id in edge_ids] for p in c.ins}
@@ -403,8 +389,7 @@ def _component(m, c, cone, fields, always, in_cone, L, stratum=0, track=None):
     fired_terms, spent_terms = [], []
     outs = {}
     field_of = (lambda qp: f"p_{_ident(qp)}") if fifo else _ident
-    keep_c = "all.c" if not fifo or track["c"] else "0"
-    keep_t = lambda level: ("0" if fifo and not track["t"] else f"Max(all.t, {level})" if level else "all.t")  # noqa: E731
+    keep_t = lambda level: f"Max(all.t, {level})" if level else "all.t"  # noqa: E731
     if c.is_guard:
         tin = "i_in"
         caught = []
@@ -456,11 +441,7 @@ def _component(m, c, cone, fields, always, in_cone, L, stratum=0, track=None):
         lets.append(f"drop == {drop}")
         # a guard that may drop acts only from its phase on, when its input has settled
         acts = f"ph >= {stratum} /\\ " if stratum else ""
-        if fifo:
-            cexpr, aexpr, texpr = (cexpr if track["c"] else "0", aexpr if track["a"] else "ATop",
-                                   texpr if track["t"] else "0")
-        nexpr = "n_in" if not fifo or track["n"] else "TRUE"
-        outs["out"] = (f"[u |-> {acts}u_in /\\ ~drop, n |-> {nexpr}, k |-> [b |-> {_bexpr(parts)}, "
+        outs["out"] = (f"[u |-> {acts}u_in /\\ ~drop, n |-> n_in, k |-> [b |-> {_bexpr(parts)}, "
                        f"c |-> {cexpr}, a |-> {aexpr}, t |-> {texpr}]]")
     else:
         rows = [m.rows[r] for r in sorted(in_cone) if m.rows[r].comp == c.id]
@@ -497,8 +478,6 @@ def _component(m, c, cone, fields, always, in_cone, L, stratum=0, track=None):
             return " \\/ ".join(cs)
 
         auth_out = f"{c.authority}" if c.raises else f"Min({c.authority}, all.a)"
-        if fifo and not track["a"]:
-            auth_out = "ATop"
         # rounds keeps the old boolean: only `trusted: false`, or an external or user component, taints
         taint_out = keep_t(c.taint if fifo else (0 if c.trusted else 1))
         fwds = [(ports, q, r, join) for ports, q, r, join in forwarding(m, c) if r is None or r.id in in_cone]
@@ -544,10 +523,8 @@ def _component(m, c, cone, fields, always, in_cone, L, stratum=0, track=None):
                     parts.append((f, f"({terms[0]})"))
                 elif terms:
                     parts.append((f, "MaxSet({" + ", ".join(terms) + "})"))
-            if fifo and not track["n"]:
-                norm_x = "TRUE"
             outs[qp] = (f"[u |-> {sent_x}, n |-> {norm_x}, k |-> [b |-> {_bexpr(parts)}, "
-                        f"c |-> {keep_c}, a |-> {auth_out}, t |-> {taint_out}]]")
+                        f"c |-> all.c, a |-> {auth_out}, t |-> {taint_out}]]")
     fired = " \\cup ".join(f'(IF {x} THEN {{"{rid}"}} ELSE {{}})' for rid, x in fired_terms) or "{}"
     rec = ",\n         ".join(f"{field_of(qp)} |-> {v}" for qp, v in outs.items())
     L.append(f"\\* {c.kind} {c.id}" + (f" (guard on {c.on_edge}{', on a cycle' if c.on_cycle else ''}"

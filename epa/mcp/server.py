@@ -709,11 +709,13 @@ def build_server(bench=None):
     @srv.tool(annotations=write)
     def set_model_settings(name: str | None = None, description: str | None = None, modes: list[Any] | None = None,
                            confidentiality: list[str] | None = None, authority: list[str] | None = None,
-                           worst_case_defaults: str | None = None, severity: dict[str, int] | None = None, force: bool = False) -> dict[str, Any]:
-        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}), the confidentiality and authority levels (low to high), worst_case_defaults: "all" (every component starts with an open worst-case row per output and failure mode, FPTC style; a new model's setting) or "llm" (only LLM components), or severity: {mode: whole number}, how much a failure weighs in the certify-next ranking (default 1; it changes no verdict; the map given replaces the old one, {} removes it)."""
+                           worst_case_defaults: str | None = None, severity: dict[str, int] | None = None,
+                           loop_bound: int | None = None, force: bool = False) -> dict[str, Any]:
+        """Change the model's name, description, failure modes (a list of names, or {mode: [sub-kinds]}), the confidentiality and authority levels (low to high), worst_case_defaults: "all" (every component starts with an open worst-case row per output and failure mode, FPTC style; a new model's setting) or "llm" (only LLM components), severity: {mode: whole number}, how much a failure weighs in the certify-next ranking (default 1; it changes no verdict; the map given replaces the old one, {} removes it), or loop_bound: k, how many times an edge may carry one token value in a run (default 2; a cell the bound cut says so in its advice)."""
         return wrap(lambda: b.set_model_settings(force=force, name=name, description=description, modes=modes,
                                                  confidentiality=confidentiality, authority=authority,
-                                                 worst_case_defaults=worst_case_defaults, severity=severity))
+                                                 worst_case_defaults=worst_case_defaults, severity=severity,
+                                                 loop_bound=loop_bound))
 
     # ---- evidence
     @srv.tool(annotations=read)

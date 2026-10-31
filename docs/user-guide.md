@@ -440,6 +440,9 @@ candidates give it (N never, S sometimes, A always) and a short reason. Click a 
   which a component took its inputs, the advice says so, and **Depends on the firing order** names the
   component, its ports and the use cases: the remedy is to synchronise them, which no certificate or
   mitigation replaces;
+  When the loop bound k cut a delivery in the runs of the cell, the advice says where and how many copies
+  got through: the result holds up to k laps, and deeper interactions were not analysed. Without such a
+  sentence the bound changed nothing for the cell;
 * **The model for this cell**: whether it is *consistent* (the evidence leaves a candidate), *complete*
   (every combination of tokens that reaches a component is named by its table; what is not is listed
   as uncovered) and *correct* (every component that is not an LLM or a learned guard has a confirmed
