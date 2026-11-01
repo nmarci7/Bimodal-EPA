@@ -1,0 +1,15 @@
+{
+  "title": "Bimodal Agentic System Reasoner: artifact for Bimodal nondeterministic EPA for agentic systems",
+  "description": "Code, case models and measurement scripts for the TDK paper Bimodal nondeterministic EPA for agentic systems.",
+  "upload_type": "software",
+  "version": "1.0.0",
+  "publication_date": "2026-11-01",
+  "license": "Apache-2.0",
+  "creators": [
+    {
+      "name": "Németh, Marcell",
+      "affiliation": "Budapest University of Technology and Economics"
+    }
+  ],
+  "keywords": ["error propagation analysis", "agentic systems", "LLM", "model checking", "answer set programming"]
+}
